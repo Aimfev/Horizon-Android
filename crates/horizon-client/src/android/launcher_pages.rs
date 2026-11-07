@@ -3280,7 +3280,13 @@ impl Launcher {
             14.0,
             my3_accent(),
         );
-        ui.icon(Icon::Zap, mx + 31.0, head_y + 11.0, 22.0, my3_accent());
+        ui.icon(
+            Icon::HorizonLogo,
+            mx + 31.0,
+            head_y + 11.0,
+            22.0,
+            my3_accent(),
+        );
 
         let title_x = mx + 74.0;
         ui.text(

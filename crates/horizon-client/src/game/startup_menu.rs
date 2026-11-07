@@ -2492,9 +2492,10 @@ impl Loading {
             }
             if !is_goy
                 && (!hud_in_menu
-                    || self.menu.controls.settings.layouts[self.menu.controls.settings.mode.index()]
-                        .iter()
-                        .any(|p| p.visible_in_menu))
+                    || self.menu.controls.settings.layouts
+                        [self.menu.controls.settings.mode.index()]
+                    .iter()
+                    .any(|p| p.visible_in_menu))
             {
                 self.menu.controls.draw(batch, &gui.atlas);
             }

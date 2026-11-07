@@ -234,8 +234,10 @@ impl Game<'_> {
     /// Once per loop iteration: read the pads and act on button changes.
     pub(super) fn poll_pads(&mut self, event_loop: &dyn EventLoopCtl) {
         #[cfg(target_os = "android")]
-        if !matches!(self.screen, Screen::Playing | Screen::Options | Screen::Paused)
-            && self.pad.touch.editor.is_some()
+        if !matches!(
+            self.screen,
+            Screen::Playing | Screen::Options | Screen::Paused
+        ) && self.pad.touch.editor.is_some()
         {
             self.pad.touch.cancel_editor();
         }
@@ -245,7 +247,8 @@ impl Game<'_> {
                 crate::device_runtime::preferences().gpu_profile,
                 &crate::backend::game_home(),
             );
-            self.pad.touch.in_inventory = matches!(self.screen, Screen::Inventory | Screen::Creative);
+            self.pad.touch.in_inventory =
+                matches!(self.screen, Screen::Inventory | Screen::Creative);
             self.pad.touch.inventory_mode = self.android_inventory_controls();
             if !self.pad.touch.in_inventory {
                 self.pad.touch.inventory_shift = false;

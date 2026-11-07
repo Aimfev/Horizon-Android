@@ -14798,7 +14798,7 @@ impl Game<'_> {
             && self.player.is_some()
             && !self.pad.touch_ui.floating_menu
             && (self.singleplayer_paused()
-                || self.screen != Screen::Playing
+                || self.screen.blurs_background(self.pause_menu)
                 || self.pad.touch.editor.is_some())
             && (self.singleplayer_paused()
                 || self.pad.touch.editor.is_some()
@@ -15131,13 +15131,11 @@ impl Game<'_> {
                     &self.pad.touch.settings,
                 );
                 if let Some(status) = shader_packs::pending_shader_pack_status() {
-                    let mut ui = horizon_client::ui_theme::Ui::mobile(
-                        &self.gui.atlas,
-                        &mut hud,
-                        (0.0, 0.0),
-                    );
+                    let mut ui =
+                        horizon_client::ui_theme::Ui::mobile(&self.gui.atlas, &mut hud, (0.0, 0.0));
                     let theme = horizon_client::ui_theme::active_theme();
-                    let bw = (ui.measure(horizon_client::ui_theme::Face::SemiBold, 11.0, &status) + 28.0)
+                    let bw = (ui.measure(horizon_client::ui_theme::Face::SemiBold, 11.0, &status)
+                        + 28.0)
                         .clamp(180.0, (ui.w - 24.0).max(180.0));
                     let bx = (ui.w - bw) * 0.5;
                     let by = 38.0;
