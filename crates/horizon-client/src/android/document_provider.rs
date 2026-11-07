@@ -44,7 +44,10 @@ extern "system" fn Java_dev_horizon_android_HorizonDocumentsProvider_nativeCall(
         let id = text(&mut env, &id)?;
         let arg = text(&mut env, &arg)?;
         let value = document_store::call(&home, &op, &id, &arg).map_err(|e| e.to_string())?;
-        if matches!(op.as_str(), "create" | "mkdir" | "rename" | "delete") {
+        if matches!(
+            op.as_str(),
+            "create" | "mkdir" | "rename" | "delete" | "copy" | "move"
+        ) {
             CHANGED.store(true, Ordering::Relaxed);
         }
         env.new_string(value.to_string())

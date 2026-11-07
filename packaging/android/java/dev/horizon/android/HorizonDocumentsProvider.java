@@ -108,4 +108,16 @@ public final class HorizonDocumentsProvider extends DocumentsProvider {
     @Override public void deleteDocument(String id) throws FileNotFoundException {
         changed("delete", id, "");
     }
+    @Override public String copyDocument(String sourceDocumentId, String targetParentDocumentId)
+            throws FileNotFoundException {
+        return changed("copy", sourceDocumentId, targetParentDocumentId);
+    }
+    @Override public String moveDocument(String sourceDocumentId, String sourceParentDocumentId,
+            String targetParentDocumentId) throws FileNotFoundException {
+        return changed("move", sourceDocumentId, targetParentDocumentId);
+    }
+    @Override public void removeDocument(String documentId, String parentDocumentId)
+            throws FileNotFoundException {
+        deleteDocument(documentId);
+    }
 }

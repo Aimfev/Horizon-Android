@@ -186,6 +186,31 @@ pub fn begin_into_dir(target_dir: PathBuf) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Opens Android's `ACTION_OPEN_DOCUMENT_TREE` picker to import an entire folder with its name directly into `target_dir`.
+pub fn begin_folder_into_dir(target_dir: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("file-manager-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        kind: Kind::Packs,
+        appearance: None,
+        target_dir: Some(target_dir),
+        home: PathBuf::new(),
+        cache,
+    });
+    if !crate::native_ime::pick_document_tree() {
+        picker_failed("Android folder picker is unavailable");
+        return Err("Android folder picker is unavailable".into());
+    }
+    notice("Choose a folder to import into this directory", false);
+    Ok(())
+}
+
 /// Exports or shares a local file via Android MediaStore / SAF DocumentsUI.
 pub fn export_file(
     home: &std::path::Path,
@@ -234,6 +259,43 @@ pub fn export_file(
         ))
     }
 }
+
+/// Zips a folder and opens Android file system to export/save the zip.
+pub fn export_folder(
+    home: &std::path::Path,
+    profile: u32,
+    dir_path: &std::path::Path,
+) -> std::result::Result<String, String> {
+    let (zip_path, zip_name) = crate::document_store::export_folder_zip(home, profile, dir_path)?;
+    let rel_str = zip_path
+        .strip_prefix(home)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let saf_folder = if rel_str.contains("horizon-mods") {
+        crate::document_store::folder_id(profile, "mods")
+    } else if rel_str.contains("resourcepacks") {
+        crate::document_store::folder_id(profile, "packs")
+    } else if rel_str.contains("shaderpacks") {
+        crate::document_store::folder_id(profile, "shaders")
+    } else if rel_str.contains("saves") {
+        crate::document_store::folder_id(profile, "worlds")
+    } else if rel_str.contains("performance") {
+        "reports".into()
+    } else {
+        crate::document_store::ROOT.into()
+    };
+    if crate::platform::open_documents(&saf_folder) {
+        Ok(format!(
+            "Created '{zip_name}' and opened Android file system to save it."
+        ))
+    } else {
+        Ok(format!(
+            "Created '{zip_name}' in folder, ready to export via Files."
+        ))
+    }
+}
+
 /// Called by the approved Activity result bridge, never from a game tick.
 /// Keep a conventional JNI export as well as explicit registration: Android
 /// may restore a picker result before the IME bridge has been initialized.
@@ -245,7 +307,7 @@ pub extern "system" fn document_result(
     result: i32,
     uri: JString<'_>,
 ) {
-    if request != 4101 {
+    if request != 4101 && request != 4102 {
         return;
     }
     let pending = STATE
@@ -273,6 +335,54 @@ pub extern "system" fn document_result(
     };
     if !uri.starts_with("content://") || uri.len() > 8192 {
         notice("Unsupported document URI", false);
+        return;
+    }
+
+    if request == 4102 {
+        STATE.lock().unwrap_or_else(|e| e.into_inner()).working = true;
+        let spawned = std::thread::Builder::new()
+            .name("Folder import".into())
+            .spawn(move || {
+                let result = (|| -> Result<()> {
+                    let mut env = vm.attach_current_thread()?;
+                    let target_dir = pending
+                        .target_dir
+                        .ok_or_else(|| "No target directory for folder import")?;
+                    let target_str = target_dir.to_string_lossy().into_owned();
+                    let j_uri = env.new_string(&uri)?;
+                    let j_target = env.new_string(&target_str)?;
+                    let res = env.call_static_method(
+                        "dev/horizon/android/HorizonActivity",
+                        "copyFolderTree",
+                        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                        &[
+                            jni::objects::JValue::Object(activity.as_obj()),
+                            jni::objects::JValue::Object(&j_uri.into()),
+                            jni::objects::JValue::Object(&j_target.into()),
+                        ],
+                    );
+                    if let Err(err) = res {
+                        let _ = env.exception_clear();
+                        return Err(format!("Folder copy failed: {err}").into());
+                    }
+                    let res_obj = res?.l()?;
+                    let folder_name: String = if res_obj.is_null() {
+                        "folder".into()
+                    } else {
+                        env.get_string((&res_obj).into())?.into()
+                    };
+                    notice(format!("Imported folder '{folder_name}' successfully"), true);
+                    Ok(())
+                })();
+                STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+                if let Err(error) = result {
+                    notice(format!("Import failed: {error}"), false);
+                }
+            });
+        if let Err(error) = spawned {
+            STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+            notice(format!("Import failed: {error}"), false);
+        }
         return;
     }
     STATE.lock().unwrap_or_else(|e| e.into_inner()).working = true;

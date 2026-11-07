@@ -372,8 +372,11 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("pub fn fm_submit_new_folder(&mut self, home: &Path)", catalog)
         self.assertIn("pub fn fm_paste(", doc_store)
         self.assertIn("pub fn begin_into_dir(", documents)
+        self.assertIn("pub fn begin_folder_into_dir(", documents)
         self.assertIn("pub fn export_file(", documents)
+        self.assertIn("pub fn export_folder(", documents)
         self.assertIn("fn draw_fm_modal(", launcher_pages)
+        self.assertIn("fn draw_update_fullscreen_ui(", launcher_pages)
 
         # 8 & 9. DPI scaling & EditText / single-line hint redesign
         self.assertIn("(pw / 880.0).min(ph / 440.0)", ui_theme)

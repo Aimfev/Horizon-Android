@@ -619,6 +619,9 @@ pub struct Catalog {
     pub config: Config,
     pub editing: Option<&'static str>,
     pub render_scale_text: String,
+    pub update_ui_open: bool,
+    pub update_anim_time: f32,
+    pub update_scroll: f32,
     worker: Option<mpsc::Receiver<Result<Reply, String>>>,
     search_worker: Option<mpsc::Receiver<Result<Vec<Project>, String>>>,
     icon_worker: Option<mpsc::Receiver<IconData>>,
@@ -678,11 +681,15 @@ impl Catalog {
             config,
             editing: None,
             render_scale_text: String::new(),
+            update_ui_open: false,
+            update_anim_time: 0.0,
+            update_scroll: 0.0,
             worker: None,
             search_worker: None,
             icon_worker: None,
             searches: crate::search_queue::Queue::new(),
         };
+        crate::updater::check_in_background();
         result.refresh(home);
         result
     }

@@ -12,11 +12,11 @@ android {
     namespace 'dev.horizon.android'
     compileSdk 35
     defaultConfig {
-        applicationId providers.gradleProperty('appId').getOrElse('dev.horizon.android')
+        applicationId providers.gradleProperty('appId').getOrElse('com.goydevv.horizon')
         minSdk providers.gradleProperty('minSdk').getOrElse('28').toInteger()
         targetSdk 35
-        versionCode providers.gradleProperty('devVersionCode').getOrElse('29').toInteger()
-        versionName '0.7.7' + (providers.gradleProperty('devVersionCode').isPresent() ? '-dev.' + providers.gradleProperty('devBuild').get() : '')
+        versionCode providers.gradleProperty('devVersionCode').getOrElse('30').toInteger()
+        versionName '1.0.0' + (providers.gradleProperty('devVersionCode').isPresent() ? '-dev.' + providers.gradleProperty('devBuild').get() : '')
         ndk { abiFilters providers.gradleProperty('abi').get() }
     }
     signingConfigs {
@@ -39,7 +39,7 @@ android {
         debug {
             signingConfig signingConfigs.development
             versionNameSuffix '-dev.' + providers.gradleProperty('devBuild').getOrElse('local')
-            if (!providers.gradleProperty('appId').isPresent()) { applicationIdSuffix '.dev' }
+            if (providers.gradleProperty('useDevSuffix').isPresent()) { applicationIdSuffix '.dev' }
         }
         release {
             debuggable false

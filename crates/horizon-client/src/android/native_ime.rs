@@ -33,6 +33,7 @@ enum Command {
     Capture(bool),
     Bounds,
     ImportDocument,
+    ImportFolderTree,
     Screen(bool, bool),
 }
 struct Ui {
@@ -392,6 +393,35 @@ impl Ui {
                     crate::documents::picker_failed("No Android document picker is available");
                 }
             }
+            Command::ImportFolderTree => {
+                let result = (|| -> jni::errors::Result<()> {
+                    let action =
+                        JObject::from(env.new_string("android.intent.action.OPEN_DOCUMENT_TREE")?);
+                    let intent = env.new_object(
+                        "android/content/Intent",
+                        "(Ljava/lang/String;)V",
+                        &[JValue::Object(&action)],
+                    )?;
+                    env.call_method(
+                        &intent,
+                        "addFlags",
+                        "(I)Landroid/content/Intent;",
+                        &[JValue::Int(1 | 2)],
+                    )?;
+                    env.call_method(
+                        &self.activity,
+                        "startActivityForResult",
+                        "(Landroid/content/Intent;I)V",
+                        &[JValue::Object(&intent), JValue::Int(4102)],
+                    )?;
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    let _ = env.exception_clear();
+                    log::warn!("Folder tree picker: {error}");
+                    crate::documents::picker_failed("No Android folder picker is available");
+                }
+            }
             Command::Show(text, secret) => {
                 env.call_method(
                     &self.edit,
@@ -739,6 +769,13 @@ pub fn pick_document() -> bool {
         return false;
     };
     ui.enqueue(Command::ImportDocument);
+    true
+}
+pub fn pick_document_tree() -> bool {
+    let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
+        return false;
+    };
+    ui.enqueue(Command::ImportFolderTree);
     true
 }
 

@@ -397,6 +397,7 @@ pub(super) enum Action {
     FmCut,
     FmPaste,
     FmImportHere,
+    FmImportFolderHere,
     FmOpenNewFolder,
     FmSubmitNewFolder,
     FmOpenRename(usize),
@@ -409,6 +410,10 @@ pub(super) enum Action {
     FmExportSingle(usize),
     FmExportSelected,
     FmCloseModal,
+    OpenUpdateScreen,
+    CloseUpdateScreen,
+    TriggerUpdateInstall,
+    CheckForUpdates,
 }
 
 pub(super) fn button(
@@ -1985,6 +1990,7 @@ impl Launcher {
         if self.diagnostics_modal_open {
             self.draw_diagnostics_summary_modal(&mut ui, w, h);
         }
+        self.draw_update_fullscreen_ui(&mut ui, w, h);
         if self.exit_confirmation {
             self.targets.clear();
             self.list_targets.clear();
@@ -2523,26 +2529,33 @@ impl Launcher {
             has_up,
         );
 
-        let right_cta_w = if compact { 148.0 } else { 172.0 };
-        let imp_btn_w = (right_cta_w - 6.0) * 0.48;
-        let new_folder_w = right_cta_w - 6.0 - imp_btn_w;
+        let right_cta_w = if compact { 224.0 } else { 260.0 };
+        let imp_btn_w = (right_cta_w - 8.0) * 0.28;
+        let imp_fld_w = (right_cta_w - 8.0) * 0.44;
+        let new_folder_w = right_cta_w - 8.0 - imp_btn_w - imp_fld_w;
+        let btn1_x = content_x + content_w - right_cta_w;
+        let btn2_x = btn1_x + imp_btn_w + 4.0;
+        let btn3_x = btn2_x + imp_fld_w + 4.0;
         button(
             ui,
             &mut self.targets,
-            [content_x + content_w - right_cta_w, nav_y, imp_btn_w, 30.0],
+            [btn1_x, nav_y, imp_btn_w, 30.0],
             "Import",
             Action::FmImportHere,
+            false,
+        );
+        button(
+            ui,
+            &mut self.targets,
+            [btn2_x, nav_y, imp_fld_w, 30.0],
+            "Import Folder",
+            Action::FmImportFolderHere,
             true,
         );
         button(
             ui,
             &mut self.targets,
-            [
-                content_x + content_w - new_folder_w,
-                nav_y,
-                new_folder_w,
-                30.0,
-            ],
+            [btn3_x, nav_y, new_folder_w, 30.0],
             "+ Folder",
             Action::FmOpenNewFolder,
             false,
@@ -2658,6 +2671,17 @@ impl Launcher {
         } else {
             "Delete".into()
         };
+        let has_dir_sel = self.catalog.fm_selected.iter().any(|rel| {
+            self.catalog
+                .fm_entries
+                .iter()
+                .any(|e| e.is_dir && &e.rel_path == rel)
+        });
+        let export_lbl = if has_dir_sel {
+            "Export Folder".to_string()
+        } else {
+            "Export".to_string()
+        };
         let tools: [(&str, Action, bool); 8] = [
             ("All", Action::FmSelectAll, false),
             ("Clear", Action::FmClearSelection, false),
@@ -2665,7 +2689,7 @@ impl Launcher {
             ("Cut", Action::FmCut, sel_count > 0),
             (&paste_label, Action::FmPaste, clip_count > 0),
             ("Rename", Action::FmOpenRenameSelected, sel_count == 1),
-            ("Export", Action::FmExportSelected, sel_count > 0),
+            (&export_lbl, Action::FmExportSelected, sel_count > 0),
             (&del_label, Action::FmRequestDeleteSelected, sel_count > 0),
         ];
         let t_gap = 4.0;
@@ -3172,6 +3196,268 @@ impl Launcher {
                 }
             }
         }
+    }
+
+    /// Full screen Material 3 view for update detection and automated installation.
+    fn draw_update_fullscreen_ui(&mut self, ui: &mut Ui, w: f32, h: f32) {
+        let status = crate::updater::get_status();
+        let (info, is_downloading, is_downloaded) = match &status {
+            crate::updater::UpdateStatus::Available(info) => (Some(info.clone()), false, false),
+            crate::updater::UpdateStatus::Downloading { .. } => {
+                let info = self.catalog.update_info.clone();
+                (info, true, false)
+            }
+            crate::updater::UpdateStatus::Downloaded { .. } => {
+                let info = self.catalog.update_info.clone();
+                (info, false, true)
+            }
+            crate::updater::UpdateStatus::Error(_) => {
+                let info = self.catalog.update_info.clone();
+                (info, false, false)
+            }
+            _ => (None, false, false),
+        };
+
+        if let Some(ref i) = info {
+            self.catalog.update_info = Some(i.clone());
+            if !self.catalog.update_ui_open && status != crate::updater::UpdateStatus::Dismissed {
+                self.catalog.update_ui_open = true;
+            }
+        }
+
+        if !self.catalog.update_ui_open {
+            return;
+        }
+
+        let Some(info) = self.catalog.update_info.clone() else {
+            return;
+        };
+
+        // Material 3 Animation: smooth slide-up and fade-in
+        self.catalog.update_anim_time = (self.catalog.update_anim_time + 0.06).min(1.0);
+        let ease = 1.0 - (1.0 - self.catalog.update_anim_time).powi(3);
+        let slide_y = (1.0 - ease) * 60.0;
+
+        self.targets.clear();
+        self.list_targets.clear();
+        self.list_view = None;
+
+        // Full screen background scrim
+        ui.rounded(
+            0.0,
+            0.0,
+            w,
+            h,
+            0.0,
+            horizon_client::hud::rgba(8, 7, 16, (235.0 * ease) as u8),
+        );
+
+        // Center Material 3 Container Card
+        let mw = (w - 32.0).clamp(320.0, 680.0);
+        let mh = (h - 28.0).clamp(340.0, 520.0);
+        let mx = (w - mw) * 0.5;
+        let my = (h - mh) * 0.5 + slide_y;
+
+        ui.rounded(mx, my, mw, mh, 24.0, my3_surface());
+        ui.border(mx, my, mw, mh, 24.0, my3_border());
+
+        // Header with Material Icon & Accent Glow
+        let head_y = my + 18.0;
+        let icon_box_r = [mx + 20.0, head_y, 44.0, 44.0];
+        ui.rounded(
+            icon_box_r[0],
+            icon_box_r[1],
+            icon_box_r[2],
+            icon_box_r[3],
+            14.0,
+            my3_accent_soft(),
+        );
+        ui.border(
+            icon_box_r[0],
+            icon_box_r[1],
+            icon_box_r[2],
+            icon_box_r[3],
+            14.0,
+            my3_accent(),
+        );
+        ui.icon(Icon::Zap, mx + 31.0, head_y + 11.0, 22.0, my3_accent());
+
+        let title_x = mx + 74.0;
+        ui.text(
+            Face::SemiBold,
+            18.5,
+            title_x,
+            head_y + 2.0,
+            my3_text(),
+            "Horizon Android Update",
+        );
+        let badge_text = format!("v1.0.0  ➔  v{}", info.version);
+        let badge_w = ui.measure(Face::SemiBold, 11.0, &badge_text) + 16.0;
+        let badge_r = [title_x, head_y + 24.0, badge_w, 20.0];
+        ui.rounded(
+            badge_r[0],
+            badge_r[1],
+            badge_r[2],
+            badge_r[3],
+            6.0,
+            my3_surface_high(),
+        );
+        ui.border(
+            badge_r[0],
+            badge_r[1],
+            badge_r[2],
+            badge_r[3],
+            6.0,
+            my3_accent(),
+        );
+        ui.centered_fit(Face::SemiBold, 11.0, badge_r, my3_accent(), &badge_text);
+
+        // Changelog Content Box
+        let box_y = head_y + 54.0;
+        let box_h = mh - 138.0;
+        let box_w = mw - 40.0;
+        ui.rounded(mx + 20.0, box_y, box_w, box_h, 16.0, my3_surface_high());
+        ui.border(mx + 20.0, box_y, box_w, box_h, 16.0, my3_border());
+
+        ui.text(
+            Face::SemiBold,
+            13.0,
+            mx + 32.0,
+            box_y + 12.0,
+            my3_accent(),
+            "What's New in this release:",
+        );
+
+        let lines: Vec<&str> = info.changelog.lines().collect();
+        let line_h = 18.0;
+        let text_top = box_y + 34.0;
+        let text_bottom = box_y + box_h - 10.0;
+        let mut cur_ty = text_top;
+        ui.set_clip(Some([
+            mx + 28.0,
+            text_top,
+            box_w - 16.0,
+            (text_bottom - text_top).max(1.0),
+        ]));
+        for line in lines {
+            if cur_ty + line_h > text_bottom {
+                break;
+            }
+            let is_header = line.starts_with('#');
+            let is_bullet = line.starts_with('-') || line.starts_with('*');
+            let (draw_text, face, size, col) = if is_header {
+                (
+                    line.trim_start_matches('#').trim(),
+                    Face::SemiBold,
+                    13.0,
+                    my3_text(),
+                )
+            } else if is_bullet {
+                (line, Face::Regular, 12.0, my3_text())
+            } else {
+                (line, Face::Regular, 11.5, my3_muted())
+            };
+            ui.text(face, size, mx + 32.0, cur_ty, col, draw_text);
+            cur_ty += line_h;
+        }
+        ui.set_clip(None);
+
+        // Progress or Status Bar when downloading / installing
+        let status_y = my + mh - 70.0;
+        match &status {
+            crate::updater::UpdateStatus::Downloading {
+                progress,
+                downloaded,
+                total,
+            } => {
+                let track_w = mw - 40.0;
+                let track_r = [mx + 20.0, status_y, track_w, 8.0];
+                ui.rounded(
+                    track_r[0],
+                    track_r[1],
+                    track_r[2],
+                    track_r[3],
+                    4.0,
+                    my3_border(),
+                );
+                let fill_w = (track_w * progress).clamp(4.0, track_w);
+                ui.rounded(
+                    track_r[0],
+                    track_r[1],
+                    fill_w,
+                    track_r[3],
+                    4.0,
+                    my3_accent(),
+                );
+                let prog_lbl = format!(
+                    "Downloading: {:.1} / {:.1} MiB ({:.0}%)",
+                    *downloaded as f32 / 1048576.0,
+                    *total as f32 / 1048576.0,
+                    progress * 100.0
+                );
+                ui.text(
+                    Face::Medium,
+                    11.0,
+                    mx + 20.0,
+                    status_y - 16.0,
+                    my3_accent(),
+                    &prog_lbl,
+                );
+            }
+            crate::updater::UpdateStatus::Downloaded { .. } => {
+                ui.text(
+                    Face::Medium,
+                    11.5,
+                    mx + 20.0,
+                    status_y - 14.0,
+                    my3_accent(),
+                    "Download complete. Ready to install.",
+                );
+            }
+            crate::updater::UpdateStatus::Error(e) => {
+                ui.text(
+                    Face::Medium,
+                    11.0,
+                    mx + 20.0,
+                    status_y - 14.0,
+                    horizon_client::hud::rgba(239, 68, 68, 255),
+                    e,
+                );
+            }
+            _ => {}
+        }
+
+        // Bottom CTA Buttons
+        let btn_y = my + mh - 44.0;
+        let btn_h = 32.0;
+        let dismiss_w = 90.0;
+        let update_btn_w = 170.0;
+
+        button(
+            ui,
+            &mut self.targets,
+            [mx + 20.0, btn_y, dismiss_w, btn_h],
+            "Later",
+            Action::CloseUpdateScreen,
+            false,
+        );
+
+        let (btn_lbl, btn_act, btn_enabled) = if is_downloading {
+            ("Downloading...", Action::TriggerUpdateInstall, false)
+        } else if is_downloaded {
+            ("Install Now", Action::TriggerUpdateInstall, true)
+        } else {
+            ("Update & Install", Action::TriggerUpdateInstall, true)
+        };
+
+        button(
+            ui,
+            &mut self.targets,
+            [mx + mw - 20.0 - update_btn_w, btn_y, update_btn_w, btn_h],
+            btn_lbl,
+            btn_act,
+            btn_enabled,
+        );
     }
 
     /// Material You 3 Project Detail Dialog showing Modrinth PFP, Description,
@@ -6585,6 +6871,21 @@ impl Launcher {
                     Err(e) => self.catalog.status = e,
                 }
             }
+            Some(Action::FmImportFolderHere) => {
+                let game_home = self.catalog.config.game_home(&self.home);
+                match crate::document_store::resolve_fm_path(
+                    &self.home,
+                    &game_home,
+                    &self.catalog.fm_current_dir,
+                ) {
+                    Ok(target_dir) => {
+                        if let Err(e) = crate::documents::begin_folder_into_dir(target_dir) {
+                            self.catalog.status = e;
+                        }
+                    }
+                    Err(e) => self.catalog.status = e,
+                }
+            }
             Some(Action::FmOpenNewFolder) => {
                 self.catalog.fm_input_text = "New Folder".into();
                 self.catalog.fm_modal = Some(crate::catalog::FmModal::NewFolder);
@@ -6685,14 +6986,25 @@ impl Launcher {
                         &entry.rel_path,
                     ) {
                         Ok(path) => {
-                            self.catalog.status = match crate::documents::export_file(
-                                &self.home,
-                                self.catalog.config.profile,
-                                &path,
-                            ) {
-                                Ok(msg) => msg,
-                                Err(e) => e,
-                            };
+                            if path.is_dir() {
+                                self.catalog.status = match crate::documents::export_folder(
+                                    &self.home,
+                                    self.catalog.config.profile,
+                                    &path,
+                                ) {
+                                    Ok(msg) => msg,
+                                    Err(e) => e,
+                                };
+                            } else {
+                                self.catalog.status = match crate::documents::export_file(
+                                    &self.home,
+                                    self.catalog.config.profile,
+                                    &path,
+                                ) {
+                                    Ok(msg) => msg,
+                                    Err(e) => e,
+                                };
+                            }
                         }
                         Err(e) => self.catalog.status = e,
                     }
@@ -6703,20 +7015,63 @@ impl Launcher {
                     let game_home = self.catalog.config.game_home(&self.home);
                     match crate::document_store::resolve_fm_path(&self.home, &game_home, &rel) {
                         Ok(path) => {
-                            self.catalog.status = match crate::documents::export_file(
-                                &self.home,
-                                self.catalog.config.profile,
-                                &path,
-                            ) {
-                                Ok(msg) => msg,
-                                Err(e) => e,
-                            };
+                            if path.is_dir() {
+                                self.catalog.status = match crate::documents::export_folder(
+                                    &self.home,
+                                    self.catalog.config.profile,
+                                    &path,
+                                ) {
+                                    Ok(msg) => msg,
+                                    Err(e) => e,
+                                };
+                            } else {
+                                self.catalog.status = match crate::documents::export_file(
+                                    &self.home,
+                                    self.catalog.config.profile,
+                                    &path,
+                                ) {
+                                    Ok(msg) => msg,
+                                    Err(e) => e,
+                                };
+                            }
                         }
                         Err(e) => self.catalog.status = e,
                     }
                 } else {
-                    self.catalog.status = "Select a file to export.".into();
+                    self.catalog.status = "Select a file or folder to export.".into();
                 }
+            }
+            Some(Action::OpenUpdateScreen) => {
+                self.catalog.update_ui_open = true;
+                self.catalog.update_anim_time = 0.0;
+            }
+            Some(Action::CloseUpdateScreen) => {
+                self.catalog.update_ui_open = false;
+                crate::updater::dismiss();
+            }
+            Some(Action::TriggerUpdateInstall) => {
+                let status = crate::updater::get_status();
+                match status {
+                    crate::updater::UpdateStatus::Available(info) => {
+                        crate::updater::download_and_install_in_background(info, self.home.clone());
+                    }
+                    crate::updater::UpdateStatus::Downloaded { path, .. } => {
+                        crate::updater::trigger_install(&path);
+                    }
+                    crate::updater::UpdateStatus::Error(_) => {
+                        if let Some(info) = self.catalog.update_info.clone() {
+                            crate::updater::download_and_install_in_background(
+                                info,
+                                self.home.clone(),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some(Action::CheckForUpdates) => {
+                self.catalog.status = "Checking for updates...".into();
+                crate::updater::check_in_background();
             }
             Some(Action::FmCloseModal) => {
                 self.catalog.fm_modal = None;

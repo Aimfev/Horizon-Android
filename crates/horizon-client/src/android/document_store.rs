@@ -144,7 +144,7 @@ fn row(home: &Path, id: &str) -> io::Result<Value> {
     if id == ROOT {
         return Ok(
             json!({"document_id": ROOT, "_display_name": "Horizon Android",
-            "mime_type": DIRECTORY, "flags": 0}),
+            "mime_type": DIRECTORY, "flags": 8}),
         );
     }
     let doc = resolve(home, id)?;
@@ -183,7 +183,7 @@ fn row(home: &Path, id: &str) -> io::Result<Value> {
     };
     let flags = flags
         | if doc.label.is_none() && !doc.reports && !doc.configuration {
-            4 | if meta.is_file() { 64 } else { 0 }
+            4 | 128 | 256 | 64
         } else {
             0
         };
@@ -282,7 +282,7 @@ pub fn call(home: &Path, op: &str, id: &str, arg: &str) -> io::Result<Value> {
     }
     match op {
         "roots" => Ok(json!([{"root_id": ROOT, "document_id": ROOT,
-            "title": "Horizon Android", "flags": 18, "mime_types": "*/*"}])),
+            "title": "Horizon Android", "flags": 19, "mime_types": "*/*"}])),
         "document" => Ok(json!([row(home, id)?])),
         "children" => Ok(json!(children(home, id)?)),
         "child" => Ok(json!(is_child(home, id, arg))),
@@ -312,20 +312,41 @@ pub fn call(home: &Path, op: &str, id: &str, arg: &str) -> io::Result<Value> {
         }
         "create" | "mkdir" => {
             component(arg)?;
-            let parent = resolve(home, id)?;
-            if parent.reports || !parent.path.is_dir() || (parent.configuration && op == "mkdir") {
-                return Err(invalid());
-            }
-            // create_new never overwrites a name. Let DocumentsUI request another name.
-            let child = format!("{id}/{arg}");
-            let target = resolve(home, &child)?;
+            let (child, target_path) = if id == ROOT {
+                let p = profile(home);
+                let folder = if op == "mkdir" {
+                    "worlds"
+                } else if arg.ends_with(".hmod") || arg.ends_with(".jar") {
+                    "mods"
+                } else if arg.ends_with(".hshader") {
+                    "shaders"
+                } else if arg.ends_with(".zip") {
+                    "packs"
+                } else {
+                    "worlds"
+                };
+                let child_id = format!("p{p}/{folder}/{arg}");
+                let target = resolve(home, &child_id)?;
+                (child_id, target.path)
+            } else {
+                let parent = resolve(home, id)?;
+                if parent.reports
+                    || !parent.path.is_dir()
+                    || (parent.configuration && op == "mkdir")
+                {
+                    return Err(invalid());
+                }
+                let child_id = format!("{id}/{arg}");
+                let target = resolve(home, &child_id)?;
+                (child_id, target.path)
+            };
             if op == "mkdir" {
-                fs::create_dir(target.path)?;
+                fs::create_dir_all(target_path)?;
             } else {
                 OpenOptions::new()
                     .write(true)
                     .create_new(true)
-                    .open(target.path)?;
+                    .open(target_path)?;
             }
             Ok(json!(child))
         }
@@ -335,17 +356,13 @@ pub fn call(home: &Path, op: &str, id: &str, arg: &str) -> io::Result<Value> {
                 return Err(invalid());
             }
             if op == "delete" {
-                // Nonempty directories must be emptied by the client explicitly.
                 if doc.path.is_dir() {
-                    fs::remove_dir(doc.path)?;
+                    fs::remove_dir_all(&doc.path)?;
                 } else {
-                    fs::remove_file(doc.path)?;
+                    fs::remove_file(&doc.path)?;
                 }
                 Ok(Value::Null)
             } else {
-                if !doc.path.is_file() {
-                    return Err(invalid());
-                }
                 component(arg)?;
                 let (parent, _) = id.rsplit_once('/').ok_or_else(invalid)?;
                 let child = format!("{parent}/{arg}");
@@ -357,8 +374,51 @@ pub fn call(home: &Path, op: &str, id: &str, arg: &str) -> io::Result<Value> {
                 Ok(json!(child))
             }
         }
+        "copy" | "move" => {
+            let doc = resolve(home, id)?;
+            if doc.label.is_some() || doc.reports || doc.configuration {
+                return Err(invalid());
+            }
+            let dest_parent = resolve(home, arg)?;
+            if dest_parent.reports || !dest_parent.path.is_dir() || dest_parent.configuration {
+                return Err(invalid());
+            }
+            let file_name = doc.path.file_name().ok_or_else(invalid)?;
+            let file_name_str = file_name.to_str().ok_or_else(invalid)?;
+            component(file_name_str)?;
+            let child = format!("{arg}/{file_name_str}");
+            let target = resolve(home, &child)?;
+            if target.path.try_exists()? {
+                return Err(io::Error::from(ErrorKind::AlreadyExists));
+            }
+            if op == "move" {
+                rename_new(&doc.path, &target.path)?;
+            } else {
+                copy_recursive(&doc.path, &target.path)?;
+            }
+            Ok(json!(child))
+        }
         _ => Err(invalid()),
     }
+}
+
+fn copy_recursive(source: &Path, target: &Path) -> io::Result<()> {
+    if source.is_dir() {
+        fs::create_dir_all(target)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            let path = entry.path();
+            let dest = target.join(entry.file_name());
+            if path.is_dir() {
+                copy_recursive(&path, &dest)?;
+            } else if path.is_file() {
+                fs::copy(&path, &dest)?;
+            }
+        }
+    } else {
+        fs::copy(source, target)?;
+    }
+    Ok(())
 }
 
 fn rename_new(source: &Path, target: &Path) -> io::Result<()> {
@@ -376,10 +436,14 @@ fn rename_new(source: &Path, target: &Path) -> io::Result<()> {
     }
     #[cfg(not(target_os = "android"))]
     {
-        fs::hard_link(source, target)?;
-        if let Err(error) = fs::remove_file(source) {
-            let _ = fs::remove_file(target);
-            return Err(error);
+        if source.is_dir() {
+            fs::rename(source, target)?;
+        } else {
+            fs::hard_link(source, target)?;
+            if let Err(error) = fs::remove_file(source) {
+                let _ = fs::remove_file(target);
+                return Err(error);
+            }
         }
     }
     Ok(())
@@ -1153,6 +1217,64 @@ pub fn fm_details(
         kind_label,
         preview_lines,
     })
+}
+
+/// Creates a zip archive of a folder for export/backup.
+pub fn export_folder_zip(
+    _home: &Path,
+    _profile: u32,
+    dir_path: &Path,
+) -> std::result::Result<(PathBuf, String), String> {
+    let meta = fs::symlink_metadata(dir_path).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err("Only directories can be exported as a folder zip.".into());
+    }
+    let folder_name = dir_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or("Invalid folder name")?;
+    let zip_name = format!("{folder_name}.zip");
+    let parent = dir_path.parent().unwrap_or(dir_path);
+    let zip_path = parent.join(&zip_name);
+
+    let file = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    fn add_dir_to_zip<W: std::io::Write + std::io::Seek>(
+        zip: &mut zip::ZipWriter<W>,
+        base: &Path,
+        current: &Path,
+        root_name: &str,
+        options: zip::write::SimpleFileOptions,
+    ) -> std::io::Result<()> {
+        for entry in fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            if entry.file_type()?.is_symlink() {
+                continue;
+            }
+            if path.is_dir() {
+                add_dir_to_zip(zip, base, &path, root_name, options)?;
+            } else if path.is_file() {
+                if let Ok(rel) = path.strip_prefix(base) {
+                    let zip_entry_name =
+                        format!("{root_name}/{}", rel.to_string_lossy().replace('\\', "/"));
+                    zip.start_file(zip_entry_name, options)?;
+                    let mut f = fs::File::open(&path)?;
+                    io::copy(&mut f, zip)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    add_dir_to_zip(&mut zip, dir_path, dir_path, folder_name, options)
+        .map_err(|e| e.to_string())?;
+    zip.finish().map_err(|e| e.to_string())?;
+
+    Ok((zip_path, zip_name))
 }
 
 #[cfg(test)]
