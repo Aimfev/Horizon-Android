@@ -166,9 +166,6 @@ name = "arbitrary"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
-dependencies = [
- "derive_arbitrary",
-]
 
 [[package]]
 name = "arboard"
@@ -998,17 +995,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
-name = "derive_arbitrary"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.6",
-]
-
-[[package]]
 name = "des"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1645,11 +1631,12 @@ dependencies = [
  "sha1",
  "sha2",
  "symphonia",
+ "toml",
  "ureq",
  "url",
  "wgpu",
  "winit",
- "zip 2.6.1",
+ "zip",
 ]
 
 [[package]]
@@ -1745,13 +1732,14 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "toml",
  "unicode-bidi",
  "ureq",
  "url",
  "wgpu",
  "winit",
  "winresource",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -1818,7 +1806,7 @@ dependencies = [
  "ureq",
  "wgpu",
  "winit",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -1905,7 +1893,7 @@ dependencies = [
  "wasmtime",
  "wit-component",
  "wit-parser",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -1951,7 +1939,7 @@ dependencies = [
  "sha1",
  "toml",
  "ureq",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -1963,7 +1951,7 @@ dependencies = [
  "regex",
  "sha1",
  "sha2",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -2023,7 +2011,7 @@ dependencies = [
  "toml_edit",
  "ureq",
  "windows-sys 0.61.2",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -2049,7 +2037,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -2060,7 +2048,7 @@ dependencies = [
  "horizon-core",
  "naga",
  "png",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -6180,21 +6168,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
-]
-
-[[package]]
-name = "zip"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dcb24d0152526ae49b9b96c1dcf71850ca1e0b882e4e28ed898a93c41334744"
-dependencies = [
- "arbitrary",
- "crc32fast",
- "crossbeam-utils",
- "flate2",
- "indexmap",
- "memchr",
- "zopfli",
 ]
 
 [[package]]

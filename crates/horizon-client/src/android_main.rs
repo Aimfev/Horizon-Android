@@ -49,6 +49,7 @@ mod native_ime;
 mod performance;
 #[path = "android/platform.rs"]
 mod platform;
+pub use horizon_client_render::mod_list;
 #[rustfmt::skip]
 #[allow(dead_code)]
 #[path = "../../../launcher/src/proxy.rs"]

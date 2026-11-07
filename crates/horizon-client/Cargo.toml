@@ -61,6 +61,7 @@ horizon-theme = { path = "../horizon-theme" }
 horizon-telemetry = { path = "../horizon-telemetry", default-features = false, features = ["live"] }
 horizon-bench = { path = "../horizon-bench" }
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
+toml = "1"
 # Controllers (evdev + libudev on Linux, IOKit on macOS, Windows.Gaming.Input); the `controllers` feature.
 gilrs = { version = "0.11", optional = true }
 # The DualSense's rumble, adaptive triggers and lights over HID (gilrs only reads it).
