@@ -10,7 +10,7 @@ on real phones. For rendering or performance reports, include the phone, Android
 version, renderer, resolution scale, render distance and APK/source version.
 Emulator FPS does not establish phone performance.
 
-[Report an Android bug](https://github.com/Vasysik/horizon-android/issues/new?template=android-bug.yml)
+[Report an Android bug](https://github.com/GoyDevv/Horizon-Android/issues/new?template=android-bug.yml)
 or send a focused pull request against `android`. Reproduction steps and a short
 video often help more than a large log dump. Do not post account/session files,
 tokens, private server details, signing keys or complete app data.

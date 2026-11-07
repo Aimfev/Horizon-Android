@@ -9,7 +9,7 @@ use std::{
 };
 
 pub const CURRENT_VERSION: &str = "1.0.0";
-pub const REPO: &str = "GoyDevv/horizon-androidPRO";
+pub const REPO: &str = "GoyDevv/Horizon-Android";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReleaseInfo {

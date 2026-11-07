@@ -6,7 +6,7 @@ and Java multiplayer. It does not run arbitrary Minecraft JAR versions.
 
 ## Install and play
 
-1. Install the APK matching the device architecture from [Releases](https://github.com/Vasysik/horizon-android/releases).
+1. Install the APK matching the device architecture from [Releases](https://github.com/GoyDevv/Horizon-Android/releases).
 2. Open Horizon and choose **Download Minecraft 26.3**.
 3. Wait for resource verification and installation, then choose **Play**.
 
@@ -169,7 +169,7 @@ launcher entry; TV support is experimental and analog gamepad axes are not conne
 
 F2 keeps the original PNG in the profile and publishes a copy to
 **Pictures/HorizonAndroid** through Android MediaStore. Android 10+ needs no
-storage permission. Android 8.1–9 asks for storage permission when first saving;
+storage permission. Android 8.1â€“9 asks for storage permission when first saving;
 if access is denied, the profile copy remains available. Gallery publication runs
 outside the render thread and reports success or failure in game chat.
 

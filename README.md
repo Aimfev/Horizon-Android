@@ -1,21 +1,21 @@
-# Horizon Android PRO
+# Horizon Android
 
-[![Release v1.0.0](https://img.shields.io/badge/Release-v1.0.0-7C4DFF?style=for-the-badge&logo=android&logoColor=white)](https://github.com/GoyDevv/horizon-androidPRO/releases)
+[![Release v1.0.0](https://img.shields.io/badge/Release-v1.0.0-7C4DFF?style=for-the-badge&logo=android&logoColor=white)](https://github.com/GoyDevv/Horizon-Android/releases)
 [![Discord](https://img.shields.io/badge/Discord-Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/CjyWBu2mC7)
-[![Minecraft Java 26.3](https://img.shields.io/badge/Minecraft%20Java-26.3-5D9C3F?style=for-the-badge&logo=curseforge&logoColor=white)](https://github.com/GoyDevv/horizon-androidPRO)
-[![Rust 2024](https://img.shields.io/badge/Rust-2024%20(wgpu)-B7410E?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/GoyDevv/horizon-androidPRO)
-[![Android 9.0+](https://img.shields.io/badge/Android-API%2028--35-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/GoyDevv/horizon-androidPRO)
+[![Minecraft Java 26.3](https://img.shields.io/badge/Minecraft%20Java-26.3-5D9C3F?style=for-the-badge&logo=curseforge&logoColor=white)](https://github.com/GoyDevv/Horizon-Android)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024%20(wgpu)-B7410E?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/GoyDevv/Horizon-Android)
+[![Android 9.0+](https://img.shields.io/badge/Android-API%2028--35-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/GoyDevv/Horizon-Android)
 [![License: MIT](https://img.shields.io/badge/License-MIT-4527A0?style=for-the-badge)](LICENSE)
 
 A high-performance native Android port of **Horizon**, rewriting Minecraft: Java Edition 26.3 in pure Rust with `wgpu` (Vulkan & OpenGL ES).
 
 **Android 9+ (API 28–35) · Vulkan 1.0+ / GLES 3.0 · Full SAF Read & Write · In-App GitHub Updater · Material 3 Launcher · 260 FPS Uncapped · Java Multiplayer**
 
-[Download Latest Release (v1.0.0)](https://github.com/GoyDevv/horizon-androidPRO/releases) · [Discord](https://discord.gg/CjyWBu2mC7) · [Build Guide](docs/android.md) · [Contributing](CONTRIBUTING_ANDROID.md) · [Report Bug](https://github.com/GoyDevv/horizon-androidPRO/issues)
+[Download Latest Release (v1.0.0)](https://github.com/GoyDevv/Horizon-Android/releases) · [Discord](https://discord.gg/CjyWBu2mC7) · [Build Guide](docs/android.md) · [Contributing](CONTRIBUTING_ANDROID.md) · [Report Bug](https://github.com/GoyDevv/Horizon-Android/issues)
 
 ---
 
-## What's New in v1.0.0 PRO
+## What's New in v1.0.0
 
 - 🚀 **Full Read/Write Storage Access Framework (SAF)**: Full read, write, copy, move, rename, and directory deletion support across external storage and file managers.
 - 📁 **Integrated Mini File Manager**: Inside the launcher's **Installed** tab, manage your files directly. Includes **Import Folder** (recursive tree import) and **Export Folder** (compresses to zip for easy backup and export).

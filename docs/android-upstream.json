@@ -1,6 +1,6 @@
 {
   "upstream": "https://github.com/ludovic111/horizon",
-  "fork": "https://github.com/Vasysik/horizon-android",
+  "fork": "https://github.com/GoyDevv/Horizon-Android",
   "base_commit": "d65282fb0f0fd7ba57876aef87dc4c6c2b5fa04b",
   "base_selection": "Best matching first-parent revision; 309 revisions compared",
   "matching_source_files": 3106,
