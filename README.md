@@ -1,11 +1,17 @@
-# Horizon Android
+<p align="center">
+  <img src="packaging/android/res/drawable-nodpi/launcher_icon.png" width="128" height="128" alt="Horizon Android Icon" />
+</p>
 
-[![Release v1.0.0](https://img.shields.io/badge/Release-v1.0.0-7C4DFF?style=for-the-badge&logo=android&logoColor=white)](https://github.com/GoyDevv/Horizon-Android/releases)
-[![Discord](https://img.shields.io/badge/Discord-Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/CjyWBu2mC7)
-[![Minecraft Java 26.3](https://img.shields.io/badge/Minecraft%20Java-26.3-5D9C3F?style=for-the-badge&logo=curseforge&logoColor=white)](https://github.com/GoyDevv/Horizon-Android)
-[![Rust 2024](https://img.shields.io/badge/Rust-2024%20(wgpu)-B7410E?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/GoyDevv/Horizon-Android)
-[![Android 9.0+](https://img.shields.io/badge/Android-API%2028--35-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/GoyDevv/Horizon-Android)
-[![License: MIT](https://img.shields.io/badge/License-MIT-4527A0?style=for-the-badge)](LICENSE)
+# <p align="center">Horizon Android</p>
+
+<p align="center">
+  <a href="https://github.com/GoyDevv/Horizon-Android/releases"><img src="https://img.shields.io/badge/Release-v1.0.0-7C4DFF?style=for-the-badge&logo=android&logoColor=white" alt="Release v1.0.0" /></a>
+  <a href="https://discord.gg/CjyWBu2mC7"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://github.com/GoyDevv/Horizon-Android"><img src="https://img.shields.io/badge/Minecraft%20Java-26.3-5D9C3F?style=for-the-badge&logo=curseforge&logoColor=white" alt="Minecraft Java 26.3" /></a>
+  <a href="https://github.com/GoyDevv/Horizon-Android"><img src="https://img.shields.io/badge/Rust-2024%20(wgpu)-B7410E?style=for-the-badge&logo=rust&logoColor=white" alt="Rust 2024" /></a>
+  <a href="https://github.com/GoyDevv/Horizon-Android"><img src="https://img.shields.io/badge/Android-API%2028--35-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 9.0+" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-4527A0?style=for-the-badge" alt="License: MIT" /></a>
+</p>
 
 A high-performance native Android port of **Horizon**, rewriting Minecraft: Java Edition 26.3 in pure Rust with `wgpu` (Vulkan & OpenGL ES).
 
