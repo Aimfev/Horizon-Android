@@ -1043,7 +1043,13 @@ impl TouchControls {
                 ..
             } = role
             {
-                *dragged |= ((point[0] - start[0]) * aspect).hypot(point[1] - start[1]) > 0.010;
+                let drag_thresh = if self.settings.zero_latency_touch {
+                    0.002
+                } else {
+                    0.010
+                };
+                *dragged |=
+                    ((point[0] - start[0]) * aspect).hypot(point[1] - start[1]) > drag_thresh;
                 if !*dragged && since.elapsed() >= HOLD_DELAY {
                     *committed = true;
                 }

@@ -128,6 +128,24 @@ pub fn vsync_present_mode(supported: &[PresentMode], vsync: bool) -> Option<Pres
     preferred.iter().copied().find(|m| supported.contains(m))
 }
 
+/// Present mode selection for Android surfaces: avoids Mailbox (which stalls on
+/// buggy Mali drivers) and provides true uncapped presentation via Immediate when VSync is disabled.
+pub fn android_chosen_present_mode(
+    supported: &[PresentMode],
+    vsync: bool,
+    setting: Option<PresentMode>,
+) -> Option<PresentMode> {
+    if vsync {
+        return supported.iter().copied().find(|m| *m == PresentMode::Fifo);
+    }
+    if let Some(m) = setting.filter(|m| supported.contains(m) && *m != PresentMode::Mailbox) {
+        return Some(m);
+    }
+    [PresentMode::Immediate, PresentMode::Fifo]
+        .into_iter()
+        .find(|mode| supported.contains(mode))
+}
+
 /// The present mode for the VSync option and Horizon's present-mode setting
 /// (`None` for Auto). VSync on always means Fifo, in a window and in
 /// fullscreen alike, as in vanilla; the setting chooses only while VSync is
@@ -139,11 +157,10 @@ pub fn chosen_present_mode(
 ) -> Option<PresentMode> {
     // A Mailbox present can block for seconds in Android's GLES/Vulkan
     // drivers (seen on Mali) and ANR the activity during loading. The
-    // Android surface stays on vsync; desktop keeps the setting.
+    // Android surface avoids Mailbox and presents via Immediate when VSync is off,
+    // or Fifo when VSync is on.
     if cfg!(target_os = "android") {
-        return [PresentMode::Fifo, PresentMode::Immediate]
-            .into_iter()
-            .find(|mode| supported.contains(mode));
+        return android_chosen_present_mode(supported, vsync, setting);
     }
     setting
         .filter(|m| !vsync && supported.contains(m))
@@ -735,6 +752,40 @@ mod tests {
         assert_eq!(
             chosen_present_mode(&[Fifo, Immediate], false, Some(Mailbox)),
             Some(Immediate)
+        );
+    }
+
+    #[test]
+    fn android_present_mode_uncapped_and_vsync_handling() {
+        use PresentMode::*;
+        let all = [Mailbox, Fifo, Immediate];
+        // When VSync is on, Android enforces Fifo regardless of other settings
+        for setting in [None, Some(Fifo), Some(Mailbox), Some(Immediate)] {
+            assert_eq!(android_chosen_present_mode(&all, true, setting), Some(Fifo));
+        }
+        // When VSync is off, uncap FPS selects Immediate presentation
+        assert_eq!(
+            android_chosen_present_mode(&all, false, None),
+            Some(Immediate)
+        );
+        assert_eq!(
+            android_chosen_present_mode(&all, false, Some(Immediate)),
+            Some(Immediate)
+        );
+        // Explicit Fifo setting respected even if VSync option is toggled off
+        assert_eq!(
+            android_chosen_present_mode(&all, false, Some(Fifo)),
+            Some(Fifo)
+        );
+        // Mailbox is avoided on Android to prevent Mali ANRs; falls back to Immediate
+        assert_eq!(
+            android_chosen_present_mode(&all, false, Some(Mailbox)),
+            Some(Immediate)
+        );
+        // When driver only exposes Fifo, safely falls back
+        assert_eq!(
+            android_chosen_present_mode(&[Fifo], false, None),
+            Some(Fifo)
         );
     }
 

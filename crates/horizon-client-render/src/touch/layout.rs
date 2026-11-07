@@ -463,6 +463,8 @@ pub struct Settings {
     pub virtual_mouse_enabled: bool,
     #[serde(default)]
     pub disable_game_animations: bool,
+    #[serde(default = "default_true")]
+    pub zero_latency_touch: bool,
     #[serde(default = "default_res_scale")]
     pub resolution_scale_percent: u32,
     pub virtual_mouse_sensitivity: f32,
@@ -613,6 +615,7 @@ impl Default for Settings {
             inventory_controls: false,
             virtual_mouse_enabled: false,
             disable_game_animations: false,
+            zero_latency_touch: true,
             resolution_scale_percent: default_res_scale(),
             virtual_mouse_sensitivity: 1.0,
             virtual_mouse_pointer_scale: default_pointer_scale(),
@@ -1236,6 +1239,7 @@ impl Settings {
         let prev_pointer_scale = self.virtual_mouse_pointer_scale;
         let prev_vibrate = self.vibrate;
         let prev_auto_jump = self.auto_jump;
+        let prev_zero_latency = self.zero_latency_touch;
         let mut loaded = Self::load_preset(game_home, style, id);
         let clean = loaded.preset_id.clone();
         loaded.active_mcpe_preset = if style == ControlStyle::Mcpe {
@@ -1255,6 +1259,7 @@ impl Settings {
         loaded.virtual_mouse_pointer_scale = prev_pointer_scale;
         loaded.vibrate = prev_vibrate;
         loaded.auto_jump = prev_auto_jump;
+        loaded.zero_latency_touch = prev_zero_latency;
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
     }
@@ -1290,6 +1295,7 @@ impl Settings {
         let prev_pointer_scale = self.virtual_mouse_pointer_scale;
         let prev_vibrate = self.vibrate;
         let prev_auto_jump = self.auto_jump;
+        let prev_zero_latency = self.zero_latency_touch;
         let mut loaded = Self::load_preset(game_home, target, &target_preset_id);
         loaded.control_style = target;
         loaded.active_mcpe_preset = prev_mcpe;
@@ -1301,6 +1307,7 @@ impl Settings {
         loaded.virtual_mouse_pointer_scale = prev_pointer_scale;
         loaded.vibrate = prev_vibrate;
         loaded.auto_jump = prev_auto_jump;
+        loaded.zero_latency_touch = prev_zero_latency;
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
     }
@@ -1766,6 +1773,7 @@ impl Settings {
             let prev_pointer_scale = self.virtual_mouse_pointer_scale;
             let prev_vibrate = self.vibrate;
             let prev_auto_jump = self.auto_jump;
+            let prev_zero_latency = self.zero_latency_touch;
             *self = Self::default_for_style(style);
             self.active_mcpe_preset = prev_mcpe;
             self.active_goy_preset = prev_goy;
@@ -1776,6 +1784,7 @@ impl Settings {
             self.virtual_mouse_pointer_scale = prev_pointer_scale;
             self.vibrate = prev_vibrate;
             self.auto_jump = prev_auto_jump;
+            self.zero_latency_touch = prev_zero_latency;
             match style {
                 ControlStyle::Mcpe => self.active_mcpe_preset = "default".into(),
                 ControlStyle::GoyControl => self.active_goy_preset = "default".into(),
@@ -1811,6 +1820,7 @@ impl Settings {
         loaded.virtual_mouse_pointer_scale = active.virtual_mouse_pointer_scale;
         loaded.vibrate = active.vibrate;
         loaded.auto_jump = active.auto_jump;
+        loaded.zero_latency_touch = active.zero_latency_touch;
         match loaded.control_style {
             ControlStyle::Mcpe => loaded.active_mcpe_preset = loaded.preset_id.clone(),
             ControlStyle::GoyControl => loaded.active_goy_preset = loaded.preset_id.clone(),

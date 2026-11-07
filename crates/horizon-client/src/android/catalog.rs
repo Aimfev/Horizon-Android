@@ -257,6 +257,10 @@ impl Config {
             settings.chunk_fade = 0.0;
             settings.view_bobbing = false;
             settings.menu_blur = 0;
+        } else if !self.super_perf_mode {
+            settings.horizon.animated_textures = true;
+            settings.chunk_fade = 1.0;
+            settings.view_bobbing = true;
         }
         if self.super_perf_mode {
             settings.render_distance = settings.render_distance.min(8);
@@ -275,12 +279,22 @@ impl Config {
             settings.max_fps = 60;
             settings.vsync = true;
             settings.menu_blur = 0;
+            settings.horizon.present_mode = horizon_client::graphics::PresentMode::Fifo;
         } else if self.max_fps_mode {
             settings.max_fps = 260;
             settings.vsync = false;
+            settings.horizon.present_mode = horizon_client::graphics::PresentMode::Immediate;
+        } else {
+            if settings.max_fps > 120 {
+                settings.max_fps = 120;
+            }
+            settings.vsync = true;
+            settings.horizon.present_mode = horizon_client::graphics::PresentMode::Auto;
         }
         if self.fast_chunk_upload {
             settings.horizon.upload_budget_kib = settings.horizon.upload_budget_kib.max(4096);
+        } else if !self.super_perf_mode {
+            settings.horizon.upload_budget_kib = 2048;
         }
         settings.horizon.cave_culling = true;
         settings.horizon.entity_culling = true;
@@ -290,6 +304,7 @@ impl Config {
         let mut touch_cfg = horizon_client::touch::Settings::load_from(&touch_path);
         touch_cfg.disable_game_animations = self.disable_game_animations;
         touch_cfg.resolution_scale_percent = self.render_scale.percent().clamp(25, 100);
+        touch_cfg.zero_latency_touch = self.zero_latency_touch;
         let _ = touch_cfg.save_to(&touch_path);
     }
 }
@@ -815,18 +830,28 @@ impl Catalog {
         // Also scan horizon-native-mods/ for any .hnmod or .hmod files on disk.
         let native_dir = game.join("horizon-native-mods");
         if std::fs::symlink_metadata(&native_dir).is_ok_and(|m| !m.file_type().is_symlink()) {
-            for entry in std::fs::read_dir(&native_dir).into_iter().flatten().flatten() {
+            for entry in std::fs::read_dir(&native_dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
                 if !entry.file_type().is_ok_and(|t| t.is_file()) {
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if !horizon_client::content_files::plain_name(&name)
-                    || (!name.ends_with(".hnmod") && !name.ends_with(".hmod") && !name.ends_with(".jar"))
+                    || (!name.ends_with(".hnmod")
+                        && !name.ends_with(".hmod")
+                        && !name.ends_with(".jar"))
                 {
                     continue;
                 }
                 let rel = format!("horizon-native-mods/{name}");
-                if self.local.iter().any(|item| item.file == name || item.file == rel) {
+                if self
+                    .local
+                    .iter()
+                    .any(|item| item.file == name || item.file == rel)
+                {
                     continue;
                 }
                 let mod_id = name
@@ -842,7 +867,10 @@ impl Catalog {
                     enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
                     size_bytes,
                     badge: "MOD",
-                    subtitle: format!("Horizon Native Mod (.hnmod)  •  {}  •  {name}", format_file_size(size_bytes)),
+                    subtitle: format!(
+                        "Horizon Native Mod (.hnmod)  •  {}  •  {name}",
+                        format_file_size(size_bytes)
+                    ),
                 });
             }
         }
@@ -1555,7 +1583,10 @@ impl Catalog {
                 items.len()
             )
         } else if self.page == Page::Mods {
-            format!("{} Horizon mods available (playhorizon.dev/mods) - select Install to download", items.len())
+            format!(
+                "{} Horizon mods available (playhorizon.dev/mods) - select Install to download",
+                items.len()
+            )
         } else {
             format!("{} results - select Install to download", items.len())
         };

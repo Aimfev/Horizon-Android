@@ -5505,6 +5505,9 @@ impl Launcher {
                         106..=200 => 260,
                         _ => 30,
                     };
+                    if s.max_fps >= 260 {
+                        s.vsync = false;
+                    }
                 });
             }
             Some(Action::CycleGraphicsPreset) => {
@@ -5541,6 +5544,7 @@ impl Launcher {
                 self.catalog.config.super_perf_mode = !self.catalog.config.super_perf_mode;
                 if self.catalog.config.super_perf_mode {
                     self.catalog.config.battery_perf_mode = false;
+                    self.catalog.config.max_fps_mode = false;
                     self.catalog.config.renderer = crate::catalog::RendererMode::Vulkan;
                 }
                 horizon_client::ui_theme::motion::set_reduced_motion(
@@ -5560,7 +5564,11 @@ impl Launcher {
                 if self.catalog.config.battery_perf_mode {
                     self.catalog.config.super_perf_mode = false;
                     self.catalog.config.max_fps_mode = false;
+                    self.catalog.config.device.display_hz = 60;
+                } else if self.catalog.config.device.display_hz == 60 {
+                    self.catalog.config.device.display_hz = 0;
                 }
+                crate::device_runtime::configure(self.catalog.config.device);
                 horizon_client::ui_theme::motion::set_reduced_motion(
                     self.catalog.config.super_perf_mode || self.catalog.config.battery_perf_mode,
                 );
@@ -5576,22 +5584,30 @@ impl Launcher {
             Some(Action::ToggleMaxFpsMode) => {
                 self.catalog.config.max_fps_mode = !self.catalog.config.max_fps_mode;
                 if self.catalog.config.max_fps_mode {
+                    self.catalog.config.super_perf_mode = false;
                     self.catalog.config.battery_perf_mode = false;
+                    if self.catalog.config.device.display_hz < 120 {
+                        self.catalog.config.device.display_hz = 120;
+                    }
+                } else if self.catalog.config.device.display_hz == 120 {
+                    self.catalog.config.device.display_hz = 0;
                 }
+                crate::device_runtime::configure(self.catalog.config.device);
                 self.catalog.config.save(&self.home)?;
                 self.catalog.config.apply_experimental_to_game(&self.home);
                 self.catalog.status = if self.catalog.config.max_fps_mode {
-                    "Max FPS Mode enabled: 260 FPS uncapped with VSync disabled."
+                    "Max FPS Mode enabled: 260 FPS uncapped with VSync disabled and high-refresh requested."
                 } else {
-                    "Max FPS Mode disabled."
+                    "Max FPS Mode disabled (balanced 120 FPS default restored)."
                 }
                 .into();
             }
             Some(Action::ToggleZeroLatencyTouch) => {
                 self.catalog.config.zero_latency_touch = !self.catalog.config.zero_latency_touch;
                 self.catalog.config.save(&self.home)?;
+                self.catalog.config.apply_experimental_to_game(&self.home);
                 self.catalog.status = if self.catalog.config.zero_latency_touch {
-                    "Zero-Latency Touch Pipeline active."
+                    "Zero-Latency Touch Pipeline active: zero deadzone on look and virtual mouse."
                 } else {
                     "Standard touch pipeline active."
                 }
@@ -6801,7 +6817,9 @@ impl Launcher {
             }
             Action::PointerSizeDelta(_) => {
                 let v = ((0.50 + t * 1.50) * 100.0).round() / 100.0;
-                self.modify_touch_settings(|ts| ts.virtual_mouse_pointer_scale = v.clamp(0.50, 2.0));
+                self.modify_touch_settings(|ts| {
+                    ts.virtual_mouse_pointer_scale = v.clamp(0.50, 2.0)
+                });
             }
             Action::GyroSensDelta(_) => {
                 let v = ((0.10 + t * 2.90) * 100.0).round() / 100.0;
