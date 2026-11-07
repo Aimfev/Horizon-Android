@@ -1,5 +1,5 @@
-name: Android dev APKs
-run-name: Android dev · ${{ github.sha }}
+name: Android release APKs
+run-name: Android release · ${{ github.sha }}
 
 on:
   push:
@@ -20,14 +20,14 @@ on:
   workflow_dispatch:
     inputs:
       all_abis:
-        description: Also build ARMv7, x86 and x86_64
+        description: Build all four Android ABIs
         type: boolean
-        default: false
+        default: true
 
 permissions:
-  contents: read
+  contents: write
 concurrency:
-  group: android-dev-${{ github.ref }}
+  group: android-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        abi: ${{ fromJSON(inputs.all_abis && '["arm64-v8a","armeabi-v7a","x86","x86_64"]' || '["arm64-v8a"]') }}
+        abi: ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"]
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_PROFILE_DEV_DEBUG: '0'
@@ -115,24 +115,22 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .local/ci-target
-          key: android-dev-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-${{ github.sha }}
+          key: android-release-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-${{ github.sha }}
           restore-keys: |
-            android-dev-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-
+            android-release-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-
       - name: Check public source and packaging boundaries
         run: |
           python3 tools/check_public_tree.py
           python3 -m unittest discover -s tests -p 'test_android_release_audit.py'
       - name: Prepare private engine inputs from official downloads
         run: python3 tools/android_prepare.py --java-home "$JAVA_HOME"
-      - name: Build optimized public dev APK
+      - name: Build optimized public release APK
         env:
           ABI: ${{ matrix.abi }}
         run: |
           python3 tools/android_build.py --abi "$ABI" --public --profile release \
-            --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME_17_X64" --gradle "$(command -v gradle)" \
-            --ndk-version 28.2.13676358 --build-tools-version 35.0.0 \
-            --dev-build "${GITHUB_RUN_NUMBER}.${GITHUB_SHA:0:12}" \
-            --dev-version-code "$((1000 + GITHUB_RUN_NUMBER))"
+            --sdk "$ANDROID_HOME" --java-home "${JAVA_HOME_17_X64:-$JAVA_HOME}" --gradle "$(command -v gradle)" \
+            --ndk-version 28.2.13676358 --build-tools-version 35.0.0
       - name: Collect only audited APK and public metadata
         env:
           ABI: ${{ matrix.abi }}
@@ -143,26 +141,30 @@ jobs:
           out = Path('dist')
           out.mkdir()
           sha, abi = os.environ['GITHUB_SHA'], os.environ['ABI']
-          name = f'Horizon-Android-dev.{os.environ["GITHUB_RUN_NUMBER"]}.{sha[:12]}-{abi}.apk'
+          name = f'Horizon-Android-v1.0.0-{abi}.apk'
           apk = out / name
           shutil.copyfile(Path('.local/android/apk') / abi / 'horizon-android-public.apk', apk)
           (out / 'SHA256SUMS.txt').write_text(f'{hashlib.sha256(apk.read_bytes()).hexdigest()}  {name}\n')
           for source, dest in [('LICENSE', 'LICENSE.txt'), ('THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.md')]:
               shutil.copyfile(source, out / dest)
           (out / 'BUILD.json').write_text(json.dumps({'commit': sha, 'abi': abi, 'profile': 'release',
-              'package': 'dev.horizon.android.dev', 'experimental': True,
+              'package': 'com.goydevv.horizon', 'version': '1.0.0',
               'run': f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'}, indent=2) + '\n')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write(f'### Dev APK: {abi}\n\nCommit: `{sha}`. Optimized release profile; experimental build.\n\n'
-                  'Download the APK artifact below. Installs separately from the stable app. '
-                  'Existing worlds/accounts are not copied automatically.\n')
+              summary.write(f'### Release APK: {abi}\n\nCommit: `{sha}`. Official release build (`com.goydevv.horizon`).\n\n'
+                  f'File: `{name}` ({apk.stat().st_size:,} bytes)\n')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: horizon-dev-${{ github.run_number }}-${{ matrix.abi }}
+          name: horizon-v1.0.0-${{ matrix.abi }}
           path: dist/
           if-no-files-found: error
           retention-days: 14
+      - name: Publish APK to GitHub Release v1.0.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v1.0.0 dist/*.apk -R GoyDevv/Horizon-Android --clobber
       - name: Remove signing key
         if: always()
         run: rm -f .local/android/ci.keystore .local/android/debug.keystore
