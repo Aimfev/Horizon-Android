@@ -293,7 +293,7 @@ pub fn cache_dir() -> Option<std::path::PathBuf> {
 }
 
 pub fn open_repository() -> bool {
-    open_url("https://github.com/Vasysik/horizon-android")
+    open_url("https://github.com/GoyDevv/horizon-androidPRO")
 }
 /// Browse our SAF directory through the system file manager, never a private path.
 pub fn open_documents(id: &str) -> bool {

@@ -286,6 +286,7 @@ pub(super) enum Action {
     CancelLogin,
     ReviewApp,
     Repository,
+    Discord,
     SignOut,
     LoginLink,
     CloseLogin,
@@ -1492,6 +1493,16 @@ impl Launcher {
                         Action::Profile,
                         false,
                     );
+                    if content_w > 530.0 {
+                        button(
+                            &mut ui,
+                            &mut self.targets,
+                            [content_x + play_w + 154.0, btn_y, 110.0, 46.0],
+                            "Discord",
+                            Action::Discord,
+                            false,
+                        );
+                    }
                 }
             }
         } else if page == Page::Skins {
@@ -1943,6 +1954,14 @@ impl Launcher {
                     [w - 118.0, h - 38.0, 92.0, 28.0],
                     "GitHub",
                     Action::Repository,
+                    false,
+                );
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [w - 222.0, h - 38.0, 96.0, 28.0],
+                    "Discord",
+                    Action::Discord,
                     false,
                 );
             }
@@ -6265,6 +6284,15 @@ impl Launcher {
                     "Repository opened in browser."
                 } else {
                     "No browser available to open the repository."
+                }
+                .into();
+            }
+            Some(Action::Discord) => {
+                self.catalog.status = if crate::platform::open_url("https://discord.gg/CjyWBu2mC7")
+                {
+                    "Discord opened in browser."
+                } else {
+                    "No browser available to open Discord."
                 }
                 .into();
             }
