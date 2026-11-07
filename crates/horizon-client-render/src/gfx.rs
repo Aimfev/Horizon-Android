@@ -1359,6 +1359,25 @@ fn backends_name(backends: wgpu::Backends) -> &'static str {
 fn is_software(kind: wgpu::DeviceType) -> bool {
     kind == wgpu::DeviceType::Cpu
 }
+/// Whether an adapter is a PowerVR/Imagination GPU (e.g. IMG BXM-8-256 on Dimensity 7025 / HONOR X9c Smart).
+/// On Android, vendor Vulkan drivers for PowerVR GPUs frequently crash during swapchain or
+/// pipeline initialization, whereas OpenGL ES is stable.
+#[allow(dead_code)]
+pub(crate) fn is_powervr_adapter(name: &str, vendor: u32, driver: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let driver = driver.to_ascii_lowercase();
+    vendor == 0x1010
+        || name.contains("powervr")
+        || name.contains("bxm")
+        || name.contains("b-series")
+        || name.contains("rogue")
+        || driver.contains("powervr")
+        || driver.contains("img")
+}
+#[cfg(target_os = "android")]
+fn is_powervr(info: &wgpu::AdapterInfo) -> bool {
+    is_powervr_adapter(&info.name, info.vendor, &info.driver)
+}
 /// A device and what it came from.
 struct Opened {
     instance: wgpu::Instance,
@@ -1573,6 +1592,13 @@ async fn open_backend(
     }
     describe_adapter(&adapter);
     let info = adapter.get_info();
+    #[cfg(target_os = "android")]
+    if backends == wgpu::Backends::VULKAN && is_powervr(&info) {
+        return Err(NoDevice::Failed(format!(
+            "{name}: PowerVR/IMG Vulkan driver ({}) is unstable on Android; falling back to OpenGL ES",
+            info.name
+        )));
+    }
     let limits = adapter.limits();
     if let Err(e) = check_layers(&adapter, layers) {
         return Err(NoDevice::Failed(format!("{name}: {e}")));
@@ -9680,6 +9706,23 @@ mod tests {
         assert!(!is_software(wgpu::DeviceType::DiscreteGpu));
         assert!(!is_software(wgpu::DeviceType::IntegratedGpu));
         assert!(!is_software(wgpu::DeviceType::VirtualGpu));
+    }
+    #[test]
+    fn powervr_adapter_detection() {
+        use super::is_powervr_adapter;
+        assert!(is_powervr_adapter("IMG BXM-8-256", 0x1010, "PowerVR DDK"));
+        assert!(is_powervr_adapter(
+            "PowerVR Rogue GE8320",
+            0x1010,
+            "vulkan.powervr.so"
+        ));
+        assert!(is_powervr_adapter("B-Series BXM", 0, ""));
+        assert!(!is_powervr_adapter(
+            "Qualcomm Adreno 710",
+            0x5143,
+            "Qualcomm driver"
+        ));
+        assert!(!is_powervr_adapter("Mali-G57 MC2", 0x13b5, "ARM"));
     }
     #[test]
     fn auto_tries_vulkan_then_directx_12_then_opengl() {
