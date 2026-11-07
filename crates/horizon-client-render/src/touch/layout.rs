@@ -529,7 +529,7 @@ fn default_goy_preset_desc() -> String {
     "Custom layout with more options".into()
 }
 fn default_floating_pos() -> [f32; 2] {
-    [0.44, 0.05]
+    [0.02, 0.03]
 }
 fn default_pointer_scale() -> f32 {
     1.0
@@ -765,6 +765,11 @@ impl Settings {
                 sprint.center = [0.72, 0.78];
             }
         }
+        if (s.floating_menu_pos[0] - 0.44).abs() < 0.001
+            && (s.floating_menu_pos[1] - 0.05).abs() < 0.001
+        {
+            s.floating_menu_pos = default_floating_pos();
+        }
         s
     }
     pub fn sanitize(&mut self) {
@@ -915,7 +920,7 @@ impl Settings {
         for (i, v) in self.floating_menu_pos.iter_mut().enumerate() {
             let def = default_floating_pos()[i];
             *v = if v.is_finite() {
-                v.clamp(0.04, 0.94)
+                v.clamp(0.005, 0.96)
             } else {
                 def
             };
@@ -1385,6 +1390,209 @@ impl Settings {
         })
     }
 
+    /// Finds an existing user preset in `style` with the same name (case-insensitive) or sanitized ID.
+    pub fn find_preset_by_name(
+        game_home: &std::path::Path,
+        style: ControlStyle,
+        desired_name: &str,
+    ) -> Option<PresetMeta> {
+        let trimmed = desired_name.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+            return None;
+        }
+        let clean = Self::sanitize_profile_name(trimmed);
+        Self::list_presets(game_home, style)
+            .into_iter()
+            .find(|p| !p.is_default && (p.name.trim().eq_ignore_ascii_case(trimmed) || p.id == clean))
+    }
+
+    /// Saves the current layout under `name`, replacing the existing preset if one with the same
+    /// name already exists (so duplicate preset names are never created).
+    pub fn save_or_replace_preset_by_name(
+        &mut self,
+        game_home: &std::path::Path,
+        name: &str,
+        description: &str,
+    ) -> std::io::Result<PresetMeta> {
+        let style = self.control_style;
+        if let Some(existing) = Self::find_preset_by_name(game_home, style, name) {
+            let display_name: String = name.trim().chars().take(48).collect();
+            let display_desc: String = if description.trim().is_empty() {
+                existing.description.clone()
+            } else {
+                description.trim().chars().take(120).collect()
+            };
+            self.preset_id = existing.id.clone();
+            self.active_profile = existing.id.clone();
+            self.preset_name = display_name.clone();
+            self.preset_description = display_desc.clone();
+            match style {
+                ControlStyle::Mcpe => self.active_mcpe_preset = existing.id.clone(),
+                ControlStyle::GoyControl => self.active_goy_preset = existing.id.clone(),
+            }
+            self.sanitize();
+            let target = Self::system_dir(game_home, style).join(format!("{}.json", existing.id));
+            self.save_to(&target)?;
+            self.save_to(&game_home.join("horizon-touch.json"))?;
+            return Ok(PresetMeta {
+                id: existing.id,
+                name: display_name,
+                description: display_desc,
+                system: style,
+                is_default: false,
+            });
+        }
+        self.save_new_preset(game_home, name, description)
+    }
+
+    /// Copies `source_id` to `new_name`, replacing an existing preset with the same name if confirmed.
+    pub fn copy_or_replace_preset_by_name(
+        game_home: &std::path::Path,
+        style: ControlStyle,
+        source_id: &str,
+        new_name: &str,
+        new_description: &str,
+    ) -> std::io::Result<PresetMeta> {
+        if let Some(existing) = Self::find_preset_by_name(game_home, style, new_name) {
+            let display_name: String = new_name.trim().chars().take(48).collect();
+            let display_desc: String = if new_description.trim().is_empty() {
+                existing.description.clone()
+            } else {
+                new_description.trim().chars().take(120).collect()
+            };
+            let mut duplicated = Self::load_preset(game_home, style, source_id);
+            duplicated.control_style = style;
+            duplicated.preset_id = existing.id.clone();
+            duplicated.active_profile = existing.id.clone();
+            duplicated.preset_name = display_name.clone();
+            duplicated.preset_description = display_desc.clone();
+            match style {
+                ControlStyle::Mcpe => duplicated.active_mcpe_preset = existing.id.clone(),
+                ControlStyle::GoyControl => duplicated.active_goy_preset = existing.id.clone(),
+            }
+            duplicated.sanitize();
+            let target = Self::system_dir(game_home, style).join(format!("{}.json", existing.id));
+            duplicated.save_to(&target)?;
+            return Ok(PresetMeta {
+                id: existing.id,
+                name: display_name,
+                description: display_desc,
+                system: style,
+                is_default: false,
+            });
+        }
+        Self::copy_preset(game_home, style, source_id, new_name, new_description)
+    }
+
+    /// Automatically detects whether a JSON control file belongs to `MCPE` or `GoyControl`.
+    pub fn detect_control_style(value: &serde_json::Value, parsed: &Self) -> ControlStyle {
+        if let Some(raw_style) = value.get("control_style").and_then(|v| v.as_str()) {
+            if raw_style.eq_ignore_ascii_case("goy-control")
+                || raw_style.eq_ignore_ascii_case("goycontrol")
+            {
+                return ControlStyle::GoyControl;
+            }
+            if raw_style.eq_ignore_ascii_case("mcpe") {
+                return ControlStyle::Mcpe;
+            }
+        }
+        let has_goy_features = parsed.custom_buttons.iter().any(|b| {
+            !b.second_key.is_empty()
+                || !b.third_key.is_empty()
+                || b.layouts.iter().any(|p| p.use_goy_style)
+        }) || parsed.button_visibility[Control::Jump as usize] == 2;
+        if has_goy_features {
+            ControlStyle::GoyControl
+        } else {
+            parsed.control_style
+        }
+    }
+
+    /// Detects the control system (`MCPE` vs `GoyControl`) of an imported control JSON buffer,
+    /// saves it in the proper directory (`controls/mcpe/` or `controls/goycontrol/`), and activates it.
+    pub fn detect_and_import_preset(
+        game_home: &std::path::Path,
+        bytes: &[u8],
+        file_name: &str,
+    ) -> std::result::Result<PresetMeta, String> {
+        let value: serde_json::Value = serde_json::from_slice(bytes)
+            .map_err(|e| format!("Invalid control JSON file: {e}"))?;
+        let mut parsed: Self = serde_json::from_value(value.clone())
+            .map_err(|e| format!("Unrecognized control preset format: {e}"))?;
+        let style = Self::detect_control_style(&value, &parsed);
+        Self::ensure_system_storage(game_home, style);
+
+        let stem = file_name
+            .trim()
+            .strip_suffix(".json")
+            .unwrap_or(file_name.trim())
+            .strip_prefix("horizon-controls-")
+            .unwrap_or(
+                file_name
+                    .trim()
+                    .strip_suffix(".json")
+                    .unwrap_or(file_name.trim()),
+            );
+        let raw_name = if !parsed.preset_name.trim().is_empty()
+            && !parsed.preset_name.trim().eq_ignore_ascii_case("default")
+        {
+            parsed.preset_name.trim().to_owned()
+        } else if !stem.trim().is_empty() && !stem.trim().eq_ignore_ascii_case("default") {
+            stem.trim().replace('-', " ")
+        } else {
+            format!("Imported {}", style.label())
+        };
+        let display_name: String = raw_name.chars().take(48).collect();
+        let display_desc: String = if parsed.preset_description.trim().is_empty()
+            || parsed.preset_description == default_mcpe_preset_desc()
+            || parsed.preset_description == default_goy_preset_desc()
+        {
+            format!("Imported {} control preset", style.label())
+        } else {
+            parsed.preset_description.trim().chars().take(120).collect()
+        };
+
+        let target_id = if let Some(existing) = Self::find_preset_by_name(game_home, style, &display_name) {
+            existing.id
+        } else {
+            Self::allocate_unique_preset_id(game_home, style, &display_name)
+        };
+
+        parsed.control_style = style;
+        parsed.preset_id = target_id.clone();
+        parsed.active_profile = target_id.clone();
+        parsed.preset_name = display_name.clone();
+        parsed.preset_description = display_desc.clone();
+
+        let current_touch_path = game_home.join("horizon-touch.json");
+        let prev = Self::load_from(&current_touch_path);
+        parsed.active_mcpe_preset = if style == ControlStyle::Mcpe {
+            target_id.clone()
+        } else {
+            prev.active_mcpe_preset
+        };
+        parsed.active_goy_preset = if style == ControlStyle::GoyControl {
+            target_id.clone()
+        } else {
+            prev.active_goy_preset
+        };
+        parsed.sanitize();
+
+        let dest = Self::system_dir(game_home, style).join(format!("{target_id}.json"));
+        parsed.save_to(&dest).map_err(|e| e.to_string())?;
+        parsed
+            .save_to(&current_touch_path)
+            .map_err(|e| e.to_string())?;
+
+        Ok(PresetMeta {
+            id: target_id,
+            name: display_name,
+            description: display_desc,
+            system: style,
+            is_default: false,
+        })
+    }
+
     pub fn list_profiles(game_home: &std::path::Path) -> Vec<String> {
         let active = Self::load_from(&game_home.join("horizon-touch.json"));
         Self::list_presets(game_home, active.control_style)
@@ -1830,7 +2038,7 @@ impl Settings {
     }
     pub fn export_profile(
         &self,
-        root_home: &std::path::Path,
+        _root_home: &std::path::Path,
         game_home: &std::path::Path,
         name: &str,
     ) -> std::io::Result<std::path::PathBuf> {
@@ -1838,9 +2046,9 @@ impl Settings {
         if clean != "default" {
             let _ = self.save_profile(game_home, &clean);
         }
-        let reports = root_home.join("performance");
-        std::fs::create_dir_all(&reports)?;
-        let exported = reports.join(format!("horizon-controls-{clean}.json"));
+        let dir = Self::system_dir(game_home, self.control_style);
+        std::fs::create_dir_all(&dir)?;
+        let exported = dir.join(format!("{clean}.json"));
         self.save_to(&exported)?;
         Ok(exported)
     }

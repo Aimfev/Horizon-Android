@@ -171,10 +171,18 @@ impl Surface for NativeSurface {
             maximum_frame_latency: (caps.min_image_count - 1)..=(max_image_count - 1), // Note this can't underflow since both `min_image_count` is at least one and we already patched `max_image_count`.
             current_extent,
             usage: conv::map_vk_image_usage(caps.supported_usage_flags),
-            present_modes: raw_present_modes
-                .into_iter()
-                .flat_map(conv::map_vk_present_mode)
-                .collect(),
+            present_modes: {
+                #[allow(unused_mut)]
+                let mut modes: Vec<wgt::PresentMode> = raw_present_modes
+                    .into_iter()
+                    .flat_map(conv::map_vk_present_mode)
+                    .collect();
+                #[cfg(target_os = "android")]
+                if !modes.contains(&wgt::PresentMode::Immediate) {
+                    modes.push(wgt::PresentMode::Immediate);
+                }
+                modes
+            },
             composite_alpha_modes: conv::map_vk_composite_alpha(caps.supported_composite_alpha),
         })
     }
@@ -208,10 +216,59 @@ impl Surface for NativeSurface {
             raw_view_formats.push(original_format);
         }
 
+        #[cfg(target_os = "android")]
+        let (min_image_count, vk_present_mode) = {
+            let mut mode = conv::map_present_mode(config.present_mode);
+            let mut count = config.maximum_frame_latency + 1;
+            if matches!(
+                config.present_mode,
+                wgt::PresentMode::Immediate | wgt::PresentMode::Mailbox
+            ) {
+                let supported = unsafe {
+                    self.functor.get_physical_device_surface_present_modes(
+                        device.shared.physical_device,
+                        self.raw,
+                    )
+                }
+                .unwrap_or_default();
+                if mode == vk::PresentModeKHR::IMMEDIATE && !supported.contains(&mode) {
+                    // Android's Vulkan loader only sets ANativeWindow_setSwapInterval(window, 0)
+                    // for VK_PRESENT_MODE_MAILBOX_KHR and never exposes IMMEDIATE natively.
+                    if supported.contains(&vk::PresentModeKHR::MAILBOX) {
+                        mode = vk::PresentModeKHR::MAILBOX;
+                    } else if supported.contains(&vk::PresentModeKHR::FIFO_RELAXED) {
+                        mode = vk::PresentModeKHR::FIFO_RELAXED;
+                    } else {
+                        mode = vk::PresentModeKHR::FIFO;
+                    }
+                }
+                if mode == vk::PresentModeKHR::MAILBOX {
+                    count = count.max(4);
+                }
+                if let Ok(caps) = unsafe {
+                    self.functor.get_physical_device_surface_capabilities(
+                        device.shared.physical_device,
+                        self.raw,
+                    )
+                } {
+                    count = count.max(caps.min_image_count);
+                    if caps.max_image_count > 0 {
+                        count = count.min(caps.max_image_count);
+                    }
+                }
+            }
+            (count, mode)
+        };
+        #[cfg(not(target_os = "android"))]
+        let (min_image_count, vk_present_mode) = (
+            config.maximum_frame_latency + 1,
+            conv::map_present_mode(config.present_mode),
+        );
+
         let mut info = vk::SwapchainCreateInfoKHR::default()
             .flags(raw_flags)
             .surface(self.raw)
-            .min_image_count(config.maximum_frame_latency + 1) // TODO: https://github.com/gfx-rs/wgpu/issues/2869
+            .min_image_count(min_image_count) // TODO: https://github.com/gfx-rs/wgpu/issues/2869
             .image_format(original_format)
             .image_color_space(color_space)
             .image_extent(vk::Extent2D {
@@ -223,7 +280,7 @@ impl Surface for NativeSurface {
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
             .composite_alpha(conv::map_composite_alpha_mode(config.composite_alpha_mode))
-            .present_mode(conv::map_present_mode(config.present_mode))
+            .present_mode(vk_present_mode)
             .clipped(true)
             .old_swapchain(old_swapchain);
 

@@ -16,7 +16,7 @@ version = "0.0.0"
 edition = "2024"
 [workspace]
 [dependencies]
-horizon-mods = { path = "../../../crates/horizon-mods", default-features = false }
+horizon-mods = { path = "../../../crates/horizon-mods", default-features = false, features = ["index"] }
 serde_json = "1"
 sha2 = "0.10"
 ureq = { version = "2", default-features = false, features = ["tls"] }
@@ -44,6 +44,7 @@ mod android_runtime {
 #[path = "../../../../crates/horizon-client-render/src/zip.rs"] mod archive_reader;
 #[path = "../../../../crates/horizon-client/src/android/search_queue.rs"] mod search_queue;
 #[path = "../../../../crates/horizon-client/src/android/document_store.rs"] mod document_store;
+#[path = "../../../../crates/horizon-client-render/src/mod_list.rs"] mod mod_list;
 #[path = "../../../../crates/horizon-client-render/src/graphics_startup.rs"] mod graphics_startup;
 #[path = "../../../../crates/horizon-client/src/android_resources.rs"] mod android_resources;
 #[path = "../../../../crates/horizon-client/src/ui_text.rs"] mod ui_text;

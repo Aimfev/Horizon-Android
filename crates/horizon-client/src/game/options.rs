@@ -583,6 +583,13 @@ impl Game<'_> {
             has_screen: self.title.is_some() || self.screen != super::Screen::Playing,
             has_overlay: false,
         };
+        #[cfg(target_os = "android")]
+        let limit = if self.settings.max_fps >= 260 && !self.settings.vsync && self.focused {
+            self.settings.max_fps as i32
+        } else {
+            framerate_limit(self.settings.max_fps as i32, context)
+        };
+        #[cfg(not(target_os = "android"))]
         let limit = framerate_limit(self.settings.max_fps as i32, context);
         self.settings
             .horizon

@@ -141,9 +141,13 @@ pub fn android_chosen_present_mode(
     if let Some(m) = setting.filter(|m| supported.contains(m) && *m != PresentMode::Mailbox) {
         return Some(m);
     }
-    [PresentMode::Immediate, PresentMode::Fifo]
-        .into_iter()
-        .find(|mode| supported.contains(mode))
+    [
+        PresentMode::Immediate,
+        PresentMode::Mailbox,
+        PresentMode::Fifo,
+    ]
+    .into_iter()
+    .find(|mode| supported.contains(mode))
 }
 
 /// The present mode for the VSync option and Horizon's present-mode setting

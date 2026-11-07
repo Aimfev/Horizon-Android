@@ -773,7 +773,6 @@ impl Game<'_> {
         }
         #[cfg(target_os = "android")]
         batch.clip_since(start, x0, y0, x1, y1);
-        #[cfg(not(target_os = "android"))]
         batch.depth_since(start, [x0, y0, x1, y1]);
     }
     /// The survival inventory's player box (`InventoryScreen`).

@@ -4267,6 +4267,60 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
+        // Also scan horizon-mods/ and horizon-native-mods/ for any imported .hnmod bundles
+        // that aren't already listed by the compiled-in hooks.
+        let base_dir = Self::options_path();
+        for folder in [
+            base_dir.with_file_name(horizon_client::mod_list::DIR),
+            base_dir.with_file_name(horizon_client::mod_list::NATIVE_DIR),
+        ] {
+            if let Ok(rd) = std::fs::read_dir(&folder) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    if !path.extension().is_some_and(|e| e == "hnmod") {
+                        continue;
+                    }
+                    if let Ok(bundle) = horizon_mods::index::native::Bundle::read(&path) {
+                        let id = bundle.manifest.id;
+                        if !mods.iter().any(|m| m.id == id) {
+                            let prefix = format!("mixins/{id}/horizon-mixin.toml");
+                            let (title, desc) = bundle
+                                .files
+                                .get(&prefix)
+                                .and_then(|b| std::str::from_utf8(b).ok())
+                                .and_then(|s| toml::from_str::<toml::Value>(s).ok())
+                                .map(|v| {
+                                    let name = v
+                                        .get("mod")
+                                        .and_then(|m| m.get("name"))
+                                        .and_then(|n| n.as_str())
+                                        .unwrap_or(&id)
+                                        .to_owned();
+                                    let d = v
+                                        .get("mod")
+                                        .and_then(|m| m.get("description"))
+                                        .and_then(|n| n.as_str())
+                                        .unwrap_or("Imported Horizon native mod (.hnmod)")
+                                        .to_owned();
+                                    (format!("{name} {}", bundle.manifest.version), d)
+                                })
+                                .unwrap_or_else(|| {
+                                    (
+                                        format!("{id} {}", bundle.manifest.version),
+                                        "Imported Horizon native mod (.hnmod)".into(),
+                                    )
+                                });
+                            mods.push(NativeMod {
+                                id,
+                                title,
+                                description: desc,
+                                keys: Vec::new(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
         // A WebAssembly mod of the same id doesn't run (`start_mods`): the
         // native row stands for it, and alone toggles its `mod.<id>` line.
         self.settings

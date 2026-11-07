@@ -744,7 +744,7 @@ impl Game<'_> {
                     description,
                 } => {
                     let cur_style = self.pad.touch.settings.control_style;
-                    if let Ok(meta) = horizon_client::touch::Settings::copy_preset(
+                    if let Ok(meta) = horizon_client::touch::Settings::copy_or_replace_preset_by_name(
                         std::path::Path::new("."),
                         cur_style,
                         &source_id,

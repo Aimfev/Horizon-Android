@@ -61,3 +61,51 @@ pub fn open(
         Ok((file, name))
     })
 }
+
+/// Open a newly created document URI (`ACTION_CREATE_DOCUMENT`) for writing.
+pub fn create_output(
+    env: &mut JNIEnv<'_>,
+    activity: &JObject<'_>,
+    uri: &str,
+) -> Result<std::fs::File, Box<dyn std::error::Error + Send + Sync>> {
+    use jni::objects::JValue;
+    use std::os::fd::FromRawFd;
+    env.with_local_frame(16, |env| {
+        let resolver = env
+            .call_method(
+                activity,
+                "getContentResolver",
+                "()Landroid/content/ContentResolver;",
+                &[],
+            )?
+            .l()?;
+        let text = JObject::from(env.new_string(uri)?);
+        let uri_obj = env
+            .call_static_method(
+                "android/net/Uri",
+                "parse",
+                "(Ljava/lang/String;)Landroid/net/Uri;",
+                &[JValue::Object(&text)],
+            )?
+            .l()?;
+        let mode = JObject::from(env.new_string("wt")?);
+        let fd = env
+            .call_method(
+                &resolver,
+                "openFileDescriptor",
+                "(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;",
+                &[JValue::Object(&uri_obj), JValue::Object(&mode)],
+            )?
+            .l()?;
+        if fd.is_null() {
+            return Err("Document provider returned no writable file".into());
+        }
+        let raw = env.call_method(&fd, "detachFd", "()I", &[])?.i()?;
+        if raw < 0 {
+            return Err("Document provider returned an invalid descriptor".into());
+        }
+        let file = unsafe { std::fs::File::from_raw_fd(raw) };
+        env.call_method(&fd, "close", "()V", &[])?;
+        Ok(file)
+    })
+}

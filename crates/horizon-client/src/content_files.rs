@@ -30,7 +30,9 @@ impl Kind {
     pub fn accepts(self, name: &str) -> bool {
         let lower = name.to_ascii_lowercase();
         match self {
-            Self::Mods => lower.ends_with(".hmod"),
+            Self::Mods => {
+                lower.ends_with(".hmod") || lower.ends_with(".hnmod") || lower.ends_with(".jar")
+            }
             Self::Packs => lower.ends_with(".zip"),
             Self::Shaders => lower.ends_with(".zip") || lower.ends_with(".hshader"),
         }
@@ -111,7 +113,12 @@ pub fn validate(
                 && ["vsh", "fsh", "glsl", "csh", "gsh", "tcs", "tes"]
                     .iter()
                     .any(|ext| raw.ends_with(&format!(".{ext}")));
-        manifest |= raw == "horizon-mod.toml";
+        manifest |= raw == "horizon-mod.toml"
+            || raw == "horizon-native.json"
+            || raw == "fabric.mod.json"
+            || raw == "quilt.mod.json"
+            || raw == "META-INF/neoforge.mods.toml"
+            || raw == "META-INF/mods.toml";
         let expected = entry.size();
         if raw == "pack.mcmeta" && expected > 1 << 20 {
             return Err("Pack metadata is too large".into());
@@ -157,11 +164,69 @@ pub fn validate(
         .into());
     }
     if kind == Kind::Mods {
-        // Accept both sandboxed code and upstream content-only packages. The
-        // shared parser requires mod.wasm unless the manifest grants registries.
-        horizon_mods::Package::read(path).map_err(|e| format!("Invalid Horizon mod: {e}"))?;
+        read_mod_archive_id(path, name)?;
     }
     Ok(kind == Kind::Shaders && native_shader)
+}
+
+/// Validates a `.hmod`, `.hnmod`, or `.jar` archive at `path` and returns `(canonical_mod_id, extension)`.
+pub fn read_mod_archive_id(path: &Path, original_name: &str) -> crate::Result<(String, &'static str)> {
+    let lower = original_name.to_ascii_lowercase();
+    let file = std::fs::File::open(path)?;
+    let mut zip = zip::ZipArchive::new(file)?;
+    let has_native_json = zip.by_name("horizon-native.json").is_ok();
+    let has_hmod_toml = zip.by_name("horizon-mod.toml").is_ok();
+
+    if lower.ends_with(".hnmod") || (has_native_json && !has_hmod_toml) {
+        if let Ok(bundle) = horizon_mods::index::native::Bundle::read(path) {
+            return Ok((bundle.manifest.id, "hnmod"));
+        }
+        if let Ok(entry) = zip.by_name("horizon-native.json") {
+            let mut buf = Vec::new();
+            entry.take(65536).read_to_end(&mut buf)?;
+            let val: serde_json::Value = serde_json::from_slice(&buf)
+                .map_err(|e| format!("Invalid horizon-native.json: {e}"))?;
+            if let Some(id) = val.get("id").and_then(|v| v.as_str()) {
+                let clean = id.trim();
+                if plain_name(clean) {
+                    return Ok((clean.to_owned(), "hnmod"));
+                }
+            }
+        }
+        if has_hmod_toml {
+            let pkg = horizon_mods::Package::read(path)
+                .map_err(|e| format!("Invalid Horizon mod: {e}"))?;
+            return Ok((pkg.manifest.id, "hmod"));
+        }
+        return Err("Invalid .hnmod package: missing valid horizon-native.json manifest".into());
+    }
+
+    if lower.ends_with(".jar") && !has_hmod_toml {
+        if let Ok(entry) = zip.by_name("fabric.mod.json") {
+            let mut buf = Vec::new();
+            if entry.take(262_144).read_to_end(&mut buf).is_ok()
+                && let Ok(val) = serde_json::from_slice::<serde_json::Value>(&buf)
+                && let Some(id) = val.get("id").and_then(|v| v.as_str())
+                && plain_name(id.trim())
+            {
+                return Ok((id.trim().to_owned(), "jar"));
+            }
+        }
+        let stem = Path::new(original_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("imported_mod");
+        let sanitized: String = stem
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c.to_ascii_lowercase() } else { '_' })
+            .collect();
+        let id = if sanitized.is_empty() { "imported_mod".into() } else { sanitized };
+        return Ok((id, "jar"));
+    }
+
+    // Standard .hmod (sandboxed WASM or content-only package)
+    let pkg = horizon_mods::Package::read(path).map_err(|e| format!("Invalid Horizon mod: {e}"))?;
+    Ok((pkg.manifest.id, "hmod"))
 }
 pub fn copy_bounded(
     input: &mut impl Read,

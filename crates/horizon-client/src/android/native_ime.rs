@@ -34,6 +34,7 @@ enum Command {
     Bounds,
     ImportDocument,
     ImportFolderTree,
+    CreateDocument(String, String),
     Screen(bool, bool),
 }
 struct Ui {
@@ -422,6 +423,59 @@ impl Ui {
                     crate::documents::picker_failed("No Android folder picker is available");
                 }
             }
+            Command::CreateDocument(suggested_name, mime_type) => {
+                let result = (|| -> jni::errors::Result<()> {
+                    let action =
+                        JObject::from(env.new_string("android.intent.action.CREATE_DOCUMENT")?);
+                    let intent = env.new_object(
+                        "android/content/Intent",
+                        "(Ljava/lang/String;)V",
+                        &[JValue::Object(&action)],
+                    )?;
+                    let category =
+                        JObject::from(env.new_string("android.intent.category.OPENABLE")?);
+                    env.call_method(
+                        &intent,
+                        "addCategory",
+                        "(Ljava/lang/String;)Landroid/content/Intent;",
+                        &[JValue::Object(&category)],
+                    )?;
+                    let mime = JObject::from(env.new_string(&mime_type)?);
+                    env.call_method(
+                        &intent,
+                        "setType",
+                        "(Ljava/lang/String;)Landroid/content/Intent;",
+                        &[JValue::Object(&mime)],
+                    )?;
+                    let extra_title =
+                        JObject::from(env.new_string("android.intent.extra.TITLE")?);
+                    let title_val = JObject::from(env.new_string(&suggested_name)?);
+                    env.call_method(
+                        &intent,
+                        "putExtra",
+                        "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;",
+                        &[JValue::Object(&extra_title), JValue::Object(&title_val)],
+                    )?;
+                    env.call_method(
+                        &intent,
+                        "addFlags",
+                        "(I)Landroid/content/Intent;",
+                        &[JValue::Int(1 | 2)],
+                    )?;
+                    env.call_method(
+                        &self.activity,
+                        "startActivityForResult",
+                        "(Landroid/content/Intent;I)V",
+                        &[JValue::Object(&intent), JValue::Int(4103)],
+                    )?;
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    let _ = env.exception_clear();
+                    log::warn!("Create document picker: {error}");
+                    crate::documents::picker_failed("No Android file save picker is available");
+                }
+            }
             Command::Show(text, secret) => {
                 env.call_method(
                     &self.edit,
@@ -776,6 +830,16 @@ pub fn pick_document_tree() -> bool {
         return false;
     };
     ui.enqueue(Command::ImportFolderTree);
+    true
+}
+pub fn create_document(suggested_name: &str, mime_type: &str) -> bool {
+    let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
+        return false;
+    };
+    ui.enqueue(Command::CreateDocument(
+        suggested_name.to_owned(),
+        mime_type.to_owned(),
+    ));
     true
 }
 

@@ -22,6 +22,9 @@ struct Request {
     kind: Kind,
     appearance: Option<crate::skins::library::Kind>,
     target_dir: Option<PathBuf>,
+    control_import: bool,
+    export_bytes: Option<(Vec<u8>, String)>,
+    export_source_path: Option<(PathBuf, String)>,
     home: PathBuf,
     cache: PathBuf,
 }
@@ -120,6 +123,9 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         kind,
         appearance: None,
         target_dir: None,
+        control_import: false,
+        export_bytes: None,
+        export_source_path: None,
         home,
         cache,
     });
@@ -150,6 +156,9 @@ pub fn begin_appearance(
         kind: Kind::Packs,
         appearance: Some(kind),
         target_dir: None,
+        control_import: false,
+        export_bytes: None,
+        export_source_path: None,
         home,
         cache,
     });
@@ -175,6 +184,9 @@ pub fn begin_into_dir(target_dir: PathBuf) -> std::result::Result<(), String> {
         kind: Kind::Packs,
         appearance: None,
         target_dir: Some(target_dir),
+        control_import: false,
+        export_bytes: None,
+        export_source_path: None,
         home: PathBuf::new(),
         cache,
     });
@@ -200,6 +212,9 @@ pub fn begin_folder_into_dir(target_dir: PathBuf) -> std::result::Result<(), Str
         kind: Kind::Packs,
         appearance: None,
         target_dir: Some(target_dir),
+        control_import: false,
+        export_bytes: None,
+        export_source_path: None,
         home: PathBuf::new(),
         cache,
     });
@@ -211,10 +226,116 @@ pub fn begin_folder_into_dir(target_dir: PathBuf) -> std::result::Result<(), Str
     Ok(())
 }
 
-/// Exports or shares a local file via Android MediaStore / SAF DocumentsUI.
+/// Opens Android's `ACTION_OPEN_DOCUMENT` picker to import a control preset JSON file,
+/// automatically detect whether it is an `MCPE` or `GoyControl` layout, and save it in the proper directory.
+pub fn begin_control_import(game_home: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .unwrap_or_else(|| game_home.clone())
+        .join("control-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        kind: Kind::Packs,
+        appearance: None,
+        target_dir: None,
+        control_import: true,
+        export_bytes: None,
+        export_source_path: None,
+        home: game_home,
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice(
+        "Choose a control preset (.json) — auto-detects MCPE or GoyControl",
+        false,
+    );
+    Ok(())
+}
+
+/// Opens Android's `ACTION_CREATE_DOCUMENT` system file manager so the user can pick the save location
+/// for their exported control preset JSON.
+pub fn begin_control_export(
+    game_home: PathBuf,
+    suggested_name: String,
+    bytes: Vec<u8>,
+) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current file operation first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .unwrap_or_else(|| game_home.clone())
+        .join("control-exports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        kind: Kind::Packs,
+        appearance: None,
+        target_dir: None,
+        control_import: false,
+        export_bytes: Some((bytes, suggested_name.clone())),
+        export_source_path: None,
+        home: game_home,
+        cache,
+    });
+    if !crate::native_ime::create_document(&suggested_name, "application/json") {
+        picker_failed("Android file save picker is unavailable");
+        return Err("Android file save picker is unavailable".into());
+    }
+    notice(
+        format!("Choose where to save '{suggested_name}' in file manager"),
+        false,
+    );
+    Ok(())
+}
+
+/// Opens Android's `ACTION_CREATE_DOCUMENT` system file manager so the user can choose where to
+/// save/paste any exported file or folder `.zip` archive.
+pub fn begin_file_export(
+    home: PathBuf,
+    source_path: PathBuf,
+    suggested_name: String,
+    mime_type: String,
+) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current file operation first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .unwrap_or_else(|| home.clone())
+        .join("file-exports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        kind: Kind::Packs,
+        appearance: None,
+        target_dir: None,
+        control_import: false,
+        export_bytes: None,
+        export_source_path: Some((source_path, suggested_name.clone())),
+        home,
+        cache,
+    });
+    if !crate::native_ime::create_document(&suggested_name, &mime_type) {
+        picker_failed("Android file save picker is unavailable");
+        return Err("Android file save picker is unavailable".into());
+    }
+    notice(
+        format!("Select where to save '{suggested_name}' in file manager"),
+        false,
+    );
+    Ok(())
+}
+
+/// Exports a local file by opening Android's system file save picker (`ACTION_CREATE_DOCUMENT`)
+/// so the user chooses where to save it (never dumping into `logs` or `reports`).
 pub fn export_file(
     home: &std::path::Path,
-    profile: u32,
+    _profile: u32,
     file_path: &std::path::Path,
 ) -> std::result::Result<String, String> {
     let meta = std::fs::symlink_metadata(file_path).map_err(|e| e.to_string())?;
@@ -225,75 +346,74 @@ pub fn export_file(
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or("Invalid filename")?;
-    if file_name.to_ascii_lowercase().ends_with(".png") {
+    let lower = file_name.to_ascii_lowercase();
+    if lower.ends_with(".png") {
         let _ = crate::gallery::save(file_path);
-        return Ok(format!(
-            "Exporting '{file_name}' to Pictures/HorizonAndroid..."
-        ));
     }
-    let rel_str = file_path
-        .strip_prefix(home)
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let saf_folder = if rel_str.contains("horizon-mods") {
-        crate::document_store::folder_id(profile, "mods")
-    } else if rel_str.contains("resourcepacks") {
-        crate::document_store::folder_id(profile, "packs")
-    } else if rel_str.contains("shaderpacks") {
-        crate::document_store::folder_id(profile, "shaders")
-    } else if rel_str.contains("saves") {
-        crate::document_store::folder_id(profile, "worlds")
-    } else if rel_str.contains("performance") {
-        "reports".into()
+    let mime = if lower.ends_with(".zip")
+        || lower.ends_with(".hmod")
+        || lower.ends_with(".hnmod")
+        || lower.ends_with(".jar")
+        || lower.ends_with(".hshader")
+    {
+        "application/zip"
+    } else if lower.ends_with(".json") {
+        "application/json"
+    } else if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".txt") || lower.ends_with(".toml") || lower.ends_with(".log") {
+        "text/plain"
     } else {
-        crate::document_store::ROOT.into()
+        "application/octet-stream"
     };
-    if crate::platform::open_documents(&saf_folder) {
-        Ok(format!(
-            "Opened '{file_name}' in Android Files for sharing/export."
-        ))
-    } else {
-        Ok(format!(
-            "Ready to export '{file_name}' via system Files > Horizon Android."
-        ))
+    match begin_file_export(
+        home.to_path_buf(),
+        file_path.to_path_buf(),
+        file_name.to_owned(),
+        mime.to_owned(),
+    ) {
+        Ok(()) => Ok(format!(
+            "Select where to save '{file_name}' (also copied to File Manager clipboard for Paste)."
+        )),
+        Err(_) => Ok(format!(
+            "Copied '{file_name}' to clipboard — open destination folder and tap Paste."
+        )),
     }
 }
 
-/// Zips a folder and opens Android file system to export/save the zip.
+/// Zips a folder into `.export-staging/<folder>.zip`, opens Android's system file picker to choose
+/// where to save it, and returns `(zip_path, zip_name, status_message)` so callers can also place
+/// `zip_path` on the in-app File Manager clipboard for `Paste`.
+pub fn export_folder_prepared(
+    home: &std::path::Path,
+    profile: u32,
+    dir_path: &std::path::Path,
+) -> std::result::Result<(PathBuf, String, String), String> {
+    let (zip_path, zip_name) = crate::document_store::export_folder_zip(home, profile, dir_path)?;
+    let msg = match begin_file_export(
+        home.to_path_buf(),
+        zip_path.clone(),
+        zip_name.clone(),
+        "application/zip".into(),
+    ) {
+        Ok(()) => format!(
+            "Created '{zip_name}'. Choose where to save it, or open any folder here and tap Paste."
+        ),
+        Err(_) => format!(
+            "Created '{zip_name}' on clipboard — select any destination folder and tap Paste."
+        ),
+    };
+    Ok((zip_path, zip_name, msg))
+}
+
+/// Zips a folder and opens Android file system picker to choose where to save/paste the zip.
 pub fn export_folder(
     home: &std::path::Path,
     profile: u32,
     dir_path: &std::path::Path,
 ) -> std::result::Result<String, String> {
-    let (zip_path, zip_name) = crate::document_store::export_folder_zip(home, profile, dir_path)?;
-    let rel_str = zip_path
-        .strip_prefix(home)
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let saf_folder = if rel_str.contains("horizon-mods") {
-        crate::document_store::folder_id(profile, "mods")
-    } else if rel_str.contains("resourcepacks") {
-        crate::document_store::folder_id(profile, "packs")
-    } else if rel_str.contains("shaderpacks") {
-        crate::document_store::folder_id(profile, "shaders")
-    } else if rel_str.contains("saves") {
-        crate::document_store::folder_id(profile, "worlds")
-    } else if rel_str.contains("performance") {
-        "reports".into()
-    } else {
-        crate::document_store::ROOT.into()
-    };
-    if crate::platform::open_documents(&saf_folder) {
-        Ok(format!(
-            "Created '{zip_name}' and opened Android file system to save it."
-        ))
-    } else {
-        Ok(format!(
-            "Created '{zip_name}' in folder, ready to export via Files."
-        ))
-    }
+    let (_, _, msg) = export_folder_prepared(home, profile, dir_path)?;
+    Ok(msg)
 }
 
 /// Called by the approved Activity result bridge, never from a game tick.
@@ -307,7 +427,7 @@ pub extern "system" fn document_result(
     result: i32,
     uri: JString<'_>,
 ) {
-    if request != 4101 && request != 4102 {
+    if request != 4101 && request != 4102 && request != 4103 {
         return;
     }
     let pending = STATE
@@ -320,7 +440,18 @@ pub extern "system" fn document_result(
         return;
     };
     if result != -1 || uri.is_null() {
-        notice("Import cancelled", false);
+        if request == 4103 {
+            if let Some((_, name)) = pending.export_source_path {
+                notice(
+                    format!("'{name}' is on clipboard — open any folder in File Manager and tap Paste."),
+                    false,
+                );
+            } else {
+                notice("Export cancelled", false);
+            }
+        } else {
+            notice("Import cancelled", false);
+        }
         return;
     }
     let setup = (|| -> jni::errors::Result<_> {
@@ -335,6 +466,52 @@ pub extern "system" fn document_result(
     };
     if !uri.starts_with("content://") || uri.len() > 8192 {
         notice("Unsupported document URI", false);
+        return;
+    }
+
+    if request == 4103 {
+        STATE.lock().unwrap_or_else(|e| e.into_inner()).working = true;
+        let spawned = std::thread::Builder::new()
+            .name("File export".into())
+            .spawn(move || {
+                let result = (|| -> Result<()> {
+                    use std::io::Write;
+                    let mut env = vm.attach_current_thread()?;
+                    let opened =
+                        crate::document_bridge::create_output(&mut env, activity.as_obj(), &uri);
+                    if opened.is_err() {
+                        let _ = env.exception_clear();
+                    }
+                    let mut output = opened.map_err(|e| e.to_string())?;
+                    if let Some((bytes, suggested_name)) = pending.export_bytes {
+                        output.write_all(&bytes)?;
+                        output.sync_all()?;
+                        notice(
+                            format!("Saved '{suggested_name}' to chosen location."),
+                            true,
+                        );
+                    } else if let Some((src_path, suggested_name)) = pending.export_source_path {
+                        let mut src_file = std::fs::File::open(&src_path)?;
+                        std::io::copy(&mut src_file, &mut output)?;
+                        output.sync_all()?;
+                        notice(
+                            format!("Saved '{suggested_name}' to chosen location."),
+                            true,
+                        );
+                    } else {
+                        return Err("No pending export data".into());
+                    }
+                    Ok(())
+                })();
+                STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+                if let Err(error) = result {
+                    notice(format!("Export failed: {error}"), false);
+                }
+            });
+        if let Err(error) = spawned {
+            STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+            notice(format!("Export failed: {error}"), false);
+        }
         return;
     }
 
@@ -371,6 +548,9 @@ pub extern "system" fn document_result(
                     } else {
                         env.get_string((&res_obj).into())?.into()
                     };
+                    if let Some(err_msg) = folder_name.strip_prefix("ERROR:") {
+                        return Err(err_msg.trim().to_owned().into());
+                    }
                     notice(format!("Imported folder '{folder_name}' successfully"), true);
                     Ok(())
                 })();
@@ -415,6 +595,27 @@ pub extern "system" fn document_result(
     }
 }
 fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()> {
+    if request.control_import {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        input.take(2 * 1024 * 1024).read_to_end(&mut bytes)?;
+        if CANCEL.load(Ordering::Relaxed) {
+            return Err("Import cancelled".into());
+        }
+        let meta =
+            horizon_client::touch::Settings::detect_and_import_preset(&request.home, &bytes, &name)?;
+        notice(
+            format!(
+                "Imported {} preset '{}' into {}/{}.json",
+                meta.system.label(),
+                meta.name,
+                meta.system.storage_subdir(),
+                meta.id
+            ),
+            true,
+        );
+        return Ok(());
+    }
     if let Some(target_dir) = request.target_dir {
         crate::document_store::validate_entry_name(&name)?;
         std::fs::create_dir_all(&target_dir)?;
@@ -446,6 +647,57 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             drop(output);
             if CANCEL.load(Ordering::Relaxed) {
                 return Err("Import cancelled".into());
+            }
+            let lower_name = name.to_ascii_lowercase();
+            let in_saves = target_dir
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s == "saves");
+            if in_saves && (lower_name.ends_with(".zip") || lower_name.ends_with(".mcworld")) {
+                if let Ok(Some(world_folder)) =
+                    crate::document_store::extract_world_zip_if_valid(&staged, &target_dir, &name)
+                {
+                    let _ = std::fs::remove_file(&staged);
+                    notice(
+                        format!("Imported world '{world_folder}' into Worlds."),
+                        true,
+                    );
+                    return Ok(());
+                }
+            }
+            let in_mods = target_dir
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s == "horizon-mods" || s == "horizon-native-mods");
+            if in_mods
+                && (lower_name.ends_with(".hnmod")
+                    || lower_name.ends_with(".hmod")
+                    || lower_name.ends_with(".jar"))
+            {
+                let (mod_id, ext) = content_files::read_mod_archive_id(&staged, &name)?;
+                let canon_name = format!("{mod_id}.{ext}");
+                let profile_root = target_dir.parent().unwrap_or(&target_dir);
+                let mods_dir = profile_root.join("horizon-mods");
+                std::fs::create_dir_all(&mods_dir)?;
+                let dest = mods_dir.join(&canon_name);
+                if std::fs::rename(&staged, &dest).is_err() {
+                    std::fs::copy(&staged, &dest)?;
+                    let _ = std::fs::remove_file(&staged);
+                }
+                if ext == "hnmod" {
+                    let native_dir = profile_root.join("horizon-native-mods");
+                    let _ = std::fs::create_dir_all(&native_dir);
+                    let _ = std::fs::copy(&dest, native_dir.join(&canon_name));
+                }
+                let mut on = horizon_client::mod_list::ModList::load(profile_root);
+                on.disabled.remove(&mod_id);
+                on.enabled.insert(mod_id.clone());
+                on.save(profile_root);
+                imported(
+                    format!("Imported & enabled mod '{canon_name}' ({mod_id})."),
+                    Kind::Mods,
+                );
+                return Ok(());
             }
             let dest = crate::document_store::unique_destination_path(&target_dir, &name)?;
             let final_name = dest
@@ -529,8 +781,12 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         let native_shader = content_files::validate(&staged, request.kind, &name, || {
             CANCEL.load(Ordering::Relaxed)
         })?;
+        let mut imported_mod_id: Option<(String, &'static str)> = None;
         let name = if request.kind == Kind::Mods {
-            format!("{}.hmod", horizon_mods::Package::read(&staged)?.manifest.id)
+            let (mod_id, ext) = content_files::read_mod_archive_id(&staged, &name)?;
+            let fname = format!("{mod_id}.{ext}");
+            imported_mod_id = Some((mod_id, ext));
+            fname
         } else if native_shader || name.to_ascii_lowercase().ends_with(".hshader") {
             let pack = horizon_shader_api::Pack::read(&staged)?;
             horizon_shader_api::check(&pack).map_err(|e| format!("Invalid shader pack: {e:?}"))?;
@@ -558,10 +814,26 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 false,
             );
         } else {
-            std::fs::rename(&staged, &target)?;
+            if std::fs::rename(&staged, &target).is_err() {
+                std::fs::copy(&staged, &target)?;
+                let _ = std::fs::remove_file(&staged);
+            }
+            if let Some((mod_id, ext)) = imported_mod_id {
+                if ext == "hnmod" {
+                    let native_dir = request.home.join("horizon-native-mods");
+                    let _ = std::fs::create_dir_all(&native_dir);
+                    if let Some(fname) = target.file_name() {
+                        let _ = std::fs::copy(&target, native_dir.join(fname));
+                    }
+                }
+                let mut on = horizon_client::mod_list::ModList::load(&request.home);
+                on.disabled.remove(&mod_id);
+                on.enabled.insert(mod_id);
+                on.save(&request.home);
+            }
             imported(
                 format!(
-                    "Imported {} into {}. Enable it in game settings.",
+                    "Imported {} into {} and enabled it.",
                     target.file_name().unwrap_or_default().to_string_lossy(),
                     request.kind.label()
                 ),
@@ -633,7 +905,29 @@ pub fn resolve(choice: Choice) {
                 }
             }
         }
-        std::fs::rename(&c.staged, &c.target)?;
+        if std::fs::rename(&c.staged, &c.target).is_err() {
+            std::fs::copy(&c.staged, &c.target)?;
+            let _ = std::fs::remove_file(&c.staged);
+        }
+        if c.kind == Kind::Mods
+            && let Some(profile_root) = c.target.parent().and_then(|p| p.parent())
+            && let Some(fname) = c.target.file_name().and_then(|s| s.to_str())
+        {
+            if fname.ends_with(".hnmod") {
+                let native_dir = profile_root.join("horizon-native-mods");
+                let _ = std::fs::create_dir_all(&native_dir);
+                let _ = std::fs::copy(&c.target, native_dir.join(fname));
+            }
+            let mod_id = fname
+                .strip_suffix(".hnmod")
+                .or_else(|| fname.strip_suffix(".hmod"))
+                .or_else(|| fname.strip_suffix(".jar"))
+                .unwrap_or(fname);
+            let mut on = horizon_client::mod_list::ModList::load(profile_root);
+            on.disabled.remove(mod_id);
+            on.enabled.insert(mod_id.to_owned());
+            on.save(profile_root);
+        }
         Ok(())
     })();
     match result {

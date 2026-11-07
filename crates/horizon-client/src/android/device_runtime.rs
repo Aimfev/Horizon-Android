@@ -80,7 +80,11 @@ pub fn frame(enabled: bool, hz: u16, active: bool) -> Frame {
         crate::APP.with(|app| {
             if let Some(w) = app.borrow().as_ref().and_then(|a| a.native_window()) {
                 let ptr = w.ptr().as_ptr() as usize;
-                let requested = if active { hz } else { 0 };
+                let requested = if active {
+                    if hz == 0 { 120 } else { hz }
+                } else {
+                    0
+                };
                 if r.window != ptr || r.hz != requested {
                     unsafe {
                         let p = r.symbol(c"ANativeWindow_setFrameRate");
@@ -91,6 +95,9 @@ pub fn frame(enabled: bool, hz: u16, active: bool) -> Frame {
                                 std::mem::transmute(p);
                             f(ptr as *mut c_void, f32::from(requested), 0)
                         };
+                    }
+                    if active {
+                        crate::platform::apply_high_refresh_rate(hz);
                     }
                     r.window = ptr;
                     r.hz = requested;
@@ -206,6 +213,7 @@ pub fn configure(mut settings: crate::device_preferences::Settings) {
         | (u32::from(settings.performance_hints) << 16)
         | (u32::from(settings.gpu_profile) << 17);
     PREFERENCES.store(bits, std::sync::atomic::Ordering::Relaxed);
+    crate::platform::apply_high_refresh_rate(settings.display_hz);
 }
 pub fn preferences() -> crate::device_preferences::Settings {
     let bits = PREFERENCES.load(std::sync::atomic::Ordering::Relaxed);

@@ -54,10 +54,17 @@ class LauncherOverhaulTests(unittest.TestCase):
             "crates/horizon-client-render/src/menu_blur.rs",
             "crates/horizon-client-render/src/ui.rs",
             "crates/horizon-client/src/android/document_store.rs",
+            "crates/horizon-client/src/content_files.rs",
+            "crates/horizon-client/src/game/native_hooks.rs",
             "crates/horizon-client/src/android/documents.rs",
             "crates/horizon-client/src/android/platform.rs",
             "crates/horizon-client/src/game/perspective.rs",
             "crates/horizon-client/src/game/recipe_book.rs",
+            "crates/horizon-client-input/src/window.rs",
+            "crates/horizon-client-render/src/hud.rs",
+            "crates/horizon-client/src/android/device_runtime.rs",
+            "crates/horizon-client/src/android/document_bridge.rs",
+            "third_party/wgpu-hal/src/vulkan/swapchain/native.rs",
             "crates/horizon-client/src/game/screens.rs",
             "crates/horizon-client/src/item_render.rs",
             "crates/horizon-client/src/item_render/gui.rs",
@@ -657,6 +664,101 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("ACTIVE_SLIDER_DRAG", launcher_pages)
 
 
-if __name__ == "__main__":
 
+    def test_uncapped_fps_import_export_inventory_player_m3_controls_homepage_and_duplicate_confirm(self) -> None:
+        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
+        launcher = (ROOT / "crates/horizon-client/src/android/launcher.rs").read_text(encoding="utf-8")
+        launcher_pages = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
+        window = (ROOT / "crates/horizon-client-input/src/window.rs").read_text(encoding="utf-8")
+        native_vk = (ROOT / "third_party/wgpu-hal/src/vulkan/swapchain/native.rs").read_text(encoding="utf-8")
+        activity_java = (ROOT / "packaging/android/java/dev/horizon/android/HorizonActivity.java").read_text(encoding="utf-8")
+        perspective = (ROOT / "crates/horizon-client/src/game/perspective.rs").read_text(encoding="utf-8")
+        hud = (ROOT / "crates/horizon-client-render/src/hud.rs").read_text(encoding="utf-8")
+        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(encoding="utf-8")
+        editor = (ROOT / "crates/horizon-client-render/src/touch/editor.rs").read_text(encoding="utf-8")
+        touch_ui = (ROOT / "crates/horizon-client/src/touch_ui.rs").read_text(encoding="utf-8")
+        documents = (ROOT / "crates/horizon-client/src/android/documents.rs").read_text(encoding="utf-8")
+        doc_bridge = (ROOT / "crates/horizon-client/src/android/document_bridge.rs").read_text(encoding="utf-8")
+        native_ime = (ROOT / "crates/horizon-client/src/android/native_ime.rs").read_text(encoding="utf-8")
+
+        # 1. Uncapped FPS on by default & Vulkan swapchain Immediate/Mailbox non-blocking presentation
+        self.assertIn('#[serde(default = "default_true")]\n    pub max_fps_mode: bool,', catalog)
+        self.assertIn("max_fps_mode: true,", catalog)
+        self.assertIn("catalog.config.apply_experimental_to_game(&home);", launcher)
+        self.assertIn("modes.push(wgt::PresentMode::Immediate);", native_vk)
+        self.assertIn("mode = vk::PresentModeKHR::MAILBOX;", native_vk)
+        self.assertIn("applyHighRefreshRate", activity_java)
+        self.assertIn("PresentMode::Mailbox,", window)
+
+        # 2. Import & Export Controls via system File Manager + auto-detect MCPE vs GoyControl
+        self.assertIn("pub fn detect_and_import_preset(", layout)
+        self.assertIn("pub fn detect_control_style(", layout)
+        self.assertIn("pub fn begin_control_import(", documents)
+        self.assertIn("pub fn begin_control_export(", documents)
+        self.assertIn("pub fn create_output(", doc_bridge)
+        self.assertIn("android.intent.action.CREATE_DOCUMENT", native_ime)
+        self.assertIn("request != 4103", activity_java)
+        self.assertIn("Action::ImportControlProfile", launcher_pages)
+        self.assertIn("Action::ExportControlProfile", launcher_pages)
+
+        # 3. 3D Player Model in Inventory depth buffer & clip fix (no shader regressions)
+        preview_fn = perspective.split("fn draw_player_preview(")[1].split("fn draw_inventory_player(")[0]
+        self.assertIn("batch.clip_since(start, x0, y0, x1, y1);", preview_fn)
+        self.assertIn("batch.depth_since(start, [x0, y0, x1, y1]);", preview_fn)
+        self.assertNotIn('#[cfg(not(target_os = "android"))]\n        batch.depth_since', preview_fn)
+        self.assertIn("let is_2d = corners.iter().all(|v| v.depth == 0.0);", hud)
+
+        # 4. MCPE top-left '...' draggable & screen-clamped button + Send Key in Recommended tab
+        self.assertIn("fn default_floating_pos() -> [f32; 2] {\n    [0.02, 0.03]\n}", layout)
+        self.assertIn("let total_dots_w = dot_sz * 3.0 + dot_gap * 2.0;", touch_ui)
+        self.assertIn('"Send Key (Keyboard / Mouse / Action)"', touch_ui)
+
+        # 5. Homepage shows selected Renderer mode and downloaded version Changelogs
+        self.assertIn("Renderer: {}", launcher_pages)
+        self.assertIn("CHANGELOG — MINECRAFT 26.3 • HORIZON ANDROID", launcher_pages)
+
+        # 6. Duplicate control preset name confirmation dialog (Save to replace or Cancel)
+        self.assertIn("pub duplicate_name_confirm_open: bool,", editor)
+        self.assertIn("pub fn find_preset_by_name(", layout)
+        self.assertIn("pub fn save_or_replace_preset_by_name(", layout)
+        self.assertIn('"Replace Existing Control Preset?"', touch_ui)
+        self.assertIn("Action::ConfirmReplaceDuplicatePreset", launcher_pages)
+
+    def test_world_folder_import_export_zip_picker_no_logs_and_mods_folder_sync(self) -> None:
+        activity_java = (ROOT / "packaging/android/java/dev/horizon/android/HorizonActivity.java").read_text(encoding="utf-8")
+        doc_store = (ROOT / "crates/horizon-client/src/android/document_store.rs").read_text(encoding="utf-8")
+        documents = (ROOT / "crates/horizon-client/src/android/documents.rs").read_text(encoding="utf-8")
+        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
+        launcher_pages = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
+        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(encoding="utf-8")
+
+        # 1. World / Folder import never throws unhandled Java exception and takes persistable URI permission
+        self.assertIn("takePersistableUriPermission(", activity_java)
+        self.assertNotIn("copyFolderTree(android.content.Context context, String treeUriString, String destDirPath) throws Exception", activity_java)
+        self.assertIn("android.net.Uri treeUri, String parentDocId, java.io.File destDir)", activity_java)
+        self.assertIn('if let Some(err_msg) = folder_name.strip_prefix("ERROR:")', documents)
+        self.assertIn("pub fn extract_world_zip_if_valid(", doc_store)
+
+        # 2. Exports never dump into logs/performance (`reports`) and let user pick where to save/paste
+        self.assertIn('let staging_dir = home.join(".export-staging");', doc_store)
+        self.assertNotIn('let reports = root_home.join("performance");', layout)
+        self.assertIn("pub fn begin_file_export(", documents)
+        self.assertIn("pub fn export_folder_prepared(", documents)
+        self.assertIn("self.catalog.fm_clipboard = Some((vec![zip_path], false));", launcher_pages)
+
+        # 3. Mods folder syncs native mods (.hnmod) and enabled bundled mods (.mod.json) so it never shows empty
+        self.assertIn("pub fn sync_mods_folder(profile_root: &Path)", doc_store)
+        self.assertIn("sync_mods_folder(profile_root);", doc_store)
+        self.assertIn("crate::document_store::sync_mods_folder(&game);", catalog)
+
+        # 4. .hnmod and .jar import, validation, canonical ID extraction, auto-enabling, and in-game Options > Mods listing
+        content_files = (ROOT / "crates/horizon-client/src/content_files.rs").read_text(encoding="utf-8")
+        native_hooks = (ROOT / "crates/horizon-client/src/game/native_hooks.rs").read_text(encoding="utf-8")
+        self.assertIn('lower.ends_with(".hmod") || lower.ends_with(".hnmod") || lower.ends_with(".jar")', content_files)
+        self.assertIn("pub fn read_mod_archive_id(", content_files)
+        self.assertIn("content_files::read_mod_archive_id(&staged, &name)?;", documents)
+        self.assertIn("horizon_mods::index::native::Bundle::read(&path)", native_hooks)
+
+
+if __name__ == "__main__":
     unittest.main()

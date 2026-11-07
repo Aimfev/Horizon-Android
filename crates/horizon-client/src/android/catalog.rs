@@ -56,7 +56,7 @@ impl RendererMode {
     }
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub profile: u32,
@@ -85,7 +85,7 @@ pub struct Config {
     pub super_perf_mode: bool,
     #[serde(default)]
     pub battery_perf_mode: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub max_fps_mode: bool,
     #[serde(default = "default_true")]
     pub zero_latency_touch: bool,
@@ -109,6 +109,43 @@ pub struct Config {
 
 fn default_true() -> bool {
     true
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            profile: 0,
+            proxy: None,
+            name: String::new(),
+            server: String::new(),
+            microsoft_client_id: String::new(),
+            renderer: RendererMode::default(),
+            render_scale: crate::display::RenderScale::default(),
+            orientation: Orientation::default(),
+            screen: crate::display::ScreenPreferences::default(),
+            input_host: InputHost::default(),
+            keypad_controls: false,
+            record_performance: false,
+            worker_limit: 0,
+            cache_budget_mib: 0,
+            device: crate::device_preferences::Settings::default(),
+            shader_source: crate::shader_catalog::Origin::default(),
+            mod_source: crate::shader_catalog::Origin::default(),
+            ui_scale_percent: 0,
+            super_perf_mode: false,
+            battery_perf_mode: false,
+            max_fps_mode: true,
+            zero_latency_touch: true,
+            fast_chunk_upload: true,
+            disable_launcher_animations: false,
+            disable_game_animations: false,
+            last_name_changed: String::new(),
+            custom_profile_name: String::new(),
+            custom_profile_desc: String::new(),
+            preset_edit_mode: String::new(),
+            theme: horizon_client::ui_theme::LauncherThemeConfig::default(),
+        }
+    }
 }
 
 pub use horizon_client::android_gamepad::InputMode as InputHost;
@@ -273,14 +310,15 @@ impl Config {
             settings.smooth_lighting = false;
             settings.graphics_preset = "fast".into();
             settings.horizon.upload_budget_kib = 1536;
-        } else if self.battery_perf_mode {
+        }
+        if self.battery_perf_mode {
             settings.render_distance = settings.render_distance.min(8);
             settings.simulation_distance = settings.simulation_distance.min(5);
             settings.max_fps = 60;
             settings.vsync = true;
             settings.menu_blur = 0;
             settings.horizon.present_mode = horizon_client::graphics::PresentMode::Fifo;
-        } else if self.max_fps_mode {
+        } else if self.max_fps_mode || self.super_perf_mode {
             settings.max_fps = 260;
             settings.vsync = false;
             settings.horizon.present_mode = horizon_client::graphics::PresentMode::Immediate;
@@ -623,6 +661,7 @@ pub struct Catalog {
     pub update_anim_time: f32,
     pub update_scroll: f32,
     pub update_info: Option<crate::updater::ReleaseInfo>,
+    pub duplicate_preset_confirm: Option<(String, String, String)>,
     worker: Option<mpsc::Receiver<Result<Reply, String>>>,
     search_worker: Option<mpsc::Receiver<Result<Vec<Project>, String>>>,
     icon_worker: Option<mpsc::Receiver<IconData>>,
@@ -686,6 +725,7 @@ impl Catalog {
             update_anim_time: 0.0,
             update_scroll: 0.0,
             update_info: None,
+            duplicate_preset_confirm: None,
             worker: None,
             search_worker: None,
             icon_worker: None,
@@ -725,6 +765,7 @@ impl Catalog {
             .filter(|e| game.join(&e.file).exists())
             .map(|e| (e.source, e.project.clone()))
             .collect();
+        crate::document_store::sync_mods_folder(&game);
         let on = horizon_client::mod_list::ModList::load(&game);
         self.bundled_enabled = on.enabled.difference(&on.disabled).cloned().collect();
         let settings = horizon_client::settings::Settings::load(&game.join("options.txt"));
@@ -735,14 +776,40 @@ impl Catalog {
                 continue;
             }
             for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-                if !entry.file_type().is_ok_and(|t| t.is_file()) {
+                let Ok(ft) = entry.file_type() else {
+                    continue;
+                };
+                if ft.is_symlink() {
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
+                if ft.is_dir() {
+                    if kind == horizon_client::content_files::Kind::Mods
+                        && horizon_client::content_files::plain_name(&name)
+                        && entry.path().join("horizon-mod.toml").is_file()
+                    {
+                        let rel = format!("horizon-mods/{name}");
+                        let enabled = on.enabled.contains(&name) && !on.disabled.contains(&name);
+                        self.local.push(LocalItem {
+                            kind,
+                            file: rel,
+                            title: name.clone(),
+                            enabled,
+                            size_bytes: 0,
+                            badge: "MOD",
+                            subtitle: format!("Ported Mod Folder  •  horizon-mods/{name}"),
+                        });
+                    }
+                    continue;
+                }
+                if !ft.is_file() {
+                    continue;
+                }
+                let lower = name.to_ascii_lowercase();
                 let valid = horizon_client::content_files::plain_name(&name)
                     && (kind.accepts(&name)
                         || (kind == horizon_client::content_files::Kind::Mods
-                            && name.to_ascii_lowercase().ends_with(".jar")));
+                            && (lower.ends_with(".jar") || lower.ends_with(".hnmod"))));
                 if !valid {
                     continue;
                 }
@@ -755,8 +822,9 @@ impl Catalog {
                     }
                     horizon_client::content_files::Kind::Mods => name
                         .strip_suffix(".hmod")
+                        .or_else(|| name.strip_suffix(".hnmod"))
                         .or_else(|| name.strip_suffix(".jar"))
-                        .is_some_and(|id| on.enabled.contains(id)),
+                        .is_some_and(|id| on.enabled.contains(id) && !on.disabled.contains(id)),
                 };
                 let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 let badge = match kind {
@@ -766,6 +834,8 @@ impl Catalog {
                 };
                 let ext_tag = if name.ends_with(".hmod") {
                     "Horizon Mod (.hmod)"
+                } else if name.ends_with(".hnmod") {
+                    "Horizon Native Mod (.hnmod)"
                 } else if name.ends_with(".jar") {
                     "Java Mod (.jar)"
                 } else if name.ends_with(".hshader") {
@@ -778,6 +848,7 @@ impl Catalog {
                 let subtitle = format!("{ext_tag}  •  {}  •  {name}", format_file_size(size_bytes));
                 let clean_title = name
                     .strip_suffix(".hmod")
+                    .or_else(|| name.strip_suffix(".hnmod"))
                     .or_else(|| name.strip_suffix(".jar"))
                     .or_else(|| name.strip_suffix(".hshader"))
                     .or_else(|| name.strip_suffix(".zip"))
@@ -2065,14 +2136,27 @@ impl Catalog {
                         } else {
                             name
                         };
-                        let _ = touch.save_new_preset(&game_home, &final_name, &desc);
-                        self.status = format!(
-                            "Saved new {} preset '{}' (controls/{}/{}.json).",
-                            touch.control_style.label(),
-                            touch.preset_name,
-                            touch.control_style.storage_subdir(),
-                            touch.preset_id
-                        );
+                        if let Some(existing) = horizon_client::touch::Settings::find_preset_by_name(
+                            &game_home,
+                            touch.control_style,
+                            &final_name,
+                        ) {
+                            self.duplicate_preset_confirm =
+                                Some((existing.id, final_name.clone(), desc));
+                            self.status = format!(
+                                "A preset named '{}' already exists. Confirm Save to replace it or Cancel.",
+                                final_name
+                            );
+                        } else {
+                            let _ = touch.save_new_preset(&game_home, &final_name, &desc);
+                            self.status = format!(
+                                "Saved new {} preset '{}' (controls/{}/{}.json).",
+                                touch.control_style.label(),
+                                touch.preset_name,
+                                touch.control_style.storage_subdir(),
+                                touch.preset_id
+                            );
+                        }
                     }
                     self.config.preset_edit_mode.clear();
                 }

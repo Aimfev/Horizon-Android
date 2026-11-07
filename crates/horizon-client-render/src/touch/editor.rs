@@ -96,6 +96,10 @@ pub struct Editor {
     pub save_create_new_mode: bool,
     /// True when the Back confirmation dialog (`[ Save ]` / `[ Back ]`) is open.
     pub back_confirm_open: bool,
+    /// True when the Duplicate Preset Name Confirmation dialog (`[ Save ]` / `[ Cancel ]`) is open.
+    pub duplicate_name_confirm_open: bool,
+    /// Pending `(target_id, name, description)` when replacing an existing preset with the same name.
+    pub duplicate_conflict_target: Option<(String, String, String)>,
 }
 
 enum Drag {
@@ -147,6 +151,8 @@ impl TouchControls {
             keyboard_request: false,
             save_create_new_mode: is_default,
             back_confirm_open: false,
+            duplicate_name_confirm_open: false,
+            duplicate_conflict_target: None,
         });
     }
     pub fn cancel_editor(&mut self) {
@@ -178,6 +184,11 @@ impl TouchControls {
         }
         if e.menu_open {
             e.menu_open = false;
+            return false;
+        }
+        if e.duplicate_name_confirm_open {
+            e.duplicate_name_confirm_open = false;
+            e.duplicate_conflict_target = None;
             return false;
         }
         if e.save_dialog_open {

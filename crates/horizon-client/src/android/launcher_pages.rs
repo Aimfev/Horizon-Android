@@ -355,6 +355,8 @@ pub(super) enum Action {
     SelectControlMode(horizon_client::touch::ControlStyle),
     CopyActivePreset,
     EditActivePresetMeta,
+    ConfirmReplaceDuplicatePreset,
+    CancelReplaceDuplicatePreset,
     ToggleSplitControls,
     ToggleSprintLatch,
     ToggleLeftHanded,
@@ -1389,16 +1391,48 @@ impl Launcher {
                     Action::CancelInstall,
                 );
             } else {
-                let card_y = 66.0 + slide_y;
-                let card_h = (h - 178.0).clamp(148.0, 236.0);
-                ui.rounded(content_x, card_y, content_w, card_h, 20.0, my3_surface());
-                ui.border(content_x, card_y, content_w, card_h, 20.0, my3_border());
+                let game_home = self.catalog.config.game_home(&self.home);
+                let touch_cfg = horizon_client::touch::Settings::load_from(
+                    &game_home.join("horizon-touch.json"),
+                );
+                let card_y = 64.0 + slide_y;
+                let total_avail_h = (h - 166.0).clamp(172.0, 290.0);
+                let hero_h = (total_avail_h * 0.44).clamp(78.0, 118.0);
+                let log_y = card_y + hero_h + 10.0;
+                let log_h = (total_avail_h - hero_h - 10.0).max(84.0);
+
+                // 1. Hero Launch & Active Configuration Card (Renderer Mode, FPS Mode, Control System)
+                ui.rounded(content_x, card_y, content_w, hero_h, 20.0, my3_surface());
+                ui.border(content_x, card_y, content_w, hero_h, 20.0, my3_border());
+                ui.rounded(
+                    content_x + 16.0,
+                    card_y + 14.0,
+                    44.0,
+                    44.0,
+                    14.0,
+                    my3_accent_soft(),
+                );
+                ui.border(
+                    content_x + 16.0,
+                    card_y + 14.0,
+                    44.0,
+                    44.0,
+                    14.0,
+                    my3_accent(),
+                );
+                ui.icon(
+                    Icon::HorizonLogo,
+                    content_x + 27.0,
+                    card_y + 25.0,
+                    22.0,
+                    my3_accent(),
+                );
 
                 ui.text(
                     Face::SemiBold,
-                    23.0,
-                    content_x + 22.0,
-                    card_y + 18.0,
+                    20.0,
+                    content_x + 72.0,
+                    card_y + 12.0,
                     my3_text(),
                     if installed {
                         "Ready to play"
@@ -1410,9 +1444,9 @@ impl Launcher {
                 );
                 ui.text(
                     Face::Regular,
-                    14.0,
-                    content_x + 22.0,
-                    card_y + 52.0,
+                    12.5,
+                    content_x + 72.0,
+                    card_y + 38.0,
                     my3_muted(),
                     &format!(
                         "Minecraft 26.3 • Profile {} • {}",
@@ -1421,28 +1455,136 @@ impl Launcher {
                     ),
                 );
 
-                let rows = if installed {
-                    [
-                        "• Native Rust client with hardware Vulkan & OpenGL ES rendering",
-                        "• Browse Mods, Resource Packs & Shaders with Modrinth previews",
-                        "• Customize MCPE & GoyControl HUD layouts in Settings → Controls",
+                // Interactive Active Configuration Chips (Renderer Mode, FPS Mode, Control System)
+                let chip_y = card_y + hero_h - 32.0;
+                let renderer_tag = format!("Renderer: {}", self.catalog.config.renderer.label());
+                let fps_tag = if self.catalog.config.battery_perf_mode {
+                    "FPS: 60 Hz Battery".to_owned()
+                } else if self.catalog.config.max_fps_mode {
+                    "FPS: Max Uncapped (260)".to_owned()
+                } else {
+                    "FPS: 120 Hz Balanced".to_owned()
+                };
+                let ctrl_tag = format!(
+                    "Controls: {} ({})",
+                    touch_cfg.control_style.label(),
+                    touch_cfg.preset_name
+                );
+                let mut chip_x = content_x + 16.0;
+                for (lbl, act, hi) in [
+                    (renderer_tag.as_str(), Action::Renderer, true),
+                    (fps_tag.as_str(), Action::ToggleMaxFpsMode, self.catalog.config.max_fps_mode),
+                    (
+                        ctrl_tag.as_str(),
+                        Action::SettingsCat(SettingsCategory::Controls),
+                        false,
+                    ),
+                ] {
+                    let cw_chip = (ui.measure(Face::SemiBold, 10.5, lbl) + 20.0)
+                        .clamp(84.0, (content_w - 32.0) * 0.46);
+                    if chip_x + cw_chip > content_x + content_w - 12.0 {
+                        break;
+                    }
+                    let cr = [chip_x, chip_y, cw_chip, 24.0];
+                    self.targets.push((cr, act));
+                    ui.rounded(
+                        cr[0],
+                        cr[1],
+                        cr[2],
+                        cr[3],
+                        8.0,
+                        if hi {
+                            my3_accent_soft()
+                        } else {
+                            my3_card_bg()
+                        },
+                    );
+                    ui.border(
+                        cr[0],
+                        cr[1],
+                        cr[2],
+                        cr[3],
+                        8.0,
+                        if hi {
+                            my3_accent()
+                        } else {
+                            my3_card_border()
+                        },
+                    );
+                    ui.centered_fit(
+                        Face::SemiBold,
+                        10.2,
+                        [cr[0] + 6.0, cr[1], cr[2] - 12.0, cr[3]],
+                        if hi { my3_accent() } else { my3_text() },
+                        lbl,
+                    );
+                    chip_x += cw_chip + 8.0;
+                }
+
+                // 2. Downloaded Version Changelog Card
+                ui.rounded(content_x, log_y, content_w, log_h, 18.0, my3_card_bg());
+                ui.border(content_x, log_y, content_w, log_h, 18.0, my3_card_border());
+                let ver_header = if let Some(ref info) = self.catalog.update_info {
+                    format!(
+                        "CHANGELOG — MINECRAFT 26.3 • HORIZON ANDROID v{} (DOWNLOADED)",
+                        info.version
+                    )
+                } else if installed {
+                    format!(
+                        "CHANGELOG — MINECRAFT 26.3 • HORIZON ANDROID v{} (DOWNLOADED)",
+                        crate::updater::CURRENT_VERSION
+                    )
+                } else {
+                    "RELEASE HIGHLIGHTS — MINECRAFT 26.3 • HORIZON ANDROID".to_owned()
+                };
+                ui.text(
+                    Face::SemiBold,
+                    11.0,
+                    content_x + 18.0,
+                    log_y + 10.0,
+                    my3_accent(),
+                    &ver_header,
+                );
+
+                let changelog_lines: Vec<String> = if let Some(ref info) = self.catalog.update_info
+                    && !info.changelog.trim().is_empty()
+                {
+                    info.changelog
+                        .lines()
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty())
+                        .take(3)
+                        .map(|l| {
+                            if l.starts_with('•') || l.starts_with('-') || l.starts_with('*') {
+                                format!("• {}", l.trim_start_matches(['•', '-', '*', ' ']))
+                            } else {
+                                format!("• {l}")
+                            }
+                        })
+                        .collect()
+                } else if installed {
+                    vec![
+                        "• Uncapped Max FPS (260 FPS) enabled by default with Vulkan non-blocking swapchain & 120Hz+ display".into(),
+                        "• Control Settings Studio: Import & Export controls via system File Manager with MCPE/GoyControl auto-detect".into(),
+                        "• Fixed 3D inventory player model depth clipping, draggable top-left MCPE '...' button & Send Key in Recommended".into(),
                     ]
                 } else {
-                    [
-                        "• Downloads official Minecraft 26.3 assets directly from Mojang",
-                        "• Live download speed, ETA and 6-step verification",
-                        "• Play offline or sign in with your Microsoft account",
+                    vec![
+                        "• Downloads official Minecraft 26.3 assets directly from Mojang with 6-step verification".into(),
+                        "• Hardware Vulkan GPU batching, Vulkan compatibility & experimental OpenGL ES rendering".into(),
+                        "• Full MCPE & GoyControl touch studio with file manager import/export & Microsoft sign-in".into(),
                     ]
                 };
-                for (index, line) in rows.iter().enumerate() {
+                let max_lines = ((log_h - 32.0) / 19.0).floor().clamp(1.0, 3.0) as usize;
+                for (index, line) in changelog_lines.iter().take(max_lines).enumerate() {
                     let fitted =
-                        ui.fit_text(Face::Regular, 13.5, line, (content_w - 44.0).max(80.0));
+                        ui.fit_text(Face::Regular, 12.2, line, (content_w - 36.0).max(80.0));
                     ui.text(
                         Face::Regular,
-                        13.5,
-                        content_x + 22.0,
-                        card_y + 86.0 + index as f32 * 25.0,
-                        my3_muted(),
+                        12.2,
+                        content_x + 18.0,
+                        log_y + 30.0 + index as f32 * 19.0,
+                        my3_text(),
                         &fitted,
                     );
                 }
@@ -2005,6 +2147,73 @@ impl Launcher {
         }
         if self.catalog.fm_modal.is_some() {
             self.draw_fm_modal(&mut ui, w, h, ime_top_dp);
+        }
+        if let Some((_, ref dup_name, _)) = self.catalog.duplicate_preset_confirm.clone() {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.list_view = None;
+            ui.rounded(
+                0.0,
+                0.0,
+                w,
+                h,
+                0.0,
+                horizon_client::hud::rgba(4, 5, 10, 210),
+            );
+            let mw = (w - 32.0).clamp(300.0, 440.0);
+            let mh = 190.0;
+            let mx = (w - mw) * 0.5;
+            let my = (h - mh) * 0.5;
+            ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
+            ui.border(mx, my, mw, mh, 20.0, my3_accent());
+            ui.text(
+                Face::SemiBold,
+                16.5,
+                mx + 20.0,
+                my + 18.0,
+                my3_text(),
+                "Replace Existing Control Preset?",
+            );
+            let line1 = format!(
+                "A control preset named '{}' already exists.",
+                dup_name
+            );
+            let fitted1 = ui.fit_text(Face::Regular, 12.0, &line1, mw - 40.0);
+            ui.text(
+                Face::Regular,
+                12.0,
+                mx + 20.0,
+                my + 52.0,
+                my3_muted(),
+                &fitted1,
+            );
+            let line2 = "Duplicate names are not allowed. Save to replace the current one?";
+            let fitted2 = ui.fit_text(Face::Regular, 11.5, line2, mw - 40.0);
+            ui.text(
+                Face::Regular,
+                11.5,
+                mx + 20.0,
+                my + 76.0,
+                my3_muted(),
+                &fitted2,
+            );
+            let bw = (mw - 52.0) * 0.5;
+            button(
+                &mut ui,
+                &mut self.targets,
+                [mx + 20.0, my + mh - 52.0, bw, 38.0],
+                "Save",
+                Action::ConfirmReplaceDuplicatePreset,
+                true,
+            );
+            button(
+                &mut ui,
+                &mut self.targets,
+                [mx + 32.0 + bw, my + mh - 52.0, bw, 38.0],
+                "Cancel",
+                Action::CancelReplaceDuplicatePreset,
+                false,
+            );
         }
         if self.diagnostics_modal_open {
             self.draw_diagnostics_summary_modal(&mut ui, w, h);
@@ -2769,21 +2978,23 @@ impl Launcher {
             let card_h = 46.0;
             let selected = self.catalog.fm_selected.contains(&entry.rel_path);
             let check_r = [content_x + 6.0, y + 7.0, 32.0, 32.0];
-            let actions_w = if compact { 164.0 } else { 204.0 };
+            let actions_w = if compact { 224.0 } else { 276.0 };
             let open_r = [
                 content_x + 40.0,
                 y,
                 (content_w - 44.0 - actions_w).max(60.0),
                 card_h,
             ];
-            let btn_w = (actions_w - 14.0) / 3.0;
-            let info_r = [content_x + content_w - actions_w, y + 8.0, btn_w, 30.0];
+            let btn_w = (actions_w - 18.0) / 4.0;
+            let exp_r = [content_x + content_w - actions_w, y + 8.0, btn_w, 30.0];
+            let info_r = [exp_r[0] + btn_w + 4.0, y + 8.0, btn_w, 30.0];
             let ren_r = [info_r[0] + btn_w + 4.0, y + 8.0, btn_w, 30.0];
             let del_r = [ren_r[0] + btn_w + 4.0, y + 8.0, btn_w, 30.0];
 
             self.list_targets.push((open_r, Action::FmOpenEntry(idx)));
             self.list_targets
                 .push((check_r, Action::FmToggleSelect(idx)));
+            self.list_targets.push((exp_r, Action::FmExportSingle(idx)));
             self.list_targets.push((info_r, Action::FmOpenDetails(idx)));
             self.list_targets.push((ren_r, Action::FmOpenRename(idx)));
             self.list_targets
@@ -2824,7 +3035,11 @@ impl Launcher {
 
             let entry_icon = if entry.is_dir {
                 Icon::Folder
-            } else if entry.name.ends_with(".hmod") || entry.name.ends_with(".jar") {
+            } else if entry.name.ends_with(".hmod")
+                || entry.name.ends_with(".hnmod")
+                || entry.name.ends_with(".jar")
+                || entry.name.ends_with(".mod.json")
+            {
                 Icon::Mods
             } else if entry.name.ends_with(".hshader") {
                 Icon::Shaders
@@ -2891,6 +3106,14 @@ impl Launcher {
                 self.targets.push((c, Action::FmOpenEntry(idx)));
             }
 
+            button(
+                ui,
+                &mut self.targets,
+                exp_r,
+                "Export",
+                Action::FmExportSingle(idx),
+                false,
+            );
             button(
                 ui,
                 &mut self.targets,
@@ -5035,8 +5258,10 @@ impl Launcher {
                 ui.set_clip(None);
             }
             SettingsCategory::Controls => {
+                let studio_offset = 166.0;
                 let count = 26;
-                let max_scroll = (74.0 + count as f32 * step_y - (list_bottom - list_top)).max(0.0);
+                let max_scroll =
+                    (studio_offset + count as f32 * step_y - (list_bottom - list_top)).max(0.0);
                 self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
                 self.list_view = Some([list_top, list_bottom, max_scroll]);
 
@@ -5119,10 +5344,10 @@ impl Launcher {
                 let invert_y_active = opts.invert_y || touch_cfg.invert_y;
                 let sprint_latch_active = opts.toggle_sprint || touch_cfg.sprint_toggle;
 
-                let rows: [(&str, &str, SettingControl<'_>); 25] = [
+                let rows: [(&str, &str, SettingControl<'_>); 26] = [
                     (
-                        "LAYOUT EDITOR & PRESET PROFILES",
-                        "Visual HUD canvas editor, multi-profile switcher, duplication & JSON export",
+                        "LAYOUT STUDIO, IMPORT & EXPORT PRESETS",
+                        "Material 3 HUD editor, automatic MCPE/GoyControl file importer & location picker export",
                         SettingControl::SectionHeader(sys_name, Icon::MenuEquals),
                     ),
                     (
@@ -5140,8 +5365,18 @@ impl Launcher {
                         SettingControl::Button(&preset_label, Action::ControlProfileChooser, false),
                     ),
                     (
+                        "Import Controls from File Manager",
+                        "Pick a control .json file; auto-detects MCPE or GoyControl and saves to its folder",
+                        SettingControl::Button("Import Controls", Action::ImportControlProfile, true),
+                    ),
+                    (
+                        "Export Active Control Preset",
+                        "Open system File Manager to choose where to save your exported control .json",
+                        SettingControl::Button("Export Controls", Action::ExportControlProfile, false),
+                    ),
+                    (
                         &copy_title,
-                        "Duplicate selected layout into a new independent preset with custom name & description",
+                        "Duplicate selected layout into a new independent preset (asks to replace if same name)",
                         if self.catalog.editing == Some("profile_name") {
                             SettingControl::TextField {
                                 label: "PRESET NAME",
@@ -5172,11 +5407,6 @@ impl Launcher {
                                 false,
                             )
                         },
-                    ),
-                    (
-                        "Export Active Control Preset",
-                        "Export current layout JSON to Horizon Reports & controls folder",
-                        SettingControl::Button("Export JSON", Action::ExportControlProfile, false),
                     ),
                     (
                         "CAMERA LOOK & AIMING SENSITIVITY",
@@ -5430,8 +5660,90 @@ impl Launcher {
                     }
                 }
 
+                // Material Design 3 Control Studio Workbench Card (Active Preset + Quick Editor / Import / Export Bar)
+                let wb_y = list_top + 74.0 - self.catalog.scroll;
+                if wb_y + 84.0 >= list_top && wb_y <= list_bottom {
+                    ui.rounded(content_x, wb_y, content_w, 84.0, 20.0, my3_surface());
+                    ui.border(content_x, wb_y, content_w, 84.0, 20.0, my3_accent());
+                    ui.rounded(
+                        content_x + 14.0,
+                        wb_y + 14.0,
+                        42.0,
+                        42.0,
+                        13.0,
+                        my3_accent_soft(),
+                    );
+                    ui.icon(
+                        Icon::Gamepad,
+                        content_x + 25.0,
+                        wb_y + 25.0,
+                        20.0,
+                        my3_accent(),
+                    );
+                    let studio_hdr = format!(
+                        "{} Studio  •  Active Preset: {}",
+                        sys_name, touch_cfg.preset_name
+                    );
+                    let hdr_max = (content_w - 310.0).max(90.0);
+                    let fitted_hdr = ui.fit_text(Face::SemiBold, 14.0, &studio_hdr, hdr_max);
+                    ui.text(
+                        Face::SemiBold,
+                        14.0,
+                        content_x + 66.0,
+                        wb_y + 12.0,
+                        my3_text(),
+                        &fitted_hdr,
+                    );
+                    let path_tag = format!(
+                        "Storage: {}/{}.json  •  {} buttons",
+                        style.storage_subdir(),
+                        touch_cfg.preset_id,
+                        if is_goy {
+                            touch_cfg.custom_buttons.len()
+                        } else {
+                            14 + touch_cfg.custom_buttons.len()
+                        }
+                    );
+                    let fitted_path = ui.fit_text(Face::Regular, 11.2, &path_tag, hdr_max);
+                    ui.text(
+                        Face::Regular,
+                        11.2,
+                        content_x + 66.0,
+                        wb_y + 34.0,
+                        my3_muted(),
+                        &fitted_path,
+                    );
+                    let fitted_desc =
+                        ui.fit_text(Face::Regular, 10.8, &touch_cfg.preset_description, hdr_max);
+                    ui.text(
+                        Face::Regular,
+                        10.8,
+                        content_x + 66.0,
+                        wb_y + 54.0,
+                        my3_accent(),
+                        &fitted_desc,
+                    );
+
+                    // Studio Quick Action Buttons on the right of the Workbench Card
+                    let btn_w_sm = 88.0;
+                    let btn_y_wb = wb_y + 23.0;
+                    let r_export = [content_x + content_w - btn_w_sm - 12.0, btn_y_wb, btn_w_sm, 38.0];
+                    let r_import = [r_export[0] - btn_w_sm - 8.0, btn_y_wb, btn_w_sm, 38.0];
+                    let r_editor = [r_import[0] - 96.0 - 8.0, btn_y_wb, 96.0, 38.0];
+                    for (rect, lbl, act, primary) in [
+                        (r_editor, "Open Editor", Action::OpenControlEditor, true),
+                        (r_import, "Import JSON", Action::ImportControlProfile, false),
+                        (r_export, "Export Save", Action::ExportControlProfile, false),
+                    ] {
+                        if rect[0] > content_x + 160.0 {
+                            button(ui, &mut self.targets, rect, lbl, act, primary);
+                            self.list_targets.push((rect, act));
+                        }
+                    }
+                }
+
                 for (i, (title, sub, ctrl)) in rows.into_iter().enumerate() {
-                    let y = list_top + 74.0 + i as f32 * step_y - self.catalog.scroll;
+                    let y = list_top + studio_offset + i as f32 * step_y - self.catalog.scroll;
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
@@ -5855,7 +6167,6 @@ impl Launcher {
                 self.catalog.config.super_perf_mode = !self.catalog.config.super_perf_mode;
                 if self.catalog.config.super_perf_mode {
                     self.catalog.config.battery_perf_mode = false;
-                    self.catalog.config.max_fps_mode = false;
                     self.catalog.config.renderer = crate::catalog::RendererMode::Vulkan;
                 }
                 horizon_client::ui_theme::motion::set_reduced_motion(
@@ -5895,7 +6206,6 @@ impl Launcher {
             Some(Action::ToggleMaxFpsMode) => {
                 self.catalog.config.max_fps_mode = !self.catalog.config.max_fps_mode;
                 if self.catalog.config.max_fps_mode {
-                    self.catalog.config.super_perf_mode = false;
                     self.catalog.config.battery_perf_mode = false;
                     if self.catalog.config.device.display_hz < 120 {
                         self.catalog.config.device.display_hz = 120;
@@ -6045,45 +6355,85 @@ impl Launcher {
                     touch.control_style.label()
                 );
             }
+            Some(Action::ConfirmReplaceDuplicatePreset) => {
+                if let Some((_, name, desc)) = self.catalog.duplicate_preset_confirm.take() {
+                    let game_home = self.catalog.config.game_home(&self.home);
+                    let mut touch = horizon_client::touch::Settings::load_from(
+                        &game_home.join("horizon-touch.json"),
+                    );
+                    if let Ok(meta) = touch.save_or_replace_preset_by_name(&game_home, &name, &desc)
+                    {
+                        self.catalog.status = format!(
+                            "Replaced {} preset '{}' (controls/{}/{}.json).",
+                            meta.system.label(),
+                            meta.name,
+                            meta.system.storage_subdir(),
+                            meta.id
+                        );
+                    }
+                }
+            }
+            Some(Action::CancelReplaceDuplicatePreset) => {
+                self.catalog.duplicate_preset_confirm = None;
+                self.catalog.status = "Cancelled replacing existing control preset.".into();
+            }
             Some(Action::ExportControlProfile) => {
                 let game_home = self.catalog.config.game_home(&self.home);
                 let touch = horizon_client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
-                match touch.export_profile(&self.home, &game_home, &touch.preset_id) {
-                    Ok(path) => {
-                        let file_name = path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned();
-                        let _ = crate::platform::open_documents("reports");
-                        self.catalog.status = format!(
-                            "Exported '{}' to Reports & controls/{}/{}.json.",
-                            file_name,
-                            touch.control_style.storage_subdir(),
-                            touch.preset_id
-                        );
+                let clean = horizon_client::touch::Settings::sanitize_profile_name(&touch.preset_id);
+                let suggested_name = format!("horizon-controls-{clean}.json");
+                if let Ok(saved_path) = touch.export_profile(&self.home, &game_home, &touch.preset_id) {
+                    self.catalog.fm_clipboard = Some((vec![saved_path], false));
+                }
+                match serde_json::to_vec_pretty(&touch) {
+                    Ok(bytes) => {
+                        match crate::documents::begin_control_export(
+                            game_home.clone(),
+                            suggested_name.clone(),
+                            bytes,
+                        ) {
+                            Ok(()) => {
+                                self.catalog.status = format!(
+                                    "Select where to save '{}' (also saved in controls/{}/ and copied to clipboard).",
+                                    suggested_name,
+                                    touch.control_style.storage_subdir()
+                                );
+                            }
+                            Err(_) => {
+                                self.catalog.status = format!(
+                                    "Saved '{}' in controls/{}/{}.json and copied to File Manager clipboard.",
+                                    suggested_name,
+                                    touch.control_style.storage_subdir(),
+                                    touch.preset_id
+                                );
+                            }
+                        }
                     }
                     Err(e) => self.catalog.status = e.to_string(),
                 }
             }
             Some(Action::ImportControlProfile) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let touch = horizon_client::touch::Settings::load_from(
-                    &game_home.join("horizon-touch.json"),
+                horizon_client::touch::Settings::ensure_system_storage(
+                    &game_home,
+                    horizon_client::touch::ControlStyle::Mcpe,
                 );
-                let _ = std::fs::create_dir_all(
-                    game_home
-                        .join("controls")
-                        .join(touch.control_style.storage_subdir()),
+                horizon_client::touch::Settings::ensure_system_storage(
+                    &game_home,
+                    horizon_client::touch::ControlStyle::GoyControl,
                 );
-                let _ = crate::platform::open_documents(crate::document_store::ROOT);
-                self.catalog.status = format!(
-                    "Place any .json preset file in controls/{}/ and select it under {} Preset Selector.",
-                    touch.control_style.storage_subdir(),
-                    touch.control_style.label()
-                );
+                match crate::documents::begin_control_import(game_home) {
+                    Ok(()) => {
+                        self.catalog.status =
+                            "Pick a control .json file — Horizon will auto-detect MCPE or GoyControl and save it in the right folder."
+                                .into();
+                    }
+                    Err(err) => {
+                        self.catalog.status = err;
+                    }
+                }
             }
             Some(Action::MouseSensDelta(delta)) => {
                 self.modify_game_settings(|s| {
@@ -6245,17 +6595,16 @@ impl Launcher {
             }
             Some(Action::OpenFolder(kind)) => {
                 crate::platform::hide();
-                let folder = match kind {
-                    horizon_client::content_files::Kind::Mods => "mods",
-                    horizon_client::content_files::Kind::Packs => "packs",
-                    horizon_client::content_files::Kind::Shaders => "shaders",
+                let rel_dir = match kind {
+                    horizon_client::content_files::Kind::Mods => "horizon-mods",
+                    horizon_client::content_files::Kind::Packs => "resourcepacks",
+                    horizon_client::content_files::Kind::Shaders => "shaderpacks",
                 };
-                let id = crate::document_store::folder_id(self.catalog.config.profile, folder);
-                self.catalog.status = if crate::platform::open_documents(&id) {
-                    "Opened in Files. Return here after copying files.".into()
-                } else {
-                    "Open the system Files app and choose Horizon Android.".into()
-                };
+                self.catalog.page = crate::catalog::Page::Installed;
+                self.catalog.installed_sub_tab = crate::catalog::InstalledSubTab::FileManager;
+                self.catalog.fm_navigate(&self.home, rel_dir.to_owned());
+                self.anim.trigger_page_transition();
+                self.catalog.status = format!("Opened '{rel_dir}' in Profile File Manager.");
             }
             Some(Action::Import(kind)) => {
                 crate::platform::hide();
@@ -6802,20 +7151,40 @@ impl Launcher {
             Some(Action::ExportLocal(idx)) => {
                 if let Some(item) = self.catalog.local.get(idx).cloned() {
                     let game_home = self.catalog.config.game_home(&self.home);
-                    let direct = game_home.join(&item.file);
-                    let path = if direct.exists() {
-                        direct
+                    crate::document_store::sync_mods_folder(&game_home);
+                    let path = if let Some(bid) = item.file.strip_prefix("builtin:") {
+                        game_home.join("horizon-mods").join(format!("{bid}.mod.json"))
                     } else {
-                        game_home.join(item.kind.folder()).join(&item.file)
+                        let direct = game_home.join(&item.file);
+                        if direct.exists() {
+                            direct
+                        } else {
+                            game_home.join(item.kind.folder()).join(&item.file)
+                        }
                     };
-                    self.catalog.status = match crate::documents::export_file(
-                        &self.home,
-                        self.catalog.config.profile,
-                        &path,
-                    ) {
-                        Ok(msg) => msg,
-                        Err(e) => e,
-                    };
+                    if path.is_dir() {
+                        match crate::documents::export_folder_prepared(
+                            &self.home,
+                            self.catalog.config.profile,
+                            &path,
+                        ) {
+                            Ok((zip_path, _, msg)) => {
+                                self.catalog.fm_clipboard = Some((vec![zip_path], false));
+                                self.catalog.status = msg;
+                            }
+                            Err(e) => self.catalog.status = e,
+                        }
+                    } else {
+                        self.catalog.fm_clipboard = Some((vec![path.clone()], false));
+                        self.catalog.status = match crate::documents::export_file(
+                            &self.home,
+                            self.catalog.config.profile,
+                            &path,
+                        ) {
+                            Ok(msg) => msg,
+                            Err(e) => e,
+                        };
+                    }
                 }
             }
             Some(Action::FmNavigateRoot(rel)) => {
@@ -7012,6 +7381,7 @@ impl Launcher {
                 }
             }
             Some(Action::FmExportSingle(idx)) => {
+                self.catalog.fm_modal = None;
                 if let Some(entry) = self.catalog.fm_entries.get(idx).cloned() {
                     let game_home = self.catalog.config.game_home(&self.home);
                     match crate::document_store::resolve_fm_path(
@@ -7021,15 +7391,19 @@ impl Launcher {
                     ) {
                         Ok(path) => {
                             if path.is_dir() {
-                                self.catalog.status = match crate::documents::export_folder(
+                                match crate::documents::export_folder_prepared(
                                     &self.home,
                                     self.catalog.config.profile,
                                     &path,
                                 ) {
-                                    Ok(msg) => msg,
-                                    Err(e) => e,
-                                };
+                                    Ok((zip_path, _, msg)) => {
+                                        self.catalog.fm_clipboard = Some((vec![zip_path], false));
+                                        self.catalog.status = msg;
+                                    }
+                                    Err(e) => self.catalog.status = e,
+                                }
                             } else {
+                                self.catalog.fm_clipboard = Some((vec![path.clone()], false));
                                 self.catalog.status = match crate::documents::export_file(
                                     &self.home,
                                     self.catalog.config.profile,
@@ -7045,20 +7419,28 @@ impl Launcher {
                 }
             }
             Some(Action::FmExportSelected) => {
-                if let Some(rel) = self.catalog.fm_selected.iter().next().cloned() {
+                let target_rel = self.catalog.fm_selected.iter().next().cloned().or_else(|| {
+                    (!self.catalog.fm_current_dir.is_empty())
+                        .then(|| self.catalog.fm_current_dir.clone())
+                });
+                if let Some(rel) = target_rel {
                     let game_home = self.catalog.config.game_home(&self.home);
                     match crate::document_store::resolve_fm_path(&self.home, &game_home, &rel) {
                         Ok(path) => {
                             if path.is_dir() {
-                                self.catalog.status = match crate::documents::export_folder(
+                                match crate::documents::export_folder_prepared(
                                     &self.home,
                                     self.catalog.config.profile,
                                     &path,
                                 ) {
-                                    Ok(msg) => msg,
-                                    Err(e) => e,
-                                };
+                                    Ok((zip_path, _, msg)) => {
+                                        self.catalog.fm_clipboard = Some((vec![zip_path], false));
+                                        self.catalog.status = msg;
+                                    }
+                                    Err(e) => self.catalog.status = e,
+                                }
                             } else {
+                                self.catalog.fm_clipboard = Some((vec![path.clone()], false));
                                 self.catalog.status = match crate::documents::export_file(
                                     &self.home,
                                     self.catalog.config.profile,
@@ -7072,7 +7454,7 @@ impl Launcher {
                         Err(e) => self.catalog.status = e,
                     }
                 } else {
-                    self.catalog.status = "Select a file or folder to export.".into();
+                    self.catalog.status = "Select a file or folder (or tap Export on any row) to export.".into();
                 }
             }
             Some(Action::OpenUpdateScreen) => {

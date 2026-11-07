@@ -1277,8 +1277,15 @@ impl HudBatch {
                 y_lo = y_lo.min(v.pos[1]);
                 y_hi = y_hi.max(v.pos[1]);
             }
-            // An axis-aligned rectangle, its corners in any order.
-            let find = |x: f32, y: f32| corners.iter().find(|v| v.pos == [x, y]).copied();
+            // An axis-aligned 2D rectangle (depth == 0.0), its corners in any order.
+            // 3D quads (such as the inventory player model) carry non-zero per-vertex depth
+            // and must clip via `clip_polygon` so their 3D depth values are preserved and interpolated.
+            let is_2d = corners.iter().all(|v| v.depth == 0.0);
+            let find = |x: f32, y: f32| {
+                is_2d
+                    .then(|| corners.iter().find(|v| v.pos == [x, y]).copied())
+                    .flatten()
+            };
             let rect = (
                 find(x_lo, y_lo),
                 find(x_hi, y_lo),

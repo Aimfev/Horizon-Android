@@ -17,6 +17,7 @@ pub struct PresetDialogState {
     pub name_input: String,
     pub desc_input: String,
     pub editing_desc: bool,
+    pub confirm_replace_open: bool,
 }
 
 pub struct TouchUi {
@@ -1513,6 +1514,7 @@ pub fn draw_goy_hud(
     ui.finish();
 }
 
+#[allow(dead_code)]
 fn draw_mcpe_custom_plate(
     ui: &mut crate::ui_theme::Ui,
     rect: [f32; 4],
@@ -1637,27 +1639,29 @@ impl TouchUi {
         };
 
         let (btn_w, btn_h) = if settings.control_style == ControlStyle::Mcpe {
-            (42.0, 42.0)
+            (44.0, 36.0)
         } else {
             (48.0, 42.0)
         };
-        let btn_x = (settings.floating_menu_pos[0] * w).clamp(6.0, (w - btn_w - 6.0).max(6.0));
-        let btn_y = (settings.floating_menu_pos[1] * h).clamp(4.0, (h - btn_h - 4.0).max(4.0));
+        let max_btn_x = (w - btn_w - 4.0).max(4.0);
+        let max_btn_y = (h - btn_h - 4.0).max(4.0);
+        let btn_x = (settings.floating_menu_pos[0] * w).clamp(4.0, max_btn_x);
+        let btn_y = (settings.floating_menu_pos[1] * h).clamp(4.0, max_btn_y);
         let btn_rect = [btn_x, btn_y, btn_w, btn_h];
 
         if let Some((drag_id, offset, mut moved)) = self.floating_drag {
             if drag_id == id {
                 match phase {
                     TouchPhase::Moved => {
-                        let nx = (p[0] - offset[0]).clamp(6.0, (w - btn_w - 6.0).max(6.0));
-                        let ny = (p[1] - offset[1]).clamp(4.0, (h - btn_h - 4.0).max(4.0));
-                        if (nx - btn_x).hypot(ny - btn_y) > 5.0 {
+                        let nx = (p[0] - offset[0]).clamp(4.0, max_btn_x);
+                        let ny = (p[1] - offset[1]).clamp(4.0, max_btn_y);
+                        if (nx - btn_x).hypot(ny - btn_y) > 4.0 {
                             moved = true;
                         }
                         if moved {
                             settings.floating_menu_pos = [
-                                (nx / w.max(1.0)).clamp(0.03, 0.93),
-                                (ny / h.max(1.0)).clamp(0.02, 0.90),
+                                (nx / w.max(1.0)).clamp(0.005, (max_btn_x / w.max(1.0)).clamp(0.005, 0.96)),
+                                (ny / h.max(1.0)).clamp(0.005, (max_btn_y / h.max(1.0)).clamp(0.005, 0.94)),
                             ];
                         }
                         self.floating_drag = Some((drag_id, offset, moved));
@@ -2004,6 +2008,42 @@ impl TouchUi {
                 self.preset_dialog = Some(dlg);
                 return Some(InGameMenuAction::Close);
             }
+            if dlg.confirm_replace_open {
+                let cdw = (w - 36.0).clamp(290.0, 430.0);
+                let cdh = 182.0;
+                let cdx = (w - cdw) * 0.5;
+                let cdy = (h - cdh) * 0.5;
+                let bw = (cdw - 44.0) * 0.5;
+                let by = cdy + cdh - 50.0;
+                let save_r = [cdx + 18.0, by, bw, 36.0];
+                let cancel_r = [cdx + 26.0 + bw, by, bw, 36.0];
+                if inside(save_r) {
+                    let name = dlg.name_input.trim().to_owned();
+                    let description = if dlg.desc_input.trim().is_empty() {
+                        format!("Custom {} layout", settings.control_style.label())
+                    } else {
+                        dlg.desc_input.trim().to_owned()
+                    };
+                    if dlg.is_copy {
+                        return Some(InGameMenuAction::CopyPreset {
+                            source_id: dlg.target_id,
+                            name,
+                            description,
+                        });
+                    } else {
+                        return Some(InGameMenuAction::UpdatePresetMeta {
+                            id: dlg.target_id,
+                            name,
+                            description,
+                        });
+                    }
+                }
+                if inside(cancel_r) || !inside([cdx, cdy, cdw, cdh]) {
+                    dlg.confirm_replace_open = false;
+                }
+                self.preset_dialog = Some(dlg);
+                return Some(InGameMenuAction::Close);
+            }
             let mdw = (w - 28.0).clamp(310.0, 480.0);
             let mdh = (h - 16.0).clamp(242.0, 330.0);
             let mdx = (w - mdw) * 0.5;
@@ -2040,6 +2080,22 @@ impl TouchUi {
                 } else {
                     dlg.desc_input.trim().to_owned()
                 };
+                let existing = crate::touch::Settings::find_preset_by_name(
+                    std::path::Path::new("."),
+                    settings.control_style,
+                    &name,
+                );
+                let has_conflict = match &existing {
+                    Some(ex) => dlg.is_copy || !ex.id.eq_ignore_ascii_case(&dlg.target_id),
+                    None => false,
+                };
+                if has_conflict {
+                    dlg.name_input = name;
+                    dlg.desc_input = description;
+                    dlg.confirm_replace_open = true;
+                    self.preset_dialog = Some(dlg);
+                    return Some(InGameMenuAction::Close);
+                }
                 if dlg.is_copy {
                     return Some(InGameMenuAction::CopyPreset {
                         source_id: dlg.target_id,
@@ -2088,6 +2144,7 @@ impl TouchUi {
                         name_input: format!("{} Copy", preset.name),
                         desc_input: preset.description.clone(),
                         editing_desc: false,
+                        confirm_replace_open: false,
                     });
                     return Some(InGameMenuAction::Close);
                 }
@@ -2098,6 +2155,7 @@ impl TouchUi {
                         name_input: preset.name.clone(),
                         desc_input: preset.description.clone(),
                         editing_desc: false,
+                        confirm_replace_open: false,
                     });
                     return Some(InGameMenuAction::Close);
                 }
@@ -2304,7 +2362,13 @@ impl TouchUi {
                     self.floating_menu = false;
                     return Some(InGameMenuAction::OpenControlEditor);
                 }
-                let anim_y = body_y + 340.0;
+                let send_y = body_y + 340.0;
+                if inside([cx, send_y, cw, 44.0]) {
+                    self.custom_input_picker =
+                        crate::touch::PickerStep::AskInputType { event_slot: 0 };
+                    return Some(InGameMenuAction::Close);
+                }
+                let anim_y = body_y + 392.0;
                 if inside([cx, anim_y, cw, 46.0]) {
                     return Some(InGameMenuAction::ToggleGameAnimations);
                 }
@@ -2521,55 +2585,57 @@ impl TouchUi {
         // Draw moveable Floating Menu Button (MCPE 42x42dp stone-bevel H button OR GoyControl 48x42dp '=' pill)
         if !self.expanded && bubble_alpha > 0.001 {
             if settings.control_style == ControlStyle::Mcpe {
-                let btn_w = 42.0;
-                let btn_h = 42.0;
+                let btn_w = 44.0;
+                let btn_h = 36.0;
                 let btn_x =
-                    (settings.floating_menu_pos[0] * w).clamp(6.0, (w - btn_w - 6.0).max(6.0));
+                    (settings.floating_menu_pos[0] * w).clamp(4.0, (w - btn_w - 4.0).max(4.0));
                 let btn_y =
                     (settings.floating_menu_pos[1] * h).clamp(4.0, (h - btn_h - 4.0).max(4.0));
                 let scale_rgba = |r: u8, g: u8, bl: u8, al: u8| -> u32 {
                     rgba(r, g, bl, (f32::from(al) * bubble_alpha).round() as u8)
                 };
-                // Drop shadow
+                // Authentic MCPE top-bar '...' button plate (stone-slate 3D bevel, draggable & screen-clamped)
                 ui.rounded(
                     btn_x + 1.5,
-                    btn_y + 2.5,
+                    btn_y + 2.0,
                     btn_w,
                     btn_h,
-                    4.0,
-                    scale_rgba(0, 0, 0, 125),
+                    3.0,
+                    scale_rgba(0, 0, 0, 120),
                 );
-                // Dark MCPE outer border
-                ui.rounded(btn_x, btn_y, btn_w, btn_h, 4.0, scale_rgba(18, 20, 24, 225));
-                // Translucent MCPE stone-slate body (or emerald-slate when active)
+                ui.rounded(btn_x, btn_y, btn_w, btn_h, 3.0, scale_rgba(18, 20, 24, 230));
                 let body_col = if self.floating_menu {
-                    scale_rgba(88, 130, 72, 225)
+                    scale_rgba(88, 130, 72, 230)
                 } else {
-                    scale_rgba(58, 62, 70, 205)
+                    scale_rgba(116, 118, 124, 210)
                 };
                 ui.rounded(
                     btn_x + 2.0,
                     btn_y + 2.0,
                     btn_w - 4.0,
                     btn_h - 4.0,
-                    2.5,
+                    2.0,
                     body_col,
                 );
-                // Classic MCPE 3D top/left light highlight bevel & bottom/right dark shadow bevel
-                let hi_bevel = scale_rgba(165, 172, 184, 180);
-                let lo_bevel = scale_rgba(28, 30, 36, 200);
+                let hi_bevel = scale_rgba(198, 202, 210, 215);
+                let lo_bevel = scale_rgba(48, 50, 56, 225);
                 ui.fill(btn_x + 2.0, btn_y + 2.0, btn_w - 4.0, 2.0, hi_bevel);
                 ui.fill(btn_x + 2.0, btn_y + 4.0, 2.0, btn_h - 6.0, hi_bevel);
                 ui.fill(btn_x + 2.0, btn_y + btn_h - 4.0, btn_w - 4.0, 2.0, lo_bevel);
                 ui.fill(btn_x + btn_w - 4.0, btn_y + 4.0, 2.0, btn_h - 6.0, lo_bevel);
-                // Horizon 'H' icon crisp and centered inside the MCPE button
-                ui.icon(
-                    Icon::HorizonLogo,
-                    btn_x + (btn_w - 22.0) * 0.5,
-                    btn_y + (btn_h - 22.0) * 0.5,
-                    22.0,
-                    scale_rgba(244, 246, 250, 245),
-                );
+                // Three crisp MCPE '...' pixel squares with classic 1px drop shadow
+                let dot_sz = 4.5;
+                let dot_gap = 4.5;
+                let total_dots_w = dot_sz * 3.0 + dot_gap * 2.0;
+                let start_dx = btn_x + (btn_w - total_dots_w) * 0.5;
+                let dot_y = btn_y + (btn_h - dot_sz) * 0.5;
+                let dot_fg = scale_rgba(248, 249, 252, 250);
+                let dot_sh = scale_rgba(24, 26, 32, 220);
+                for di in 0..3 {
+                    let dx_i = start_dx + di as f32 * (dot_sz + dot_gap);
+                    ui.fill(dx_i + 1.0, dot_y + 1.0, dot_sz, dot_sz, dot_sh);
+                    ui.fill(dx_i, dot_y, dot_sz, dot_sz, dot_fg);
+                }
             } else {
                 let btn_w = 48.0;
                 let btn_h = 42.0;
@@ -2732,7 +2798,7 @@ impl TouchUi {
         // Scrollable Right Content Panel with scissor clip and tab transition slide
         let tab_slide = (1.0 - tab_ease) * 14.0;
         let content_height = match self.hub_tab {
-            0 => 394.0,
+            0 => 446.0,
             1 => 368.0,
             2 => 410.0,
             3 => 242.0,
@@ -2997,9 +3063,38 @@ impl TouchUi {
                     ui.text(Face::Regular, 8.6, rx + 42.0, act_y + 23.0, muted_c, sub);
                 }
 
+                let send_y = body_y + 340.0;
+                ui.rounded(cx, send_y, cw, 44.0, 11.0, card_sel);
+                ui.border(cx, send_y, cw, 44.0, 11.0, accent);
+                ui.icon(Icon::Gamepad, cx + 12.0, send_y + 13.0, 18.0, accent_hi);
+                ui.text(
+                    Face::SemiBold,
+                    10.8,
+                    cx + 38.0,
+                    send_y + 6.0,
+                    text_c,
+                    "Send Key (Keyboard / Mouse / Action)",
+                );
+                ui.text(
+                    Face::Regular,
+                    8.8,
+                    cx + 38.0,
+                    send_y + 23.0,
+                    muted_c,
+                    "Fast access: open 104-key PC keyboard, mouse buttons, scroll & actions",
+                );
+                ui.text(
+                    Face::SemiBold,
+                    13.5,
+                    cx + cw - 18.0,
+                    send_y + 13.0,
+                    accent_hi,
+                    "›",
+                );
+
                 draw_toggle_row(
                     &mut ui,
-                    body_y + 340.0,
+                    body_y + 392.0,
                     "In-Game Animations",
                     "Animated block textures, view bobbing, FOV transitions & menu motion",
                     Some(!settings.disable_game_animations),
@@ -3876,7 +3971,48 @@ impl TouchUi {
                 } else {
                     "Save Preset Details"
                 },
-            );
+            );            if dlg.confirm_replace_open {
+                ui.fill(0.0, 0.0, w, h, rgba(4, 5, 10, 210));
+                let cdw = (w - 36.0).clamp(290.0, 430.0);
+                let cdh = 182.0;
+                let cdx = (w - cdw) * 0.5;
+                let cdy = (h - cdh) * 0.5;
+                ui.rounded(cdx, cdy, cdw, cdh, 18.0, surface_bg);
+                ui.stroke_rounded(cdx, cdy, cdw, cdh, 18.0, 1.6, accent);
+                ui.text(
+                    Face::SemiBold,
+                    13.5,
+                    cdx + 18.0,
+                    cdy + 16.0,
+                    text_c,
+                    "Replace Existing Control Preset?",
+                );
+                ui.text(
+                    Face::Regular,
+                    10.2,
+                    cdx + 18.0,
+                    cdy + 44.0,
+                    muted_c,
+                    &format!("A control preset named '{}' already exists.", dlg.name_input.trim()),
+                );
+                ui.text(
+                    Face::Regular,
+                    9.8,
+                    cdx + 18.0,
+                    cdy + 64.0,
+                    muted_c,
+                    "Duplicate preset names are not allowed. Save to replace the current one?",
+                );
+                let bw = (cdw - 44.0) * 0.5;
+                let by = cdy + cdh - 50.0;
+                let save_r = [cdx + 18.0, by, bw, 36.0];
+                let cancel_r = [cdx + 26.0 + bw, by, bw, 36.0];
+                ui.rounded(save_r[0], save_r[1], save_r[2], save_r[3], 10.0, accent);
+                ui.centered_fit(Face::SemiBold, 11.0, save_r, accent_fg, "Save");
+                ui.rounded(cancel_r[0], cancel_r[1], cancel_r[2], cancel_r[3], 10.0, card_bg);
+                ui.border(cancel_r[0], cancel_r[1], cancel_r[2], cancel_r[3], 10.0, border_c);
+                ui.centered_fit(Face::SemiBold, 11.0, cancel_r, text_c, "Cancel");
+            }
         }
 
         // Send Custom Input Picker Sub-Modal
@@ -5971,6 +6107,60 @@ pub fn draw_hud_editor(
         return;
     }
 
+    // 8a. Duplicate Preset Name Confirmation Modal (when ed.duplicate_name_confirm_open == true)
+    if ed.duplicate_name_confirm_open {
+        ui.fill(0.0, 0.0, w, h, rgba(4, 5, 10, 210));
+        let dw = (w - 36.0).clamp(300.0, 440.0);
+        let dh = 184.0;
+        let dx = (w - dw) * 0.5;
+        let dy = (h - dh) * 0.5;
+        ui.rounded(dx, dy, dw, dh, 18.0, bg_card);
+        ui.stroke_rounded(dx, dy, dw, dh, 18.0, 1.6, accent);
+        let conflict_name = ed
+            .duplicate_conflict_target
+            .as_ref()
+            .map_or(ed.save_name_input.trim(), |(_, n, _)| n.as_str());
+        ui.text(
+            Face::SemiBold,
+            13.8,
+            dx + 18.0,
+            dy + 16.0,
+            text_c,
+            "Replace Existing Control Preset?",
+        );
+        ui.text(
+            Face::Regular,
+            10.2,
+            dx + 18.0,
+            dy + 44.0,
+            muted_c,
+            &format!(
+                "A control preset named '{}' already exists in {}.",
+                conflict_name,
+                tc.settings.control_style.label()
+            ),
+        );
+        ui.text(
+            Face::Regular,
+            9.8,
+            dx + 18.0,
+            dy + 64.0,
+            muted_c,
+            "Controls with the same name are not allowed. Save to replace the current one?",
+        );
+        let bw = (dw - 44.0) * 0.5;
+        let by = dy + dh - 50.0;
+        let save_r = [dx + 18.0, by, bw, 36.0];
+        let cancel_r = [dx + 26.0 + bw, by, bw, 36.0];
+        ui.rounded(save_r[0], save_r[1], save_r[2], save_r[3], 10.0, accent);
+        ui.centered_fit(Face::SemiBold, 11.5, save_r, accent_fg, "Save");
+        ui.rounded(cancel_r[0], cancel_r[1], cancel_r[2], cancel_r[3], 10.0, bg_hi);
+        ui.border(cancel_r[0], cancel_r[1], cancel_r[2], cancel_r[3], 10.0, border_c);
+        ui.centered_fit(Face::SemiBold, 11.5, cancel_r, text_c, "Cancel");
+        ui.finish();
+        return;
+    }
+
     // 8b. Independent Control Editor Save Workflow Dialog (Option A: Replace / Option B: Create New)
     if ed.save_dialog_open {
         ui.fill(0.0, 0.0, w, h, rgba(4, 5, 10, 195));
@@ -6702,6 +6892,41 @@ pub fn touch_hud_editor(
             return false;
         }
 
+        // 1a-bis. If Duplicate Preset Name Confirmation Modal is open (`Save` to replace vs `Cancel`):
+        if ed.duplicate_name_confirm_open {
+            let dw = (w - 36.0).clamp(300.0, 440.0);
+            let dh = 184.0;
+            let dx = (w - dw) * 0.5;
+            let dy = (h - dh) * 0.5;
+            let bw = (dw - 44.0) * 0.5;
+            let by = dy + dh - 50.0;
+            let save_r = [dx + 18.0, by, bw, 36.0];
+            let cancel_r = [dx + 26.0 + bw, by, bw, 36.0];
+            if inside(save_r) {
+                let (_, name, desc) = ed.duplicate_conflict_target.take().unwrap_or_else(|| {
+                    (
+                        String::new(),
+                        ed.save_name_input.trim().to_owned(),
+                        ed.save_desc_input.trim().to_owned(),
+                    )
+                });
+                ed.duplicate_name_confirm_open = false;
+                ed.save_dialog_open = false;
+                let _ = tc
+                    .settings
+                    .save_or_replace_preset_by_name(std::path::Path::new("."), &name, &desc);
+                let _ = tc.settings.save();
+                tc.clicked = true;
+                return true;
+            }
+            if inside(cancel_r) || !inside([dx, dy, dw, dh]) {
+                ed.duplicate_name_confirm_open = false;
+                ed.duplicate_conflict_target = None;
+                tc.clicked = true;
+            }
+            return false;
+        }
+
         // 1b. If Save Dialog is open (Option A: Replace existing / Option B: Create new preset as...)
         if ed.save_dialog_open {
             let dw = (w - 24.0).clamp(310.0, 520.0);
@@ -6759,7 +6984,7 @@ pub fn touch_hud_editor(
                 return false;
             }
 
-            // Option B: Create New Preset & Save
+            // Option B: Create New Preset & Save (checks for duplicate name first)
             if inside([dx + 14.0, dy + dh - 34.0, dw - 28.0, 26.0]) {
                 let name = if ed.save_name_input.trim().is_empty() {
                     format!("{} Custom", tc.settings.preset_name)
@@ -6771,6 +6996,16 @@ pub fn touch_hud_editor(
                 } else {
                     ed.save_desc_input.trim().to_owned()
                 };
+                if let Some(existing) = crate::touch::Settings::find_preset_by_name(
+                    std::path::Path::new("."),
+                    tc.settings.control_style,
+                    &name,
+                ) {
+                    ed.duplicate_name_confirm_open = true;
+                    ed.duplicate_conflict_target = Some((existing.id, name, desc));
+                    tc.clicked = true;
+                    return false;
+                }
                 let _ = tc
                     .settings
                     .save_new_preset(std::path::Path::new("."), &name, &desc);

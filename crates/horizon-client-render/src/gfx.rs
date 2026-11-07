@@ -3996,6 +3996,9 @@ impl Renderer {
             .take();
         self.offscreen = None;
         self.suspended = false;
+        if self.config.present_mode != previous.config.present_mode {
+            self.surface_unconfigured = true;
+        }
         if self.surface.is_none() {
             self.recreate_surface()?;
         }
@@ -4538,9 +4541,13 @@ impl Renderer {
             Some(PresentMode::Immediate) => wgpu::PresentMode::Immediate,
             _ => wgpu::PresentMode::Fifo,
         };
-        if self.config.present_mode != mode && self.surface.is_some() {
+        if self.config.present_mode != mode {
             self.config.present_mode = mode;
-            self.configure_surface();
+            if self.surface.is_some() {
+                self.configure_surface();
+            } else {
+                self.surface_unconfigured = true;
+            }
         }
     }
     /// Follows the window to `width` x `height`. A size the swapchain can't take

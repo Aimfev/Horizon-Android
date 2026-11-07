@@ -20486,7 +20486,10 @@ impl Loading {
             None,
             rendering_api(&self.settings),
         ) {
-            Ok(r) => self.renderer = Some(r),
+            Ok(mut r) => {
+                r.set_present_mode(self.settings.vsync, self.settings.horizon.present_mode);
+                self.renderer = Some(r);
+            }
             Err(e) => {
                 #[cfg(target_os = "windows")]
                 if let Some(stop) = &boot_paint_stop {
@@ -20548,7 +20551,8 @@ impl Loading {
             None,
             rendering_api(&self.settings),
         ) {
-            Ok(r) => {
+            Ok(mut r) => {
+                r.set_present_mode(self.settings.vsync, self.settings.horizon.present_mode);
                 horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
                 self.renderer = Some(r);
             }

@@ -147,6 +147,7 @@ impl Launcher {
         }
         crate::configure_input_mode(catalog.config.input_host);
         crate::device_runtime::configure(catalog.config.device);
+        catalog.config.apply_experimental_to_game(&home);
         horizon_client::ui_theme::set_ui_scale_percent(catalog.config.ui_scale_percent);
         horizon_client::ui_theme::motion::set_launcher_animations_disabled(
             catalog.config.disable_launcher_animations,
@@ -370,6 +371,15 @@ impl Launcher {
             )),
         };
         renderer.set_loading_ui(&gui.atlas, gui.panorama.as_ref())?;
+        let uncapped = self.catalog.config.max_fps_mode && !self.catalog.config.battery_perf_mode;
+        renderer.set_present_mode(
+            !uncapped,
+            if uncapped {
+                horizon_client::graphics::PresentMode::Immediate
+            } else {
+                horizon_client::graphics::PresentMode::Fifo
+            },
+        );
         self.renderer = Some(renderer);
         self.window = Some(window);
         self.gui = Some(gui);

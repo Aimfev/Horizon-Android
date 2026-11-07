@@ -164,7 +164,7 @@ fn row(home: &Path, id: &str) -> io::Result<Value> {
     } else {
         match doc.path.extension().and_then(|s| s.to_str()) {
             Some("jsonl") => "application/x-ndjson",
-            Some("zip" | "hmod" | "hshader") => "application/zip",
+            Some("zip" | "hmod" | "hnmod" | "jar" | "hshader") => "application/zip",
             Some("png") => "image/png",
             Some("json") => "application/json",
             Some("txt" | "wgsl" | "glsl" | "fsh" | "vsh" | "toml") => "text/plain",
@@ -316,7 +316,7 @@ pub fn call(home: &Path, op: &str, id: &str, arg: &str) -> io::Result<Value> {
                 let p = profile(home);
                 let folder = if op == "mkdir" {
                     "worlds"
-                } else if arg.ends_with(".hmod") || arg.ends_with(".jar") {
+                } else if arg.ends_with(".hmod") || arg.ends_with(".hnmod") || arg.ends_with(".jar") {
                     "mods"
                 } else if arg.ends_with(".hshader") {
                     "shaders"
@@ -726,6 +726,87 @@ pub fn resolve_fm_path(home: &Path, profile_root: &Path, rel: &str) -> Result<Pa
     Ok(path)
 }
 
+/// Synchronizes installed native mods (`horizon-native-mods/*.hnmod`) and enabled built-in
+/// Horizon mods (`ANDROID_BUNDLED` / `horizon-mods.txt`) into `horizon-mods/` so the Mods
+/// folder in the File Manager always reflects every installed and active mod.
+pub fn sync_mods_folder(profile_root: &Path) {
+    let mods_dir = profile_root.join("horizon-mods");
+    let _ = fs::create_dir_all(&mods_dir);
+    if fs::symlink_metadata(&mods_dir).is_ok_and(|m| m.file_type().is_symlink()) {
+        return;
+    }
+
+    // 1. Mirror any .hnmod / .hmod / .jar files from horizon-native-mods/ into horizon-mods/
+    let native_dir = profile_root.join("horizon-native-mods");
+    if fs::symlink_metadata(&native_dir).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) {
+        if let Ok(rd) = fs::read_dir(&native_dir) {
+            for entry in rd.flatten() {
+                let Ok(ft) = entry.file_type() else { continue };
+                if ft.is_symlink() || !ft.is_file() {
+                    continue;
+                }
+                let fname = entry.file_name();
+                let Some(name_str) = fname.to_str() else { continue };
+                if validate_entry_name(name_str).is_err() {
+                    continue;
+                }
+                let lower = name_str.to_ascii_lowercase();
+                if lower.ends_with(".hnmod") || lower.ends_with(".hmod") || lower.ends_with(".jar") {
+                    let dst = mods_dir.join(name_str);
+                    if !dst.exists() {
+                        let _ = fs::copy(entry.path(), &dst);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Sync enabled built-in Horizon mods (ANDROID_BUNDLED) and any enabled mod IDs in horizon-mods.txt
+    let on = crate::mod_list::ModList::load(profile_root);
+    for &(b_id, b_title, b_desc) in &crate::mod_list::ANDROID_BUNDLED {
+        let descriptor = mods_dir.join(format!("{b_id}.mod.json"));
+        if on.enabled.contains(b_id) && !on.disabled.contains(b_id) {
+            if !descriptor.exists() {
+                let payload = serde_json::json!({
+                    "id": b_id,
+                    "name": b_title,
+                    "description": b_desc,
+                    "kind": "bundled_horizon_mod",
+                    "enabled": true
+                });
+                if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
+                    let _ = fs::write(&descriptor, bytes);
+                }
+            }
+        } else if descriptor.exists() {
+            let _ = fs::remove_file(&descriptor);
+        }
+    }
+
+    for mod_id in &on.enabled {
+        if on.disabled.contains(mod_id) || validate_entry_name(mod_id).is_err() {
+            continue;
+        }
+        let has_file = mods_dir.join(format!("{mod_id}.hmod")).exists()
+            || mods_dir.join(format!("{mod_id}.hnmod")).exists()
+            || mods_dir.join(format!("{mod_id}.jar")).exists()
+            || mods_dir.join(format!("{mod_id}.mod.json")).exists()
+            || mods_dir.join(mod_id).exists();
+        if !has_file {
+            let descriptor = mods_dir.join(format!("{mod_id}.mod.json"));
+            let payload = serde_json::json!({
+                "id": mod_id,
+                "name": mod_id,
+                "kind": "enabled_horizon_mod",
+                "enabled": true
+            });
+            if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
+                let _ = fs::write(&descriptor, bytes);
+            }
+        }
+    }
+}
+
 pub fn ensure_fm_dirs(home: &Path, profile_root: &Path) {
     let _ = fs::create_dir_all(profile_root);
     for (sub, _) in FM_ROOT_DIRS {
@@ -739,11 +820,19 @@ pub fn ensure_fm_dirs(home: &Path, profile_root: &Path) {
         };
         let _ = fs::create_dir_all(target);
     }
+    sync_mods_folder(profile_root);
 }
 
 pub fn classify_entry_kind(path: &Path, is_dir: bool) -> String {
     if is_dir {
         return "Folder".into();
+    }
+    if path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|n| n.to_ascii_lowercase().ends_with(".mod.json"))
+    {
+        return "Built-in Mod (.mod.json)".into();
     }
     match path
         .extension()
@@ -1004,6 +1093,23 @@ pub fn fm_delete(
         } else {
             fs::remove_file(&path).map_err(|e| e.to_string())?;
         }
+        if let Some(mod_file) = clean.strip_prefix("horizon-mods/") {
+            let native_copy = profile_root.join("horizon-native-mods").join(mod_file);
+            if native_copy.exists() && fs::symlink_metadata(&native_copy).is_ok_and(|m| !m.file_type().is_symlink()) {
+                let _ = fs::remove_file(&native_copy);
+            }
+            let mod_id = mod_file
+                .strip_suffix(".mod.json")
+                .or_else(|| mod_file.strip_suffix(".hnmod"))
+                .or_else(|| mod_file.strip_suffix(".hmod"))
+                .or_else(|| mod_file.strip_suffix(".jar"))
+                .unwrap_or(mod_file);
+            let mut on = crate::mod_list::ModList::load(profile_root);
+            if on.enabled.remove(mod_id) || mod_file.ends_with(".mod.json") {
+                on.disabled.insert(mod_id.to_owned());
+                on.save(profile_root);
+            }
+        }
         deleted += 1;
     }
     Ok(deleted)
@@ -1219,9 +1325,10 @@ pub fn fm_details(
     })
 }
 
-/// Creates a zip archive of a folder for export/backup.
+/// Creates a zip archive of a folder in a clean staging area (`.export-staging`) so exports
+/// never clutter `logs`, `performance`, or the source folder, and can be pasted or saved anywhere.
 pub fn export_folder_zip(
-    _home: &Path,
+    home: &Path,
     _profile: u32,
     dir_path: &Path,
 ) -> std::result::Result<(PathBuf, String), String> {
@@ -1234,8 +1341,16 @@ pub fn export_folder_zip(
         .and_then(|s| s.to_str())
         .ok_or("Invalid folder name")?;
     let zip_name = format!("{folder_name}.zip");
-    let parent = dir_path.parent().unwrap_or(dir_path);
-    let zip_path = parent.join(&zip_name);
+    let staging_dir = home.join(".export-staging");
+    fs::create_dir_all(&staging_dir).map_err(|e| e.to_string())?;
+    if fs::symlink_metadata(&staging_dir)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("Refusing a redirected export staging directory.".into());
+    }
+    let zip_path = staging_dir.join(&zip_name);
 
     let file = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
@@ -1275,6 +1390,109 @@ pub fn export_folder_zip(
     zip.finish().map_err(|e| e.to_string())?;
 
     Ok((zip_path, zip_name))
+}
+
+/// If `archive_path` is a `.zip` or `.mcworld` containing `level.dat`, extracts it into `saves_dir/<world_name>`
+/// and returns `Ok(Some(world_folder_name))`. Returns `Ok(None)` if it is not a Minecraft world archive.
+pub fn extract_world_zip_if_valid(
+    archive_path: &Path,
+    saves_dir: &Path,
+    fallback_name: &str,
+) -> std::result::Result<Option<String>, String> {
+    let file = File::open(archive_path).map_err(|e| e.to_string())?;
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return Ok(None);
+    };
+    let mut level_dat_prefix: Option<String> = None;
+    for i in 0..archive.len() {
+        let Ok(entry) = archive.by_index(i) else { continue };
+        let Ok(entry_name) = entry.name() else { continue };
+        let name = entry_name.replace('\\', "/");
+        if name == "level.dat" {
+            level_dat_prefix = Some(String::new());
+            break;
+        } else if let Some(prefix) = name.strip_suffix("/level.dat") {
+            let clean_prefix = prefix.trim_matches('/');
+            if !clean_prefix.is_empty() && !clean_prefix.contains("..") {
+                level_dat_prefix = Some(format!("{clean_prefix}/"));
+                break;
+            }
+        }
+    }
+    let Some(prefix) = level_dat_prefix else {
+        return Ok(None);
+    };
+    let raw_world_name = if !prefix.is_empty() {
+        prefix
+            .trim_end_matches('/')
+            .rsplit_once('/')
+            .map_or(prefix.trim_end_matches('/'), |(_, last)| last)
+    } else {
+        Path::new(fallback_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Imported World")
+    };
+    let sanitized: String = raw_world_name
+        .chars()
+        .map(|c| if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .collect::<String>()
+        .trim()
+        .to_owned();
+    let world_name = if sanitized.is_empty() || sanitized.starts_with('.') {
+        "Imported World".to_owned()
+    } else {
+        sanitized
+    };
+    fs::create_dir_all(saves_dir).map_err(|e| e.to_string())?;
+    let dest_dir = unique_destination_path(saves_dir, &world_name)?;
+    fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
+    let final_folder_name = dest_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+
+    for i in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(i) else { continue };
+        let Ok(entry_name) = entry.name() else { continue };
+        let full_name = entry_name.replace('\\', "/");
+        let rel = if prefix.is_empty() {
+            full_name.as_str()
+        } else if let Some(stripped) = full_name.strip_prefix(&prefix) {
+            stripped
+        } else {
+            continue;
+        };
+        let rel = rel.trim_matches('/');
+        if rel.is_empty() || rel.contains("..") {
+            continue;
+        }
+        let mut out_path = dest_dir.clone();
+        let mut valid_rel = true;
+        for seg in rel.split('/') {
+            let s = seg.trim();
+            if s.is_empty() || s == "." || s == ".." {
+                valid_rel = false;
+                break;
+            }
+            out_path.push(s);
+        }
+        if !valid_rel {
+            continue;
+        }
+        if entry.is_dir() {
+            let _ = fs::create_dir_all(&out_path);
+        } else {
+            if let Some(parent) = out_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Ok(mut out_file) = File::create(&out_path) {
+                let _ = io::copy(&mut entry, &mut out_file);
+            }
+        }
+    }
+    Ok(Some(final_folder_name))
 }
 
 #[cfg(test)]
