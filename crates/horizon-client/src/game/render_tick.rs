@@ -433,10 +433,24 @@ impl Game<'_> {
                 // ClientLevel.tickWeatherEffects: rain splashes within the weather
                 // radius, and the rain sound.
                 let mut random = LegacyRandom::new(self.world.game_time.wrapping_mul(312_987_231));
-                let radius = self.settings.weather_radius;
+                let max_radius = if cfg!(target_pointer_width = "32") {
+                    5
+                } else if cfg!(target_os = "android") {
+                    7
+                } else {
+                    15
+                };
+                let radius = self.settings.weather_radius.clamp(0, max_radius);
                 let diameter = 2 * radius + 1;
-                let count = (0.225 * (diameter * diameter) as f32 * rain * rain) as i32
+                let raw_count = (0.225 * (diameter * diameter) as f32 * rain * rain) as i32
                     / if self.settings.particles == 1 { 2 } else { 1 };
+                let count = if cfg!(target_pointer_width = "32") {
+                    raw_count.min(14)
+                } else if cfg!(target_os = "android") {
+                    raw_count.min(24)
+                } else {
+                    raw_count
+                };
                 let mut rain_position = None;
                 for _ in 0..count {
                     let x = block[0] + random.next_int_bound(diameter).unwrap_or(0) - radius;

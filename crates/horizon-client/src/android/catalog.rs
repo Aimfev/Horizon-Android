@@ -1,7 +1,6 @@
 //! Mobile launcher state. Browser operations reuse the desktop backend unchanged.
 use crate::browser::{self, Kind, Project, Query, Source, installed::Installed};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -341,11 +340,11 @@ impl Config {
         match self.renderer {
             RendererMode::OpenGl => {
                 settings.horizon.api = horizon_client::graphics::GraphicsApi::OpenGl;
-                settings.file.set("preferredGraphicsBackend", horizon_client::options_file::V::Str("opengl".into()));
+                settings.file.set("preferredGraphicsBackend", crate::options_file::V::String("opengl".into()));
             }
             RendererMode::Vulkan | RendererMode::VulkanCompatibility => {
                 settings.horizon.api = horizon_client::graphics::GraphicsApi::Vulkan;
-                settings.file.set("preferredGraphicsBackend", horizon_client::options_file::V::Str("vulkan".into()));
+                settings.file.set("preferredGraphicsBackend", crate::options_file::V::String("vulkan".into()));
             }
         }
         settings.save(&options_path);
@@ -955,12 +954,23 @@ impl Catalog {
                     .or_else(|| name.strip_suffix(".hmod"))
                     .or_else(|| name.strip_suffix(".jar"))
                     .unwrap_or(&name);
+                let is_on = if name.ends_with(".hnmod") {
+                    if !on.enabled.contains(mod_id) && !on.disabled.contains(mod_id) {
+                        horizon_client::jar_transpiler::enable_mod_in_profile(&game, mod_id);
+                    }
+                    !on.disabled.contains(mod_id)
+                } else {
+                    on.enabled.contains(mod_id) && !on.disabled.contains(mod_id)
+                };
+                let display_title = horizon_client::jar_transpiler::canonical_horizon_mod_meta(mod_id)
+                    .map(|(t, _)| t.to_owned())
+                    .unwrap_or_else(|| horizon_client::jar_transpiler::title_case_id(mod_id));
                 let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 self.local.push(LocalItem {
                     kind: horizon_client::content_files::Kind::Mods,
                     file: rel,
-                    title: mod_id.to_owned(),
-                    enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
+                    title: display_title,
+                    enabled: is_on,
                     size_bytes,
                     badge: "MOD",
                     subtitle: format!(

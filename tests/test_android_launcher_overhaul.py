@@ -1029,5 +1029,72 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("back cargo .cargo ro", sandbox)
 
 
+
+    def test_pc_horizon_shader_mod_rain_and_import_parity(self) -> None:
+        native_material = (ROOT / "crates/horizon-client-render/src/gfx/native_material.rs").read_text(encoding="utf-8")
+        self.assertIn("override_ident(line)", native_material)
+        self.assertIn("horizon_block_sprite_size()", native_material)
+        self.assertIn("vertex_stage_overrides_and_helpers_link_with_material", native_material)
+
+        mod_list = (ROOT / "crates/horizon-client-render/src/mod_list.rs").read_text(encoding="utf-8")
+        self.assertIn("LIVE_MOD_STATE", mod_list)
+        self.assertIn("pub fn is_live_disabled(", mod_list)
+
+        native_hooks = (ROOT / "crates/horizon-client/src/game/native_hooks.rs").read_text(encoding="utf-8")
+        self.assertIn(
+            "super::android_bundled::native_right_click_block(self, pos, face, canceled)",
+            native_hooks,
+        )
+        self.assertIn(
+            "super::android_bundled::native_on_check(self, mod_id)",
+            native_hooks,
+        )
+
+        android_bundled = (ROOT / "crates/horizon-client/src/game/android_bundled.rs").read_text(encoding="utf-8")
+        self.assertNotIn("HUD Overlay & Visuals", android_bundled)
+        self.assertNotIn("Active Gameplay Effect", android_bundled)
+        self.assertIn("game_wrench_turn", android_bundled)
+        self.assertIn("try_right_click_harvest_crop", android_bundled)
+        self.assertIn("ore_family", android_bundled)
+        self.assertIn("is_tree_log", android_bundled)
+        self.assertIn("estimate_food_values", android_bundled)
+        self.assertIn("jade_hud", android_bundled)
+
+        jar_transpiler = (ROOT / "crates/horizon-client/src/jar_transpiler.rs").read_text(encoding="utf-8")
+        self.assertIn("canonical_horizon_mod_meta", jar_transpiler)
+        self.assertIn("horizon-mixin.toml", jar_transpiler)
+
+        documents = (ROOT / "crates/horizon-client/src/android/documents.rs").read_text(encoding="utf-8")
+        self.assertIn('notice("Import cancelled", false);', documents)
+        self.assertIn("s.working = false;", documents)
+
+        audio = (ROOT / "crates/horizon-client-render/src/audio.rs").read_text(encoding="utf-8")
+        self.assertIn("cacheable_stream", audio)
+
+
+
+    def test_swipe_through_goy_opacity_deletable_joystick_and_glass_ui(self) -> None:
+        custom_rs = (ROOT / "crates/horizon-client-render/src/touch/custom.rs").read_text(encoding="utf-8")
+        self.assertIn("activate_custom_button_at", custom_rs)
+        self.assertIn("release_custom_finger_key", custom_rs)
+        self.assertIn("swipe_through_buttons_triggers_each_button_in_sequence_and_zero_opacity_goy_works", custom_rs)
+
+        touch_rs = (ROOT / "crates/horizon-client-render/src/touch.rs").read_text(encoding="utf-8")
+        self.assertIn("custom_swipe_btn", touch_rs)
+        self.assertIn("builtin_swipe_ctrl", touch_rs)
+        self.assertIn("draw_convex_poly", touch_rs)
+
+        touch_ui = (ROOT / "crates/horizon-client/src/touch_ui.rs").read_text(encoding="utf-8")
+        self.assertIn("Delete Joystick", touch_ui)
+        self.assertIn("+ Restore Joystick", touch_ui)
+        self.assertIn("((t * 100.0).round() / 100.0).clamp(0.0, 1.0)", touch_ui)
+
+        ui_theme = (ROOT / "crates/horizon-client/src/ui_theme.rs").read_text(encoding="utf-8")
+        self.assertIn("set_stagger_transition", ui_theme)
+        self.assertIn("is_glass_surface", ui_theme)
+        self.assertIn("draw_convex_polygon_dp", ui_theme)
+        self.assertIn("ambient_time()", ui_theme)
+
+
 if __name__ == "__main__":
     unittest.main()

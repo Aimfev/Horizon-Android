@@ -587,6 +587,18 @@ fn draw_setting_card(
             my3_card_bg()
         },
     );
+    ui.border(
+        x,
+        y,
+        w,
+        h,
+        18.0,
+        if is_active_card {
+            my3_accent()
+        } else {
+            my3_card_border()
+        },
+    );
     if is_active_card {
         ui.rounded(
             x + 4.0,
@@ -1198,16 +1210,11 @@ impl Launcher {
         self.targets
             .push(([pill_x, pill_y, pill_w, pill_h], Action::Account));
 
-        // ---- Left Vertical Navigation Rail + Smooth Gliding Active Pill ----
+        // ---- Left Vertical Frosted Glass Navigation Rail + Smooth Gliding Active Pill ----
         let sidebar_w = if w < 560.0 { 136.0 } else { 184.0 };
-        ui.rounded(
-            sidebar_w,
-            56.0,
-            1.0,
-            (h - 68.0).max(10.0),
-            0.0,
-            my3_border(),
-        );
+        let rail_h = (h - 64.0).max(40.0);
+        ui.rounded(6.0, 54.0, sidebar_w - 8.0, rail_h, 20.0, active_th.sidebar_bg);
+        ui.border(6.0, 54.0, sidebar_w - 8.0, rail_h, 20.0, my3_border());
         let nav_start_y = 62.0;
         let nav_step = ((h - nav_start_y - 14.0) / 6.0).clamp(36.0, 48.0);
         let nav_h = (nav_step - 5.0).clamp(32.0, 41.0);
@@ -1229,14 +1236,30 @@ impl Launcher {
             self.catalog.sections,
         );
 
-        // Draw gliding MY3 active indicator pill
+        // Draw gliding Frosted Glass active indicator pill + luminous left accent bar
         ui.rounded(
-            10.0,
+            11.0,
             self.anim.nav_pill_y,
-            sidebar_w - 20.0,
+            sidebar_w - 22.0,
             nav_h,
             nav_h * 0.5,
             my3_nav_active(),
+        );
+        ui.border(
+            11.0,
+            self.anim.nav_pill_y,
+            sidebar_w - 22.0,
+            nav_h,
+            nav_h * 0.5,
+            my3_accent(),
+        );
+        ui.rounded(
+            15.0,
+            self.anim.nav_pill_y + 8.0,
+            3.5,
+            (nav_h - 16.0).max(10.0),
+            1.8,
+            my3_accent(),
         );
 
         for (i, page) in Page::ALL.iter().enumerate() {
@@ -1265,12 +1288,13 @@ impl Launcher {
                 .push(([nx, ny, nw, nav_h], Action::Page(*page)));
         }
 
-        // ---- Main Content Area (with smooth slide transition offset) ----
+        // ---- Main Content Area (with spatial staggered entrance & glassmorphism) ----
         let content_x = sidebar_w + 22.0;
         let content_w = (w - content_x - 22.0).max(160.0);
         let compact = content_w < 430.0;
         let page = self.catalog.page;
-        let slide_y = self.anim.page_slide;
+        let slide_y = self.anim.page_slide * 0.35;
+        ui.set_stagger_transition(self.anim.page_fade, content_x, 52.0);
 
         // When any catalog item (Mod, Pack, Shader) is downloading/installing, take the entire
         // middle screen to show the MY3 downloading view with Speed, ETA, and Steps.
@@ -2116,6 +2140,7 @@ impl Launcher {
             }
         }
 
+        ui.set_stagger_transition(1.0, 0.0, 0.0);
         // Material You 3 Project Detail Modal (Versions, Modrinth Description, Gallery Screenshots)
         if self.catalog.project_modal.is_some() {
             self.draw_project_modal(&mut ui, w, h);
@@ -2307,16 +2332,29 @@ impl Launcher {
         if !self.mouse_down
             && self.drag.is_none()
             && let Some((action, time)) = self.feedback
-            && time.elapsed() < std::time::Duration::from_millis(160)
+            && time.elapsed() < std::time::Duration::from_millis(240)
             && let Some(([x, y, w, h], _)) = self.targets.iter().find(|(_, a)| *a == action)
         {
+            let p = (time.elapsed().as_secs_f32() / 0.24).clamp(0.0, 1.0);
+            let ease = horizon_client::ui_theme::motion::ease_out_cubic(p);
+            let fade = (1.0 - p).clamp(0.0, 1.0);
+            let rad = (*h * 0.42).clamp(10.0, 22.0);
+            let expand = ease * 3.5;
             ui.rounded(
                 *x,
                 *y,
                 *w,
                 *h,
-                (*h * 0.42).clamp(10.0, 22.0),
-                horizon_client::hud::rgba(255, 255, 255, 36),
+                rad,
+                horizon_client::hud::rgba(255, 255, 255, (44.0 * fade) as u8),
+            );
+            ui.border(
+                *x - expand,
+                *y - expand,
+                *w + expand * 2.0,
+                *h + expand * 2.0,
+                rad + expand,
+                color::with_alpha(my3_accent(), 0.72 * fade),
             );
         }
         crate::documents::draw_ui(&mut ui);
@@ -7176,6 +7214,7 @@ impl Launcher {
             Some(Action::SetInstalledFilter(filter)) => {
                 self.catalog.installed_filter = filter;
                 self.catalog.scroll = 0.0;
+                self.anim.trigger_page_transition();
             }
             Some(Action::CycleInstalledSort) => {
                 self.catalog.installed_sort = self.catalog.installed_sort.next();
@@ -7223,6 +7262,7 @@ impl Launcher {
             }
             Some(Action::FmNavigateRoot(rel)) => {
                 self.catalog.fm_navigate(&self.home, (*rel).to_owned());
+                self.anim.trigger_page_transition();
             }
             Some(Action::FmBreadcrumb(depth)) => {
                 if depth == 0 {

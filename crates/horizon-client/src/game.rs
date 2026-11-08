@@ -13668,10 +13668,19 @@ impl Game<'_> {
             camera.y.floor() as i32,
             camera.z.floor() as i32,
         );
-        // The 32x32 direction table supports at most a 15-block radius.
-        let radius = self.settings.weather_radius.clamp(0, 15);
+        // The 32x32 direction table supports at most a 15-block radius; cap on Android / 32-bit
+        // to eliminate rain fillrate & CPU heightmap spikes on low-end mobile GPUs.
+        let max_radius = if cfg!(target_pointer_width = "32") {
+            5
+        } else if cfg!(target_os = "android") {
+            7
+        } else {
+            15
+        };
+        let radius = self.settings.weather_radius.clamp(0, max_radius);
+        let side = (radius * 2 + 1).max(0) as usize;
         let eye = camera.to_array();
-        let mut rain = Vec::new();
+        let mut rain = Vec::with_capacity(side * side * 4);
         let mut snow_vertices = Vec::new();
         // Saturation keeps extreme camera coordinates from overflowing the loop.
         for z in cz.saturating_sub(radius)..=cz.saturating_add(radius) {

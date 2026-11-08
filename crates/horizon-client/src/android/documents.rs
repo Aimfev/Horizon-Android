@@ -71,10 +71,12 @@ static STATE: Mutex<State> = Mutex::new(State {
     progress: None,
 });
 static CANCEL: AtomicBool = AtomicBool::new(false);
+
 pub fn busy() -> bool {
     let s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     s.request.is_some() || s.working || s.conflict.is_some()
 }
+
 pub fn conflict() -> bool {
     STATE
         .lock()
@@ -82,6 +84,14 @@ pub fn conflict() -> bool {
         .conflict
         .is_some()
 }
+
+fn set_progress(title: impl Into<String>, detail: impl Into<String>, progress: Option<f32>) {
+    let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    s.status_title = title.into();
+    s.status_detail = detail.into();
+    s.progress = progress;
+}
+
 fn notice(text: impl Into<String>, changed: bool) {
     let text = text.into();
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
@@ -92,6 +102,7 @@ fn notice(text: impl Into<String>, changed: bool) {
         kind: None,
     });
 }
+
 fn imported(text: impl Into<String>, kind: Kind) {
     let text = text.into();
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
@@ -102,6 +113,7 @@ fn imported(text: impl Into<String>, kind: Kind) {
         kind: Some(kind),
     });
 }
+
 pub fn poll() -> Option<Notice> {
     if crate::document_provider::take_changes() {
         return Some(Notice {
@@ -116,6 +128,7 @@ pub fn poll() -> Option<Notice> {
         .notice
         .take()
 }
+
 pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
     if busy() {
         return Err("Finish or cancel the current import first".into());
@@ -125,16 +138,22 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
     let cache = crate::platform::cache_dir()
         .ok_or("Could not access the Android import cache")?
         .join("content-imports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
-        kind,
-        appearance: None,
-        target_dir: None,
-        control_import: false,
-        export_bytes: None,
-        export_source_path: None,
-        home,
-        cache,
-    });
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.status_title = format!("Select {} file...", kind.label());
+        s.status_detail = "Waiting for Android file picker...".into();
+        s.progress = Some(0.08);
+        s.request = Some(Request {
+            kind,
+            appearance: None,
+            target_dir: None,
+            control_import: false,
+            export_bytes: None,
+            export_source_path: None,
+            home,
+            cache,
+        });
+    }
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
@@ -142,10 +161,17 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
     notice(format!("Choose a {} file", kind.label()), false);
     Ok(())
 }
+
 pub fn picker_failed(error: &str) {
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = None;
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.request = None;
+        s.working = false;
+        s.progress = None;
+    }
     notice(error, false);
 }
+
 pub fn begin_appearance(
     home: PathBuf,
     kind: crate::skins::library::Kind,
@@ -158,16 +184,22 @@ pub fn begin_appearance(
     let cache = crate::platform::cache_dir()
         .ok_or("Could not access Android's import cache")?
         .join("appearance-imports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
-        kind: Kind::Packs,
-        appearance: Some(kind),
-        target_dir: None,
-        control_import: false,
-        export_bytes: None,
-        export_source_path: None,
-        home,
-        cache,
-    });
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.status_title = "Select skin or cape PNG...".into();
+        s.status_detail = "Waiting for Android file picker...".into();
+        s.progress = Some(0.08);
+        s.request = Some(Request {
+            kind: Kind::Packs,
+            appearance: Some(kind),
+            target_dir: None,
+            control_import: false,
+            export_bytes: None,
+            export_source_path: None,
+            home,
+            cache,
+        });
+    }
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
@@ -186,16 +218,22 @@ pub fn begin_into_dir(target_dir: PathBuf) -> std::result::Result<(), String> {
     let cache = crate::platform::cache_dir()
         .ok_or("Could not access the Android import cache")?
         .join("file-manager-imports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
-        kind: Kind::Packs,
-        appearance: None,
-        target_dir: Some(target_dir),
-        control_import: false,
-        export_bytes: None,
-        export_source_path: None,
-        home: PathBuf::new(),
-        cache,
-    });
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.status_title = "Importing file...".into();
+        s.status_detail = "Choose a file in Android file picker (or tap Cancel)...".into();
+        s.progress = Some(0.08);
+        s.request = Some(Request {
+            kind: Kind::Packs,
+            appearance: None,
+            target_dir: Some(target_dir),
+            control_import: false,
+            export_bytes: None,
+            export_source_path: None,
+            home: PathBuf::new(),
+            cache,
+        });
+    }
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
@@ -214,16 +252,22 @@ pub fn begin_folder_into_dir(target_dir: PathBuf) -> std::result::Result<(), Str
     let cache = crate::platform::cache_dir()
         .ok_or("Could not access the Android import cache")?
         .join("file-manager-imports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
-        kind: Kind::Packs,
-        appearance: None,
-        target_dir: Some(target_dir),
-        control_import: false,
-        export_bytes: None,
-        export_source_path: None,
-        home: PathBuf::new(),
-        cache,
-    });
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.status_title = "Importing folder...".into();
+        s.status_detail = "Select world/folder in Android picker (or tap Cancel)...".into();
+        s.progress = Some(0.08);
+        s.request = Some(Request {
+            kind: Kind::Packs,
+            appearance: None,
+            target_dir: Some(target_dir),
+            control_import: false,
+            export_bytes: None,
+            export_source_path: None,
+            home: PathBuf::new(),
+            cache,
+        });
+    }
     if !crate::native_ime::pick_document_tree() {
         picker_failed("Android folder picker is unavailable");
         return Err("Android folder picker is unavailable".into());
@@ -243,16 +287,22 @@ pub fn begin_control_import(game_home: PathBuf) -> std::result::Result<(), Strin
     let cache = crate::platform::cache_dir()
         .unwrap_or_else(|| game_home.clone())
         .join("control-imports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
-        kind: Kind::Packs,
-        appearance: None,
-        target_dir: None,
-        control_import: true,
-        export_bytes: None,
-        export_source_path: None,
-        home: game_home,
-        cache,
-    });
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.status_title = "Importing control preset...".into();
+        s.status_detail = "Select a control preset (.json) file...".into();
+        s.progress = Some(0.08);
+        s.request = Some(Request {
+            kind: Kind::Packs,
+            appearance: None,
+            target_dir: None,
+            control_import: true,
+            export_bytes: None,
+            export_source_path: None,
+            home: game_home,
+            cache,
+        });
+    }
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
@@ -279,16 +329,22 @@ pub fn begin_control_export(
     let cache = crate::platform::cache_dir()
         .unwrap_or_else(|| game_home.clone())
         .join("control-exports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
-        kind: Kind::Packs,
-        appearance: None,
-        target_dir: None,
-        control_import: false,
-        export_bytes: Some((bytes, suggested_name.clone())),
-        export_source_path: None,
-        home: game_home,
-        cache,
-    });
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.status_title = format!("Exporting '{suggested_name}'...");
+        s.status_detail = "Choose destination in Android file manager...".into();
+        s.progress = Some(0.1);
+        s.request = Some(Request {
+            kind: Kind::Packs,
+            appearance: None,
+            target_dir: None,
+            control_import: false,
+            export_bytes: Some((bytes, suggested_name.clone())),
+            export_source_path: None,
+            home: game_home,
+            cache,
+        });
+    }
     if !crate::native_ime::create_document(&suggested_name, "application/json") {
         picker_failed("Android file save picker is unavailable");
         return Err("Android file save picker is unavailable".into());
@@ -316,16 +372,22 @@ pub fn begin_file_export(
     let cache = crate::platform::cache_dir()
         .unwrap_or_else(|| home.clone())
         .join("file-exports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
-        kind: Kind::Packs,
-        appearance: None,
-        target_dir: None,
-        control_import: false,
-        export_bytes: None,
-        export_source_path: Some((source_path, suggested_name.clone())),
-        home,
-        cache,
-    });
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.status_title = format!("Exporting '{suggested_name}'...");
+        s.status_detail = "Select save destination in Android file manager...".into();
+        s.progress = Some(0.1);
+        s.request = Some(Request {
+            kind: Kind::Packs,
+            appearance: None,
+            target_dir: None,
+            control_import: false,
+            export_bytes: None,
+            export_source_path: Some((source_path, suggested_name.clone())),
+            home,
+            cache,
+        });
+    }
     if !crate::native_ime::create_document(&suggested_name, &mime_type) {
         picker_failed("Android file save picker is unavailable");
         return Err("Android file save picker is unavailable".into());
@@ -423,8 +485,6 @@ pub fn export_folder(
 }
 
 /// Called by the approved Activity result bridge, never from a game tick.
-/// Keep a conventional JNI export as well as explicit registration: Android
-/// may restore a picker result before the IME bridge has been initialized.
 #[unsafe(export_name = "Java_dev_horizon_android_HorizonActivity_nativeDocumentResult")]
 pub extern "system" fn document_result(
     mut env: JNIEnv<'_>,
@@ -442,10 +502,17 @@ pub extern "system" fn document_result(
         .request
         .take();
     let Some(pending) = pending else {
-        notice("Import interrupted. Choose the file again.", false);
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        st.working = false;
+        st.progress = None;
         return;
     };
     if result != -1 || uri.is_null() {
+        {
+            let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+            st.working = false;
+            st.progress = None;
+        }
         if request == 4103 {
             if let Some((_, name)) = pending.export_source_path {
                 notice(
@@ -467,10 +534,18 @@ pub extern "system" fn document_result(
     })();
     let Ok((vm, activity, uri)) = setup else {
         let _ = env.exception_clear();
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        st.working = false;
+        st.progress = None;
+        drop(st);
         notice("Could not read the selected document", false);
         return;
     };
     if !uri.starts_with("content://") || uri.len() > 8192 {
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        st.working = false;
+        st.progress = None;
+        drop(st);
         notice("Unsupported document URI", false);
         return;
     }
@@ -481,7 +556,7 @@ pub extern "system" fn document_result(
             st.working = true;
             st.status_title = "Exporting file...".into();
             st.status_detail = "Writing archive to chosen location...".into();
-            st.progress = Some(0.3);
+            st.progress = Some(0.35);
         }
         let spawned = std::thread::Builder::new()
             .name("File export".into())
@@ -496,6 +571,11 @@ pub extern "system" fn document_result(
                     }
                     let mut output = opened.map_err(|e| e.to_string())?;
                     if let Some((bytes, suggested_name)) = pending.export_bytes {
+                        set_progress(
+                            format!("Exporting '{suggested_name}'..."),
+                            format!("Writing {} KiB...", bytes.len() / 1024),
+                            Some(0.75),
+                        );
                         output.write_all(&bytes)?;
                         output.sync_all()?;
                         notice(
@@ -504,7 +584,20 @@ pub extern "system" fn document_result(
                         );
                     } else if let Some((src_path, suggested_name)) = pending.export_source_path {
                         let mut src_file = std::fs::File::open(&src_path)?;
-                        std::io::copy(&mut src_file, &mut output)?;
+                        let total = src_file.metadata().map(|m| m.len()).unwrap_or(0);
+                        content_files::copy_bounded(&mut src_file, &mut output, |copied| {
+                            let ratio = if total > 0 {
+                                (copied as f32 / total as f32).clamp(0.1, 0.98)
+                            } else {
+                                0.6
+                            };
+                            set_progress(
+                                format!("Exporting '{suggested_name}'..."),
+                                format!("Written {} KiB...", copied / 1024),
+                                Some(ratio),
+                            );
+                            !CANCEL.load(Ordering::Relaxed)
+                        })?;
                         output.sync_all()?;
                         notice(
                             format!("Saved '{suggested_name}' to chosen location."),
@@ -515,13 +608,20 @@ pub extern "system" fn document_result(
                     }
                     Ok(())
                 })();
-                STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+                {
+                    let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+                    st.working = false;
+                    st.progress = None;
+                }
                 if let Err(error) = result {
                     notice(format!("Export failed: {error}"), false);
                 }
             });
         if let Err(error) = spawned {
-            STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+            let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+            st.working = false;
+            st.progress = None;
+            drop(st);
             notice(format!("Export failed: {error}"), false);
         }
         return;
@@ -532,8 +632,8 @@ pub extern "system" fn document_result(
             let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
             st.working = true;
             st.status_title = "Importing folder...".into();
-            st.status_detail = "Copying world folder contents into profile directory...".into();
-            st.progress = Some(0.2);
+            st.status_detail = "Scanning folder structure...".into();
+            st.progress = Some(0.05);
         }
         let spawned = std::thread::Builder::new()
             .name("Folder import".into())
@@ -548,6 +648,23 @@ pub extern "system" fn document_result(
                         activity.as_obj(),
                         &uri,
                         &target_dir,
+                        |done, total, current_file| {
+                            if CANCEL.load(Ordering::Relaxed) {
+                                return false;
+                            }
+                            let ratio = if total > 0 {
+                                (done as f32 / total as f32).clamp(0.05, 0.99)
+                            } else {
+                                0.15
+                            };
+                            let pct = (ratio * 100.0).round() as u32;
+                            set_progress(
+                                format!("Importing folder ({done}/{total} files • {pct}%)..."),
+                                format!("Copying: {current_file}"),
+                                Some(ratio),
+                            );
+                            !CANCEL.load(Ordering::Relaxed)
+                        },
                     );
                     if copied.is_err() {
                         let _ = env.exception_clear();
@@ -556,26 +673,36 @@ pub extern "system" fn document_result(
                     if let Some(err_msg) = folder_name.strip_prefix("ERROR:") {
                         return Err(err_msg.trim().to_owned().into());
                     }
-                    notice(format!("Imported folder '{folder_name}' successfully"), true);
+                    notice(format!("Imported folder '{folder_name}' successfully!"), true);
                     Ok(())
                 })();
-                STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+                {
+                    let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+                    st.working = false;
+                    st.progress = None;
+                }
                 if let Err(error) = result {
-                    notice(format!("Import failed: {error}"), false);
+                    if !CANCEL.load(Ordering::Relaxed) {
+                        notice(format!("Import failed: {error}"), false);
+                    }
                 }
             });
         if let Err(error) = spawned {
-            STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+            let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+            st.working = false;
+            st.progress = None;
+            drop(st);
             notice(format!("Import failed: {error}"), false);
         }
         return;
     }
+
     {
         let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
         st.working = true;
         st.status_title = "Importing package...".into();
-        st.status_detail = "Extracting files into profile directory...".into();
-        st.progress = Some(0.3);
+        st.status_detail = "Reading selected file from Android storage...".into();
+        st.progress = Some(0.15);
     }
     let spawned = std::thread::Builder::new()
         .name("Content import".into())
@@ -595,19 +722,35 @@ pub extern "system" fn document_result(
                 let (input, name) = opened.map_err(|e| e.to_string())?;
                 stage(pending, input, name)
             })();
-            STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+            {
+                let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+                st.working = false;
+                st.progress = None;
+            }
             if let Err(error) = result {
-                notice(format!("Import failed: {error}"), false);
+                if !CANCEL.load(Ordering::Relaxed) {
+                    notice(format!("Import failed: {error}"), false);
+                }
             }
         });
     if let Err(error) = spawned {
-        STATE.lock().unwrap_or_else(|e| e.into_inner()).working = false;
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        st.working = false;
+        st.progress = None;
+        drop(st);
         notice(format!("Import failed: {error}"), false);
     }
 }
+
 fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()> {
+    let total_file_bytes = input.metadata().map(|m| m.len()).unwrap_or(0);
     if request.control_import {
         use std::io::Read;
+        set_progress(
+            format!("Importing '{name}'..."),
+            "Detecting control layout (MCPE / GoyControl)...".into(),
+            Some(0.5),
+        );
         let mut bytes = Vec::new();
         input.take(2 * 1024 * 1024).read_to_end(&mut bytes)?;
         if CANCEL.load(Ordering::Relaxed) {
@@ -651,7 +794,16 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 .create_new(true)
                 .open(&staged)?;
             content_files::copy_bounded(&mut input, &mut output, |bytes| {
-                notice(format!("Importing {name}: {} KiB", bytes / 1024), false);
+                let ratio = if total_file_bytes > 0 {
+                    (bytes as f32 / total_file_bytes as f32).clamp(0.08, 0.85)
+                } else {
+                    0.5
+                };
+                set_progress(
+                    format!("Importing '{name}'..."),
+                    format!("Copied {} KiB...", bytes / 1024),
+                    Some(ratio),
+                );
                 !CANCEL.load(Ordering::Relaxed)
             })?;
             output.sync_all()?;
@@ -665,6 +817,11 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 .and_then(|s| s.to_str())
                 .is_some_and(|s| s == "saves");
             if in_saves && (lower_name.ends_with(".zip") || lower_name.ends_with(".mcworld")) {
+                set_progress(
+                    format!("Extracting world '{name}'..."),
+                    "Unpacking world archive into saves/...".into(),
+                    Some(0.92),
+                );
                 if let Ok(Some(world_folder)) =
                     crate::document_store::extract_world_zip_if_valid(&staged, &target_dir, &name)
                 {
@@ -685,6 +842,11 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                     || lower_name.ends_with(".hmod")
                     || lower_name.ends_with(".jar"))
             {
+                set_progress(
+                    format!("Compiling mod '{name}'..."),
+                    "Running real-time Horizon Native Compiler...".into(),
+                    Some(0.92),
+                );
                 let (mod_id, ext) = content_files::read_mod_archive_id(&staged, &name)?;
                 let canon_name = format!("{mod_id}.{ext}");
                 let profile_root = target_dir.parent().unwrap_or(&target_dir);
@@ -807,15 +969,25 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             .create_new(true)
             .open(&staged)?;
         content_files::copy_bounded(&mut input, &mut output, |bytes| {
-            notice(
-                format!("Importing {}: {} KiB", request.kind.label(), bytes / 1024),
-                false,
+            let ratio = if total_file_bytes > 0 {
+                (bytes as f32 / total_file_bytes as f32).clamp(0.1, 0.85)
+            } else {
+                0.5
+            };
+            set_progress(
+                format!("Importing {}...", request.kind.label()),
+                format!("Copied {} KiB of '{name}'...", bytes / 1024),
+                Some(ratio),
             );
             !CANCEL.load(Ordering::Relaxed)
         })?;
         output.sync_all()?;
         drop(output);
-        notice("Checking archive...", false);
+        set_progress(
+            format!("Verifying {}...", request.kind.label()),
+            "Validating package manifest and assets...".into(),
+            Some(0.9),
+        );
         let native_shader = content_files::validate(&staged, request.kind, &name, || {
             CANCEL.load(Ordering::Relaxed)
         })?;
@@ -902,6 +1074,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
     }
     result
 }
+
 pub fn resolve(choice: Choice) {
     let c = STATE
         .lock()
@@ -981,7 +1154,9 @@ pub fn resolve(choice: Choice) {
             let mut on = horizon_client::mod_list::ModList::load(profile_root);
             on.disabled.remove(mod_id);
             on.enabled.insert(mod_id.to_owned());
-            if fname.ends_with(".jar")
+            if fname.ends_with(".hnmod") {
+                let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&c.target, profile_root);
+            } else if fname.ends_with(".jar")
                 && let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&c.target, profile_root)
             {
                 on.disabled.remove(&transpiled.id);
@@ -1002,15 +1177,24 @@ pub fn resolve(choice: Choice) {
         }
     }
 }
+
 pub fn cancel() {
     CANCEL.store(true, Ordering::Relaxed);
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = None;
+    {
+        let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        s.request = None;
+        s.working = false;
+        s.progress = None;
+        s.status_title.clear();
+        s.status_detail.clear();
+    }
     if conflict() {
         resolve(Choice::Cancel);
     } else {
         notice("Import cancelled", false);
     }
 }
+
 pub fn tap(x: f32, y: f32) -> bool {
     if !busy() {
         return false;
@@ -1020,7 +1204,12 @@ pub fn tap(x: f32, y: f32) -> bool {
         .unwrap_or_else(|e| e.into_inner())
         .hits
         .iter()
-        .find(|(r, _)| x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3])
+        .find(|(r, _)| {
+            x >= r[0] - 8.0
+                && x <= r[0] + r[2] + 8.0
+                && y >= r[1] - 8.0
+                && y <= r[1] + r[3] + 8.0
+        })
         .map(|(_, c)| *c);
     if let Some(choice) = choice {
         if matches!(choice, Choice::Cancel) {
@@ -1031,21 +1220,23 @@ pub fn tap(x: f32, y: f32) -> bool {
     }
     true
 }
+
 pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas) {
     let mut ui = Ui::mobile(atlas, batch, (0.0, 0.0));
     draw_ui(&mut ui);
     ui.finish();
 }
+
 /// Launcher overlays must use its bundled font, including before game fonts exist.
 pub fn draw_ui(ui: &mut Ui<'_>) {
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     s.hits.clear();
-    if s.conflict.is_none() && !s.working {
+    if s.conflict.is_none() && !s.working && s.request.is_none() {
         return;
     }
 
-    if s.conflict.is_none() && s.working {
-        // Material 3 [Importing...] Dialog with progress bar
+    if s.conflict.is_none() && (s.working || s.request.is_some()) {
+        // Material 3 [Importing...] Dialog with live progress bar and instant Cancel button
         let w = 460.0f32.min(ui.w - 28.0);
         let h = 160.0;
         let x = (ui.w - w) / 2.0;
@@ -1060,15 +1251,36 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
 
         // [Importing...] badge chip
         let chip_w = 98.0;
-        ui.rounded(x + 16.0, y + 16.0, chip_w, 24.0, 6.0, rgba(130, 110, 245, 45));
-        ui.centered_fit(Face::SemiBold, 11.5, [x + 16.0, y + 16.0, chip_w, 24.0], rgba(195, 180, 255, 255), "[Importing...]");
+        ui.rounded(
+            x + 16.0,
+            y + 16.0,
+            chip_w,
+            24.0,
+            6.0,
+            rgba(130, 110, 245, 45),
+        );
+        ui.centered_fit(
+            Face::SemiBold,
+            11.5,
+            [x + 16.0, y + 16.0, chip_w, 24.0],
+            rgba(195, 180, 255, 255),
+            "[Importing...]",
+        );
 
         let title_text = if !s.status_title.is_empty() {
             s.status_title.as_str()
         } else {
             "Processing package..."
         };
-        ui.text(Face::SemiBold, 16.0, x + 16.0 + chip_w + 10.0, y + 19.0, color::TEXT, title_text);
+        let fitted_title = ui.fit_text(Face::SemiBold, 15.0, title_text, w - chip_w - 42.0);
+        ui.text(
+            Face::SemiBold,
+            15.0,
+            x + 16.0 + chip_w + 10.0,
+            y + 19.0,
+            color::TEXT,
+            &fitted_title,
+        );
 
         let detail_text = if !s.status_detail.is_empty() {
             s.status_detail.as_str()
@@ -1076,7 +1288,14 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             "Please wait, copying files into profile directory..."
         };
         let detail_fitted = ui.fit_text(Face::Regular, 13.0, detail_text, w - 32.0);
-        ui.text(Face::Regular, 13.0, x + 18.0, y + 54.0, rgba(195, 190, 210, 240), &detail_fitted);
+        ui.text(
+            Face::Regular,
+            13.0,
+            x + 18.0,
+            y + 54.0,
+            rgba(195, 190, 210, 240),
+            &detail_fitted,
+        );
 
         // Progress bar (Track + Fill)
         let pb_x = x + 18.0;
@@ -1084,25 +1303,42 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
         let pb_w = w - 36.0;
         ui.rounded(pb_x, pb_y, pb_w, 8.0, 4.0, rgba(255, 255, 255, 24));
 
-        let elapsed = s.toast.as_ref().map(|t| t.1.elapsed().as_secs_f32()).unwrap_or(0.0);
-        let fill_ratio = s.progress.unwrap_or_else(|| {
-            ((elapsed * 0.45).sin().abs() * 0.55 + 0.35).clamp(0.2, 0.95)
-        });
-        ui.rounded(pb_x, pb_y, pb_w * fill_ratio, 8.0, 4.0, rgba(145, 120, 255, 255));
+        let elapsed = s
+            .toast
+            .as_ref()
+            .map(|t| t.1.elapsed().as_secs_f32())
+            .unwrap_or(0.0);
+        let fill_ratio = s
+            .progress
+            .unwrap_or_else(|| ((elapsed * 0.45).sin().abs() * 0.55 + 0.35).clamp(0.15, 0.95));
+        ui.rounded(
+            pb_x,
+            pb_y,
+            pb_w * fill_ratio.clamp(0.04, 1.0),
+            8.0,
+            4.0,
+            rgba(145, 120, 255, 255),
+        );
 
         // Cancel button
-        let btn_w = 90.0;
+        let btn_w = 104.0;
         let btn_x = x + w - btn_w - 18.0;
-        let btn_y = y + 108.0;
-        ui.rounded(btn_x, btn_y, btn_w, 34.0, 8.0, rgba(255, 255, 255, 18));
-        ui.border(btn_x, btn_y, btn_w, 34.0, 8.0, rgba(255, 255, 255, 30));
-        ui.centered_fit(Face::Medium, 13.0, [btn_x, btn_y, btn_w, 34.0], color::TEXT, "Cancel");
+        let btn_y = y + 106.0;
+        ui.rounded(btn_x, btn_y, btn_w, 36.0, 8.0, rgba(235, 85, 95, 38));
+        ui.border(btn_x, btn_y, btn_w, 36.0, 8.0, rgba(255, 120, 130, 95));
+        ui.centered_fit(
+            Face::SemiBold,
+            13.0,
+            [btn_x, btn_y, btn_w, 36.0],
+            rgba(255, 210, 215, 255),
+            "Cancel",
+        );
         s.hits.push((
             [
                 btn_x * ui.density,
                 btn_y * ui.density,
                 btn_w * ui.density,
-                34.0 * ui.density,
+                36.0 * ui.density,
             ],
             Choice::Cancel,
         ));
@@ -1157,7 +1393,14 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
         },
     );
     let name = ui.fit_text(Face::Regular, 14.0, &name, w - 32.0);
-    ui.text(Face::Regular, 14.0, x + 16.0, y + 46.0, rgba(195, 190, 210, 240), &name);
+    ui.text(
+        Face::Regular,
+        14.0,
+        x + 16.0,
+        y + 46.0,
+        rgba(195, 190, 210, 240),
+        &name,
+    );
     let width = (w - 32.0) / choices.len() as f32;
     for (i, (label, choice)) in choices.into_iter().enumerate() {
         let rect = if vertical {
@@ -1165,8 +1408,22 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
         } else {
             [x + 16.0 + i as f32 * width, y + 92.0, width - 4.0, 36.0]
         };
-        ui.rounded(rect[0], rect[1], rect[2], rect[3], 8.0, rgba(255, 255, 255, 18));
-        ui.border(rect[0], rect[1], rect[2], rect[3], 8.0, rgba(255, 255, 255, 30));
+        ui.rounded(
+            rect[0],
+            rect[1],
+            rect[2],
+            rect[3],
+            8.0,
+            rgba(255, 255, 255, 18),
+        );
+        ui.border(
+            rect[0],
+            rect[1],
+            rect[2],
+            rect[3],
+            8.0,
+            rgba(255, 255, 255, 30),
+        );
         ui.centered_fit(Face::Medium, 13.0, rect, color::TEXT, label);
         s.hits.push((
             [
@@ -1179,6 +1436,7 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
         ));
     }
 }
+
 pub fn handle_event(event: &winit::event::WindowEvent) -> bool {
     use winit::{
         event::{ElementState, MouseButton, TouchPhase, WindowEvent},
@@ -1198,14 +1456,14 @@ pub fn handle_event(event: &winit::event::WindowEvent) -> bool {
             state,
             ..
         } => {
-            if *state == ElementState::Released {
+            if *state == ElementState::Released || *state == ElementState::Pressed {
                 let (x, y) = STATE.lock().unwrap_or_else(|e| e.into_inner()).cursor;
                 tap(x, y);
             }
             true
         }
         WindowEvent::Touch(t) => {
-            if t.phase == TouchPhase::Ended {
+            if matches!(t.phase, TouchPhase::Started | TouchPhase::Ended) {
                 tap(t.location.x as f32, t.location.y as f32);
             }
             true

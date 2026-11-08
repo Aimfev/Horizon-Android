@@ -196,6 +196,7 @@ struct Decode {
     key: String,
     file: PathBuf,
     channel: ChannelId,
+    looping: bool,
 }
 /// Give a channel waiting on its sound the decoded samples and start it, as
 /// the buffer future attaching and playing the source. A source stopped or
@@ -425,19 +426,22 @@ impl Backend for MixerBackend {
         if !looping && self.duplicate(channel, (namespace, &path)) {
             return;
         }
-        if sound.stream {
-            // A streamed sound loops by restarting its stream.
+        let key = format!("{namespace}:{path}");
+        let cached = self.cache.lock().ok().and_then(|mut c| c.get(&key));
+        if let Some(samples) = cached {
+            attach(&self.mixer, channel, samples, looping);
+            return;
+        }
+        // Cache short streamed sounds (<= 512 KiB on disk, e.g. weather.rain / thunder / portal)
+        // on the shared decoder thread so rain never spawns dozens of threads or re-demuxes OGG.
+        let cacheable_stream = !sound.stream
+            || fs::metadata(&file).is_ok_and(|m| m.len() <= 512 * 1024);
+        if !cacheable_stream {
             let mixer = self.mixer.clone();
             std::thread::spawn(move || {
                 let samples = decode(&file).map(|(s, r)| (Arc::new(s), r));
                 attach(&mixer, channel, samples, looping);
             });
-            return;
-        }
-        let key = format!("{namespace}:{path}");
-        let cached = self.cache.lock().ok().and_then(|mut c| c.get(&key));
-        if let Some(samples) = cached {
-            attach(&self.mixer, channel, samples, false);
             return;
         }
         let decoder = self.decoder.get_or_insert_with(|| {
@@ -456,13 +460,18 @@ impl Backend for MixerBackend {
                             }
                             samples
                         });
-                        attach(&mixer, job.channel, samples, false);
+                        attach(&mixer, job.channel, samples, job.looping);
                     }
                 })
                 .expect("sound decoder thread");
             send
         });
-        let _ = decoder.send(Decode { key, file, channel });
+        let _ = decoder.send(Decode {
+            key,
+            file,
+            channel,
+            looping,
+        });
     }
     /// `alSourceStop`: any state becomes stopped, an initial source too (a
     /// sound still decoding then never starts).

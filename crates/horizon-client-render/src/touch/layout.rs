@@ -209,7 +209,7 @@ impl JoystickStyle {
             2.0
         };
         self.stick_opacity = if self.stick_opacity.is_finite() {
-            self.stick_opacity.clamp(0.1, 1.0)
+            self.stick_opacity.clamp(0.0, 1.0)
         } else {
             0.90
         };
@@ -224,7 +224,7 @@ impl JoystickStyle {
             2.0
         };
         self.base_opacity = if self.base_opacity.is_finite() {
-            self.base_opacity.clamp(0.1, 1.0)
+            self.base_opacity.clamp(0.0, 1.0)
         } else {
             0.72
         };

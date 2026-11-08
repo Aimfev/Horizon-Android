@@ -864,6 +864,10 @@ pub struct Ui<'a> {
     pub density: f32,
     scale: f32,
     clip: Option<[f32; 4]>,
+    /// Optional page/view entrance progress (`0.0..=1.0`) for spatial staggered choreography.
+    pub page_anim: f32,
+    /// Top-left `(x, y)` in dp of the animated content region.
+    pub stagger_origin: [f32; 2],
 }
 impl<'a> Ui<'a> {
     /// `cursor` is in GUI pixels, like every screen's input.
@@ -879,8 +883,39 @@ impl<'a> Ui<'a> {
             density,
             scale,
             clip: None,
+            page_anim: 1.0,
+            stagger_origin: [0.0, 0.0],
             batch,
         }
+    }
+
+    /// Configures spatial staggered entrance choreography for elements inside `(origin_x.., origin_y..)`.
+    pub fn set_stagger_transition(&mut self, progress: f32, origin_x: f32, origin_y: f32) {
+        self.page_anim = if motion::reduced_motion() {
+            1.0
+        } else {
+            progress.clamp(0.0, 1.0)
+        };
+        self.stagger_origin = [origin_x, origin_y];
+    }
+
+    #[inline]
+    fn stagger_transform(&self, x: f32, y: f32, w: f32, h: f32) -> (f32, f32) {
+        if self.page_anim >= 0.999
+            || motion::reduced_motion()
+            || (x <= 1.0 && w >= self.w - 2.0 && h >= self.h - 2.0)
+            || x < self.stagger_origin[0] - 4.0
+            || y < self.stagger_origin[1] - 4.0
+        {
+            return (0.0, 1.0);
+        }
+        let rel_y = (y - self.stagger_origin[1]).max(0.0);
+        let rel_x = (x - self.stagger_origin[0]).max(0.0);
+        let delay = ((rel_y / 540.0) * 0.36 + (rel_x / 960.0) * 0.10).clamp(0.0, 0.44);
+        let local_t = ((self.page_anim - delay) / (1.0 - delay).max(0.25)).clamp(0.0, 1.0);
+        let dy = (1.0 - motion::spring_spatial(local_t)) * 14.0;
+        let alpha = (0.18 + 0.82 * motion::ease_out_cubic(local_t)).clamp(0.0, 1.0);
+        (dy, alpha)
     }
     /// Native phone DPI-adaptive launcher density; game HUD scale is untouched.
     pub fn mobile(atlas: &'a HudAtlas, batch: &'a mut HudBatch, cursor: (f32, f32)) -> Self {
@@ -1093,9 +1128,8 @@ impl<'a> Ui<'a> {
             self.corner_quad(rect, x0, y1 - r, r, (false, true), color);
         }
     }
-    /// A filled rectangle with rounded corners.
-    pub fn rounded(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
-        if color >> 24 == 0 {
+    fn raw_rounded_px(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
+        if color >> 24 == 0 || w <= 0.0 || h <= 0.0 {
             return;
         }
         let (x0, y0, x1, y1) = (
@@ -1118,11 +1152,79 @@ impl<'a> Ui<'a> {
         self.raw_fill(x1 - r, y0 + r, x1, y1 - r, color);
         self.corners(x0, y0, x1, y1, r, 0, color);
     }
-    /// A 1px rounded border.
+
+    /// A filled rectangle with rounded corners and single-pass Frosted Glass specular sheen on cards & pills.
+    pub fn rounded(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
+        if color >> 24 == 0 || w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let (dy, a_mul) = self.stagger_transform(x, y, w, h);
+        let y = y + dy;
+        let color = if a_mul < 0.999 {
+            color::with_alpha(color, a_mul)
+        } else {
+            color
+        };
+        let base_a = (color >> 24) & 0xFF;
+        let is_glass_surface = radius >= 6.0
+            && w >= 28.0
+            && h >= 20.0
+            && base_a >= 110
+            && !(x <= 1.0 && w >= self.w - 2.0 && h >= self.h - 2.0);
+
+        // 1. Subtle ambient float shadow under glass cards
+        if is_glass_surface && w >= 72.0 && h >= 32.0 {
+            let sh_a = ((base_a as f32 / 255.0) * 44.0 * a_mul).round() as u8;
+            if sh_a > 2 {
+                self.raw_rounded_px(x + 1.0, y + 2.5, w, h, radius, color::hex(0x000000, sh_a));
+            }
+        }
+
+        // 2. Primary frosted fill
+        self.raw_rounded_px(x, y, w, h, radius, color);
+
+        // 3. Single-pass Glassmorphism top frost sheen + top inner specular highlight rim
+        if is_glass_surface {
+            let sheen_h = (h * 0.44).clamp(6.0, 36.0);
+            let sheen_a = ((base_a as f32 / 255.0) * 14.0 * a_mul).round() as u8;
+            if sheen_a > 1 && sheen_h < h - 2.0 {
+                let inset = (radius * 0.35).clamp(2.0, 10.0);
+                if w > inset * 2.0 {
+                    self.raw_fill(
+                        self.px_x(x + inset),
+                        self.px_y(y + 1.0),
+                        self.px_x(x + w - inset),
+                        self.px_y(y + sheen_h.min(h * 0.5)),
+                        color::hex(0xFFFFFF, sheen_a),
+                    );
+                }
+            }
+            let spec_inset = (radius * 0.65).clamp(3.0, w * 0.35);
+            if w > spec_inset * 2.0 + 4.0 {
+                let spec_a = ((base_a as f32 / 255.0) * 58.0 * a_mul).round() as u8;
+                let y_spec = self.px_y(y + 0.8);
+                self.raw_fill(
+                    self.px_x(x + spec_inset),
+                    y_spec,
+                    self.px_x(x + w - spec_inset),
+                    y_spec + 1.0,
+                    color::hex(0xFFFFFF, spec_a),
+                );
+            }
+        }
+    }
+    /// A 1px rounded border with glass specular top boost.
     pub fn border(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
         if color >> 24 == 0 {
             return;
         }
+        let (dy, a_mul) = self.stagger_transform(x, y, w, h);
+        let y = y + dy;
+        let color = if a_mul < 0.999 {
+            color::with_alpha(color, a_mul)
+        } else {
+            color
+        };
         let (x0, y0, x1, y1) = (
             self.px_x(x),
             self.px_y(y),
@@ -1134,7 +1236,8 @@ impl<'a> Ui<'a> {
             .min(((x1 - x0) / 2.0).floor())
             .min(((y1 - y0) / 2.0).floor())
             .max(0.0);
-        self.raw_fill(x0 + r, y0, x1 - r, y0 + 1.0, color);
+        let top_lit = lerp_color(color, color::with_alpha(0xFFFF_FFFF, a_mul), 0.28);
+        self.raw_fill(x0 + r, y0, x1 - r, y0 + 1.0, top_lit);
         self.raw_fill(x0 + r, y1 - 1.0, x1 - r, y1, color);
         self.raw_fill(x0, y0 + r, x0 + 1.0, y1 - r, color);
         self.raw_fill(x1 - 1.0, y0 + r, x1, y1 - r, color);
@@ -1146,6 +1249,13 @@ impl<'a> Ui<'a> {
         if color >> 24 == 0 || size <= 0.0 {
             return;
         }
+        let (dy, a_mul) = self.stagger_transform(x, y, size, size);
+        let y = y + dy;
+        let color = if a_mul < 0.999 {
+            color::with_alpha(color, a_mul)
+        } else {
+            color
+        };
         let (x0, y0) = (self.px_x(x), self.px_y(y));
         let px = (size * self.density).round().clamp(8.0, 128.0) as u16;
         let atlas = self.atlas;
@@ -1533,6 +1643,17 @@ impl<'a> Ui<'a> {
     ) -> f32 {
         let px = (size * self.density * 4.0).round() / 4.0;
         let real = color >> 24 != 0;
+        let (dy, a_mul) = if real {
+            self.stagger_transform(x, y, 40.0, line)
+        } else {
+            (0.0, 1.0)
+        };
+        let y = y + dy;
+        let color = if a_mul < 0.999 {
+            color::with_alpha(color, a_mul)
+        } else {
+            color
+        };
         let (x0, y0) = (self.px_x(x), self.px_y(y));
         let box_px = line * self.density;
         let atlas = self.atlas;
@@ -1632,6 +1753,13 @@ impl<'a> Ui<'a> {
         if color >> 24 == 0 || stroke_w <= 0.0 || w <= 0.0 || h <= 0.0 {
             return;
         }
+        let (dy, a_mul) = self.stagger_transform(x, y, w, h);
+        let y = y + dy;
+        let color = if a_mul < 0.999 {
+            color::with_alpha(color, a_mul)
+        } else {
+            color
+        };
         let (x0, y0, x1, y1) = (
             self.px_x(x),
             self.px_y(y),
@@ -1702,8 +1830,84 @@ impl<'a> Ui<'a> {
         );
     }
 
-    /// Draws a GoyControl shape (0=RoundedRect, 1=Square, 2=Circle/Pill, 3=CutOctagon, 4=Diamond, 5=Hexagon)
-    /// with customizable shadow, fill, stroke thickness, stroke margin, and stroke roundness.
+    /// Emits a convex polygon in dp coordinates with a glassmorphic top specular edge and crisp vector perimeter border.
+    fn draw_convex_polygon_dp(
+        &mut self,
+        pts: &[[f32; 2]],
+        center: [f32; 2],
+        fill_color: u32,
+        stroke_size: f32,
+        stroke_margin: f32,
+        stroke_color: u32,
+    ) {
+        let Some(white) = self.atlas.sprites.get("horizon/white").copied() else {
+            return;
+        };
+        let uv = [[(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5]; 4];
+        let to_gui = |p: [f32; 2]| -> [f32; 2] {
+            [
+                (p[0] * self.density) / self.scale,
+                (p[1] * self.density) / self.scale,
+            ]
+        };
+        let n = pts.len();
+        let c_gui = to_gui(center);
+        let fill_a = ((fill_color >> 24) & 0xFF) as f32 / 255.0;
+        let spec_col = color::hex(0xFFFFFF, (fill_a * 64.0).round() as u8);
+
+        if (fill_color >> 24) > 0 {
+            let top_tint = lerp_color(fill_color, color::with_alpha(0xFFFF_FFFF, fill_a), 0.12);
+            for i in 0..n {
+                let p0 = pts[i];
+                let p1 = pts[(i + 1) % n];
+                let col = if p0[1] <= center[1] && p1[1] <= center[1] {
+                    top_tint
+                } else {
+                    fill_color
+                };
+                self.batch.quad([c_gui, to_gui(p0), to_gui(p1), c_gui], uv, col);
+            }
+        }
+
+        let offset_pt = |pt: [f32; 2], off: f32| -> [f32; 2] {
+            let dx = pt[0] - center[0];
+            let dy = pt[1] - center[1];
+            let len = (dx * dx + dy * dy).sqrt().max(1.0);
+            [pt[0] + dx / len * off, pt[1] + dy / len * off]
+        };
+
+        // Inner top glass specular rim
+        if (spec_col >> 24) > 0 {
+            for i in 0..n {
+                let p0 = pts[i];
+                let p1 = pts[(i + 1) % n];
+                if p0[1] <= center[1] + 2.0 && p1[1] <= center[1] + 2.0 {
+                    let i0 = offset_pt(p0, -1.2);
+                    let i1 = offset_pt(p1, -1.2);
+                    self.batch
+                        .quad([to_gui(i0), to_gui(p0), to_gui(p1), to_gui(i1)], uv, spec_col);
+                }
+            }
+        }
+
+        if stroke_size > 0.1 && (stroke_color >> 24) > 0 {
+            let t = stroke_size.clamp(1.0, 6.0);
+            for i in 0..n {
+                let a0 = offset_pt(pts[i], stroke_margin);
+                let a1 = offset_pt(pts[(i + 1) % n], stroke_margin);
+                let b0 = offset_pt(pts[i], stroke_margin + t);
+                let b1 = offset_pt(pts[(i + 1) % n], stroke_margin + t);
+                self.batch.quad(
+                    [to_gui(a0), to_gui(b0), to_gui(b1), to_gui(a1)],
+                    uv,
+                    stroke_color,
+                );
+            }
+        }
+    }
+
+    /// Draws a GoyControl shape (0=RoundedRect, 1=Square, 2=Circle/Pill, 3=CutOctagon, 4=Diamond, 5=Hexagon, 6=Crest/Triangle)
+    /// with true vector polygon geometry, glassmorphic specular highlights, and customizable stroke.
     #[allow(clippy::too_many_arguments)]
     pub fn goy_box(
         &mut self,
@@ -1721,12 +1925,105 @@ impl<'a> Ui<'a> {
         shadow_size: f32,
         shadow_color: u32,
     ) {
+        let _ = (shadow_size, shadow_color);
+        let center = [x + w * 0.5, y + h * 0.5];
+        match shape {
+            3 => {
+                // Cut-Corner Tactical Octagon (true 8-vertex vector geometry)
+                let cut = (w.min(h) * 0.25).max(3.0);
+                let pts = [
+                    [x + cut, y],
+                    [x + w - cut, y],
+                    [x + w, y + cut],
+                    [x + w, y + h - cut],
+                    [x + w - cut, y + h],
+                    [x + cut, y + h],
+                    [x, y + h - cut],
+                    [x, y + cut],
+                ];
+                self.draw_convex_polygon_dp(
+                    &pts,
+                    center,
+                    fill_color,
+                    stroke_size,
+                    stroke_margin,
+                    stroke_color,
+                );
+                return;
+            }
+            4 => {
+                // Chamfered-Tip Vector Diamond / Rhombus
+                let cw = (w * 0.08).max(2.0);
+                let ch = (h * 0.08).max(2.0);
+                let pts = [
+                    [center[0] - cw, y + ch],
+                    [center[0] + cw, y + ch],
+                    [x + w - cw, center[1] - ch],
+                    [x + w - cw, center[1] + ch],
+                    [center[0] + cw, y + h - ch],
+                    [center[0] - cw, y + h - ch],
+                    [x + cw, center[1] + ch],
+                    [x + cw, center[1] - ch],
+                ];
+                self.draw_convex_polygon_dp(
+                    &pts,
+                    center,
+                    fill_color,
+                    stroke_size,
+                    stroke_margin,
+                    stroke_color,
+                );
+                return;
+            }
+            5 => {
+                // True 6-Vertex Vector Hexagon
+                let inset = (w * 0.23).max(3.0);
+                let pts = [
+                    [x + inset, y],
+                    [x + w - inset, y],
+                    [x + w, center[1]],
+                    [x + w - inset, y + h],
+                    [x + inset, y + h],
+                    [x, center[1]],
+                ];
+                self.draw_convex_polygon_dp(
+                    &pts,
+                    center,
+                    fill_color,
+                    stroke_size,
+                    stroke_margin,
+                    stroke_color,
+                );
+                return;
+            }
+            6 => {
+                // Sleek Tactical Apex / Crest Triangle
+                let top_w = (w * 0.14).max(3.0);
+                let bot_cut = (h * 0.14).max(2.5);
+                let pts = [
+                    [center[0] - top_w * 0.5, y],
+                    [center[0] + top_w * 0.5, y],
+                    [x + w, y + h - bot_cut],
+                    [x + w * 0.90, y + h],
+                    [x + w * 0.10, y + h],
+                    [x, y + h - bot_cut],
+                ];
+                self.draw_convex_polygon_dp(
+                    &pts,
+                    center,
+                    fill_color,
+                    stroke_size,
+                    stroke_margin,
+                    stroke_color,
+                );
+                return;
+            }
+            _ => {}
+        }
+
         let eff_radius = match shape {
             1 => 0.0,
             2 => w.min(h) * 0.5,
-            3 => (w.min(h) * 0.22).max(4.0),
-            4 => (w.min(h) * 0.36).max(6.0),
-            5 => (w.min(h) * 0.28).max(5.0),
             _ => roundness.clamp(0.0, w.min(h) * 0.5),
         };
         let eff_stroke_r = match shape {
@@ -1737,139 +2034,36 @@ impl<'a> Ui<'a> {
                 (w + stroke_margin * 2.0).min(h + stroke_margin * 2.0) * 0.5,
             ),
         };
-        // Flat 2D GoyControl plate (3D drop shadow disabled for clean 2D look & lower GPU cost)
-        let _ = (shadow_size, shadow_color);
-        // 2. Main Fill Shape
-        match shape {
-            1 => {
-                // Sharp 0px Square / Rectangle (no corner curves at all)
-                self.fill(x, y, w, h, fill_color);
+        if shape == 1 || eff_radius <= 0.25 {
+            self.fill(x, y, w, h, fill_color);
+            let fill_a = ((fill_color >> 24) & 0xFF) as f32 / 255.0;
+            if fill_a > 0.05 && w > 6.0 && h > 6.0 {
+                self.fill(
+                    x + 1.5,
+                    y + 1.0,
+                    w - 3.0,
+                    1.2,
+                    color::hex(0xFFFFFF, (fill_a * 58.0) as u8),
+                );
             }
-            3 => {
-                // Cut-Corner Octagon / Beveled Tactical Plate
-                let steps = 14;
-                for i in 0..steps {
-                    let frac = (i as f32 + 0.5) / steps as f32;
-                    let edge_dist = frac.min(1.0 - frac);
-                    let taper = if edge_dist < 0.22 {
-                        (0.22 - edge_dist) / 0.22 * 0.36
-                    } else {
-                        0.0
-                    };
-                    let sw = (w * (1.0 - taper)).max(2.0);
-                    let sy = y + (i as f32 / steps as f32) * h;
-                    let sh = (h / steps as f32) + 0.6;
-                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
-                }
-            }
-            4 => {
-                // Crisp Diamond / Rhombus Plate
-                let steps = 16;
-                for i in 0..steps {
-                    let frac = (i as f32 + 0.5) / steps as f32;
-                    let dist = (frac - 0.5).abs() * 2.0;
-                    let sw = (w * (1.0 - dist * 0.86)).max(2.0);
-                    let sy = y + (i as f32 / steps as f32) * h;
-                    let sh = (h / steps as f32) + 0.6;
-                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
-                }
-            }
-            5 => {
-                // Hexagon Tactical Badge
-                let steps = 14;
-                for i in 0..steps {
-                    let frac = (i as f32 + 0.5) / steps as f32;
-                    let dist = (frac - 0.5).abs() * 2.0;
-                    let sw = (w * (1.0 - dist * 0.42)).max(2.0);
-                    let sy = y + (i as f32 / steps as f32) * h;
-                    let sh = (h / steps as f32) + 0.6;
-                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
-                }
-            }
-            6 => {
-                // Triangular Button Plate (Apex at top center, flat base at bottom)
-                let steps = 16;
-                for i in 0..steps {
-                    let frac = (i as f32 + 0.7) / steps as f32;
-                    let sw = (w * frac.clamp(0.08, 1.0)).max(2.0);
-                    let sy = y + (i as f32 / steps as f32) * h;
-                    let sh = (h / steps as f32) + 0.6;
-                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
-                }
-            }
-            _ => {
-                if eff_radius <= 0.25 {
-                    self.fill(x, y, w, h, fill_color);
-                } else {
-                    self.rounded(x, y, w, h, eff_radius, fill_color);
-                }
-            }
+        } else {
+            self.rounded(x, y, w, h, eff_radius, fill_color);
         }
-        // 3. Stroke Border (with stroke_margin offset and stroke_roundness)
         if stroke_size > 0.1 && (stroke_color >> 24) > 0 {
             let sx = x - stroke_margin;
             let sy = y - stroke_margin;
             let sw = (w + stroke_margin * 2.0).max(2.0);
             let sh = (h + stroke_margin * 2.0).max(2.0);
             let t = stroke_size.clamp(1.0, 6.0);
-            match shape {
-                1 => {
-                    self.fill(sx, sy, sw, t, stroke_color);
-                    self.fill(sx, sy + sh - t, sw, t, stroke_color);
-                    self.fill(sx, sy, t, sh, stroke_color);
-                    self.fill(sx + sw - t, sy, t, sh, stroke_color);
-                }
-                6 => {
-                    // Triangle outline: base + left & right sloped edges
-                    self.fill(sx, sy + sh - t, sw, t, stroke_color);
-                    let steps = 16;
-                    for i in 0..steps {
-                        let frac = (i as f32 + 0.5) / steps as f32;
-                        let row_w = (sw * frac.clamp(0.06, 1.0)).max(t * 2.0);
-                        let row_y = sy + (i as f32 / steps as f32) * sh;
-                        let row_h = (sh / steps as f32) + 0.6;
-                        let lx = sx + (sw - row_w) * 0.5;
-                        let rx_edge = lx + row_w - t;
-                        self.fill(lx, row_y, t, row_h, stroke_color);
-                        self.fill(rx_edge, row_y, t, row_h, stroke_color);
-                    }
-                }
-                3 | 4 | 5 => {
-                    let steps = 14;
-                    self.fill(sx + sw * 0.28, sy, sw * 0.44, t, stroke_color);
-                    self.fill(sx + sw * 0.28, sy + sh - t, sw * 0.44, t, stroke_color);
-                    for i in 0..steps {
-                        let frac = (i as f32 + 0.5) / steps as f32;
-                        let dist = (frac - 0.5).abs() * 2.0;
-                        let factor = match shape {
-                            3 => {
-                                let ed = frac.min(1.0 - frac);
-                                if ed < 0.22 { (0.22 - ed) / 0.22 * 0.36 } else { 0.0 }
-                            }
-                            4 => dist * 0.86,
-                            _ => dist * 0.42,
-                        };
-                        let row_w = (sw * (1.0 - factor)).max(t * 2.0);
-                        let row_y = sy + (i as f32 / steps as f32) * sh;
-                        let row_h = (sh / steps as f32) + 0.6;
-                        let lx = sx + (sw - row_w) * 0.5;
-                        let rx_edge = lx + row_w - t;
-                        self.fill(lx, row_y, t, row_h, stroke_color);
-                        self.fill(rx_edge, row_y, t, row_h, stroke_color);
-                    }
-                }
-                _ => {
-                    if eff_stroke_r <= 0.25 {
-                        self.fill(sx, sy, sw, t, stroke_color);
-                        self.fill(sx, sy + sh - t, sw, t, stroke_color);
-                        self.fill(sx, sy, t, sh, stroke_color);
-                        self.fill(sx + sw - t, sy, t, sh, stroke_color);
-                    } else if stroke_size <= 2.2 {
-                        self.border(sx, sy, sw, sh, eff_stroke_r, stroke_color);
-                    } else {
-                        self.stroke_rounded(sx, sy, sw, sh, eff_stroke_r, stroke_size, stroke_color);
-                    }
-                }
+            if shape == 1 || eff_stroke_r <= 0.25 {
+                self.fill(sx, sy, sw, t, stroke_color);
+                self.fill(sx, sy + sh - t, sw, t, stroke_color);
+                self.fill(sx, sy, t, sh, stroke_color);
+                self.fill(sx + sw - t, sy, t, sh, stroke_color);
+            } else if stroke_size <= 2.2 {
+                self.border(sx, sy, sw, sh, eff_stroke_r, stroke_color);
+            } else {
+                self.stroke_rounded(sx, sy, sw, sh, eff_stroke_r, stroke_size, stroke_color);
             }
         }
     }
@@ -1947,7 +2141,7 @@ impl<'a> Ui<'a> {
         }
     }
 
-    /// Paints the active theme background (solid or multi-stop gradient) over `[x, y, w, h]` dp.
+    /// Paints the active theme background with a living Liquid Glass Aurora backdrop over `[x, y, w, h]` dp.
     pub fn draw_theme_background(&mut self, x: f32, y: f32, w: f32, h: f32, theme: &ResolvedTheme) {
         if theme.is_gradient {
             let mid = theme
@@ -1965,8 +2159,45 @@ impl<'a> Ui<'a> {
                 20,
             );
         } else {
-            self.fill(x, y, w, h, theme.bg_solid);
+            let top_tint = lerp_color(theme.bg_solid, theme.gradient_start, 0.45);
+            let bot_tint = lerp_color(theme.bg_solid, theme.gradient_end, 0.55);
+            self.fill_gradient(
+                x,
+                y,
+                w,
+                h,
+                GradientDirection::Vertical,
+                top_tint,
+                bot_tint,
+                Some((0.48, theme.bg_solid)),
+                14,
+            );
         }
+        // Subtle drifting ambient aurora light pools behind frosted glass surfaces (single-pass, ~6 quads)
+        let t = motion::ambient_time();
+        let orb1_x = x + w * (0.28 + 0.10 * (t * 0.55).sin());
+        let orb1_y = y + h * (0.22 + 0.08 * (t * 0.42).cos());
+        let orb1_r = w.min(h) * 0.42;
+        let orb2_x = x + w * (0.76 - 0.09 * (t * 0.48).cos());
+        let orb2_y = y + h * (0.72 + 0.07 * (t * 0.61).sin());
+        let orb2_r = w.min(h) * 0.46;
+        let glow_alpha = if theme.is_light { 0.07 } else { 0.11 };
+        self.raw_rounded_px(
+            orb1_x - orb1_r,
+            orb1_y - orb1_r * 0.65,
+            orb1_r * 2.0,
+            orb1_r * 1.3,
+            orb1_r * 0.65,
+            color::with_alpha(theme.accent, glow_alpha),
+        );
+        self.raw_rounded_px(
+            orb2_x - orb2_r,
+            orb2_y - orb2_r * 0.65,
+            orb2_r * 2.0,
+            orb2_r * 1.3,
+            orb2_r * 0.65,
+            color::with_alpha(theme.accent, glow_alpha * 0.78),
+        );
     }
 
     // ---- the launcher's components & animated Horizon intro ----
@@ -2822,12 +3053,12 @@ impl LauncherThemeConfig {
             gradient_start: color::hex(gs_adj, 255),
             gradient_mid: color::hex(gm_adj, 255),
             gradient_end: color::hex(ge_adj, 255),
-            sidebar_bg: color::hex(sidebar_rgb, 246),
-            header_bg: color::hex(header_rgb, 246),
-            surface: color::hex(surf_rgb, 245),
-            surface_dim: color::hex(surf_dim_rgb, 248),
-            surface_bright: color::hex(surf_bright_rgb, 250),
-            surface_selected: color::hex(surf_sel_rgb, 252),
+            sidebar_bg: color::hex(sidebar_rgb, if is_light { 224 } else { 204 }),
+            header_bg: color::hex(header_rgb, if is_light { 226 } else { 208 }),
+            surface: color::hex(surf_rgb, if is_light { 222 } else { 202 }),
+            surface_dim: color::hex(surf_dim_rgb, if is_light { 216 } else { 192 }),
+            surface_bright: color::hex(surf_bright_rgb, if is_light { 234 } else { 218 }),
+            surface_selected: color::hex(surf_sel_rgb, if is_light { 242 } else { 232 }),
             border: color::hex(border_rgb, 255),
             border_strong: color::hex(border_strong_rgb, 255),
             accent: color::hex(accent_rgb, 255),
@@ -2915,6 +3146,23 @@ pub mod motion {
             return 1.0;
         }
         1.0 - (-6.5 * x).exp() * (1.0 + 6.5 * x * 0.45)
+    }
+
+    /// Playful overshoot easing (`cubic-bezier(0.34, 1.56, 0.64, 1)`) for button & switch pops.
+    pub fn ease_out_back(t: f32) -> f32 {
+        let x = t.clamp(0.0, 1.0) - 1.0;
+        let c1 = 1.70158;
+        let c3 = c1 + 1.0;
+        1.0 + c3 * x.powi(3) + c1 * x.powi(2)
+    }
+
+    /// Continuous ambient animation clock in seconds (returns `0.0` when `reduced_motion()` is active).
+    pub fn ambient_time() -> f32 {
+        static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        if reduced_motion() {
+            return 0.0;
+        }
+        START.get_or_init(Instant::now).elapsed().as_secs_f32()
     }
 
     /// Evaluates elapsed progress `(0.0..=1.0)` since `since` over `duration_secs`.

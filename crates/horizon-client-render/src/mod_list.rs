@@ -7,9 +7,38 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
+    sync::{Mutex, OnceLock},
 };
 
 pub const FILE: &str = "horizon-mods.txt";
+
+static LIVE_MOD_STATE: OnceLock<Mutex<(BTreeSet<String>, BTreeSet<String>)>> = OnceLock::new();
+
+fn live_state() -> &'static Mutex<(BTreeSet<String>, BTreeSet<String>)> {
+    LIVE_MOD_STATE.get_or_init(|| Mutex::new((BTreeSet::new(), BTreeSet::new())))
+}
+
+/// Updates the process-wide live mod enable/disable sets so both the Client Window thread
+/// and the Singleplayer Integrated Server thread observe mod toggles immediately.
+pub fn sync_live_state(enabled: &BTreeSet<String>, disabled: &BTreeSet<String>) {
+    if let Ok(mut guard) = live_state().lock() {
+        guard.0 = enabled.clone();
+        guard.1 = disabled.clone();
+    }
+}
+
+/// Checks if `mod_id` has an authoritative live state (`Some(true)` = disabled, `Some(false)` = enabled).
+pub fn is_live_disabled(mod_id: &str) -> Option<bool> {
+    let guard = live_state().lock().ok()?;
+    if guard.0.contains(mod_id) {
+        Some(false)
+    } else if guard.1.contains(mod_id) {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 /// Fixed native modules compiled into Android APKs, all opt-in.
 pub const ANDROID_BUNDLED: [(&str, &str, &str); 4] = [
     (
@@ -90,7 +119,9 @@ pub struct NativePage {
 
 impl ModList {
     pub fn load(dir: &Path) -> Self {
-        Self::parse(&fs::read_to_string(dir.join(FILE)).unwrap_or_default())
+        let loaded = Self::parse(&fs::read_to_string(dir.join(FILE)).unwrap_or_default());
+        sync_live_state(&loaded.enabled, &loaded.disabled);
+        loaded
     }
     pub fn parse(text: &str) -> Self {
         let mut enabled = BTreeSet::new();
@@ -156,6 +187,7 @@ impl ModList {
         })
     }
     pub fn save(&self, dir: &Path) {
+        sync_live_state(&self.enabled, &self.disabled);
         let path = dir.join(FILE);
         if self.enabled.is_empty()
             && self.disabled.is_empty()
@@ -193,6 +225,7 @@ impl ModList {
         } else if !self.enabled.remove(&m.id) {
             self.enabled.insert(m.id.clone());
         }
+        sync_live_state(&self.enabled, &self.disabled);
     }
 }
 

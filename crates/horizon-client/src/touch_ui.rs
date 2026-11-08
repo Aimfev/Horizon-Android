@@ -1476,27 +1476,33 @@ pub fn draw_goy_hud(
         }
         let [nx, ny, nw, nh] = p_draw.rect(tc.aspect());
         let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
-        let alpha = (p.opacity.clamp(0.15, 1.0) * hud_scale).clamp(0.0, 1.0);
-        let js = &tc.settings.joystick_style;
-        let side = rw.min(rh);
-        let jx = rx + (rw - side) * 0.5;
-        let jy = ry + (rh - side) * 0.5;
-        let base_fill = color::with_alpha(js.base_color, js.base_opacity * alpha);
-        let base_stroke = color::with_alpha(js.base_stroke_color, js.base_opacity * alpha);
-        let br = (side * (js.base_roundness / 100.0)).clamp(0.0, side * 0.5);
-        ui.rounded(jx, jy, side, side, br, base_fill);
-        if js.base_stroke > 0.1 {
-            ui.stroke_rounded(jx, jy, side, side, br, js.base_stroke, base_stroke);
-        }
-        let kside = side * js.stick_size.clamp(0.20, 0.85);
-        let kx = jx + (side - kside) * 0.5 + state.left[0] * (side * 0.26);
-        let ky = jy + (side - kside) * 0.5 - state.left[1] * (side * 0.26);
-        let kr = kside * 0.5;
-        let stick_fill = color::with_alpha(js.stick_color, js.stick_opacity * alpha);
-        let stick_stroke = color::with_alpha(js.stick_stroke_color, js.stick_opacity * alpha);
-        ui.rounded(kx, ky, kside, kside, kr, stick_fill);
-        if js.stick_stroke > 0.1 {
-            ui.stroke_rounded(kx, ky, kside, kside, kr, js.stick_stroke, stick_stroke);
+        let alpha = (p.opacity.clamp(0.0, 1.0) * hud_scale).clamp(0.0, 1.0);
+        if alpha > 0.001 {
+            let js = &tc.settings.joystick_style;
+            let side = rw.min(rh);
+            let jx = rx + (rw - side) * 0.5;
+            let jy = ry + (rh - side) * 0.5;
+            let base_fill = color::with_alpha(js.base_color, js.base_opacity * alpha);
+            let base_stroke = color::with_alpha(js.base_stroke_color, js.base_opacity * alpha);
+            let br = (side * (js.base_roundness / 100.0)).clamp(0.0, side * 0.5);
+            if (base_fill >> 24) > 0 {
+                ui.rounded(jx, jy, side, side, br, base_fill);
+            }
+            if js.base_stroke > 0.1 && (base_stroke >> 24) > 0 {
+                ui.stroke_rounded(jx, jy, side, side, br, js.base_stroke, base_stroke);
+            }
+            let kside = side * js.stick_size.clamp(0.20, 0.85);
+            let kx = jx + (side - kside) * 0.5 + state.left[0] * (side * 0.26);
+            let ky = jy + (side - kside) * 0.5 - state.left[1] * (side * 0.26);
+            let kr = kside * 0.5;
+            let stick_fill = color::with_alpha(js.stick_color, js.stick_opacity * alpha);
+            let stick_stroke = color::with_alpha(js.stick_stroke_color, js.stick_opacity * alpha);
+            if (stick_fill >> 24) > 0 {
+                ui.rounded(kx, ky, kside, kside, kr, stick_fill);
+            }
+            if js.stick_stroke > 0.1 && (stick_stroke >> 24) > 0 {
+                ui.stroke_rounded(kx, ky, kside, kside, kr, js.stick_stroke, stick_stroke);
+            }
         }
     }
 
@@ -1511,7 +1517,7 @@ pub fn draw_goy_hud(
         }
         let [nx, ny, nw, nh] = p.rect(tc.aspect());
         let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
-        let alpha = (p.opacity.clamp(0.15, 1.0) * hud_scale).clamp(0.0, 1.0);
+        let alpha = (p.opacity.clamp(0.0, 1.0) * hud_scale).clamp(0.0, 1.0);
         if alpha <= 0.001 {
             continue;
         }
@@ -1533,12 +1539,12 @@ pub fn draw_goy_hud(
             0.0,
             shadow_c,
         );
-        let fg_col = color::with_alpha(text_c, (alpha.max(0.75) * hud_scale).clamp(0.0, 1.0));
+        let fg_col = color::with_alpha(text_c, alpha);
         let lbl = tc.settings.control_label(c);
         draw_button_icon_and_label(&mut ui, [rx, ry, rw, rh], p.icon_id, lbl, fg_col);
     }
 
-    // 2. Custom GoyControl Static Buttons (MCPE custom buttons are drawn by `TouchControls::draw_custom` via `text_button`)
+    // 2. Custom GoyControl Static Buttons (0-100% opacity + press scale micro-interaction)
     for (i, custom) in tc.settings.custom_buttons.iter().enumerate() {
         if !tc.custom_visible_for_state(i, in_menu) {
             continue;
@@ -1548,8 +1554,8 @@ pub fn draw_goy_hud(
             continue;
         }
         let [nx, ny, nw, nh] = p.rect(tc.aspect());
-        let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
-        let alpha = (p.opacity.clamp(0.15, 1.0) * hud_scale).clamp(0.0, 1.0);
+        let [mut rx, mut ry, mut rw, mut rh] = [nx * w, ny * h, nw * w, nh * h];
+        let alpha = (p.opacity.clamp(0.0, 1.0) * hud_scale).clamp(0.0, 1.0);
         if alpha <= 0.001 {
             continue;
         }
@@ -1563,6 +1569,16 @@ pub fn draw_goy_hud(
         let is_vmouse_on = custom.key == "mouse.virtual.toggle" && virtual_mouse;
         let held = is_active_token && !p.toggleable;
         let toggled = (is_active_token && p.toggleable) || is_vmouse_on;
+
+        // Tactile press squash micro-interaction when held or swiped through
+        if held {
+            let inset_x = rw * 0.03;
+            let inset_y = rh * 0.03;
+            rx += inset_x;
+            ry += inset_y;
+            rw -= inset_x * 2.0;
+            rh -= inset_y * 2.0;
+        }
 
         let raw_fill = if held {
             p.on_click_color
@@ -1596,7 +1612,7 @@ pub fn draw_goy_hud(
             0.0,
             shadow_c,
         );
-        let fg_col = color::with_alpha(text_c, (alpha.max(0.75) * hud_scale).clamp(0.0, 1.0));
+        let fg_col = color::with_alpha(text_c, alpha);
         draw_button_icon_and_label(&mut ui, [rx, ry, rw, rh], p.icon_id, &label, fg_col);
     }
 
@@ -5007,12 +5023,26 @@ pub fn draw_hud_editor(
             sub_txt,
         );
 
-        // Telemetry Pill + Center-Snap [⛶] Button + Cyan [✓ Done] Button
-        let pill_w = 132.0;
-        let pill_r = [dx + dw - 244.0, dy + 9.0, pill_w, 26.0];
+        // Telemetry Pill + Delete [🗑] Button (for Joystick & Custom Buttons) + Center-Snap [⛶] Button + Cyan [✓ Done] Button
+        let pill_w = 122.0;
+        let pill_r = [dx + dw - 266.0, dy + 9.0, pill_w, 26.0];
         ui.rounded(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 13.0, st_inner);
         ui.border(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 13.0, st_border);
-        ui.centered_fit(Face::Mono, 8.8, pill_r, st_text, &telem);
+        ui.centered_fit(Face::Mono, 8.5, pill_r, st_text, &telem);
+
+        if is_joystick || ed.selected_custom.is_some() {
+            let del_r = [dx + dw - 138.0, dy + 9.0, 26.0, 26.0];
+            ui.rounded(
+                del_r[0],
+                del_r[1],
+                del_r[2],
+                del_r[3],
+                8.0,
+                color::with_alpha(danger_c, 0.24),
+            );
+            ui.border(del_r[0], del_r[1], del_r[2], del_r[3], 8.0, danger_c);
+            ui.icon(Icon::Trash, del_r[0] + 5.0, del_r[1] + 5.0, 16.0, danger_c);
+        }
 
         let snap_r = [dx + dw - 106.0, dy + 9.0, 26.0, 26.0];
         ui.rounded(snap_r[0], snap_r[1], snap_r[2], snap_r[3], 8.0, st_card);
@@ -5127,7 +5157,7 @@ pub fn draw_hud_editor(
                         ),
                         (
                             format!("Stick Alpha|{:.0}%", js.stick_opacity * 100.0),
-                            (js.stick_opacity - 0.15) / 0.85,
+                            js.stick_opacity.clamp(0.0, 1.0),
                         ),
                         (
                             format!("Stick Stroke|{:.1}dp", js.stick_stroke),
@@ -5290,7 +5320,7 @@ pub fn draw_hud_editor(
                     for (i, (txt, frac)) in [
                         (
                             format!("Base Alpha|{:.0}%", js.base_opacity * 100.0),
-                            (js.base_opacity - 0.15) / 0.85,
+                            js.base_opacity.clamp(0.0, 1.0),
                         ),
                         (
                             format!("Base Stroke|{:.1}dp", js.base_stroke),
@@ -5434,11 +5464,11 @@ pub fn draw_hud_editor(
                     );
 
                     let y6 = area_y + 48.0;
-                    let third = (ww - 24.0 - 8.0) / 3.0;
+                    let col4_w = (ww - 24.0 - 12.0) / 4.0;
                     ui.rounded(
                         wx + 12.0,
                         y6,
-                        third,
+                        col4_w,
                         34.0,
                         11.0,
                         if p_move.visible_in_game {
@@ -5450,7 +5480,7 @@ pub fn draw_hud_editor(
                     ui.border(
                         wx + 12.0,
                         y6,
-                        third,
+                        col4_w,
                         34.0,
                         11.0,
                         if p_move.visible_in_game {
@@ -5460,18 +5490,18 @@ pub fn draw_hud_editor(
                         },
                     );
                     ui.m3_checkbox(
-                        wx + 18.0,
+                        wx + 16.0,
                         y6 + 8.0,
                         18.0,
                         p_move.visible_in_game,
-                        "Visible in Game",
+                        "In Game",
                     );
 
-                    let vm_x = wx + 12.0 + third + 4.0;
+                    let vm_x = wx + 12.0 + col4_w + 4.0;
                     ui.rounded(
                         vm_x,
                         y6,
-                        third,
+                        col4_w,
                         34.0,
                         11.0,
                         if p_move.visible_in_menu {
@@ -5483,7 +5513,7 @@ pub fn draw_hud_editor(
                     ui.border(
                         vm_x,
                         y6,
-                        third,
+                        col4_w,
                         34.0,
                         11.0,
                         if p_move.visible_in_menu {
@@ -5497,18 +5527,36 @@ pub fn draw_hud_editor(
                         y6 + 8.0,
                         18.0,
                         p_move.visible_in_menu,
-                        "Visible in Menu",
+                        "In Menu",
                     );
 
-                    let pv_x = wx + 12.0 + (third + 4.0) * 2.0;
-                    ui.rounded(pv_x, y6, third, 34.0, 11.0, st_cyan_soft);
-                    ui.border(pv_x, y6, third, 34.0, 11.0, st_cyan);
+                    let pv_x = wx + 12.0 + (col4_w + 4.0) * 2.0;
+                    ui.rounded(pv_x, y6, col4_w, 34.0, 11.0, st_cyan_soft);
+                    ui.border(pv_x, y6, col4_w, 34.0, 11.0, st_cyan);
                     ui.centered_fit(
                         Face::SemiBold,
-                        9.5,
-                        [pv_x + 4.0, y6, third - 8.0, 34.0],
+                        9.2,
+                        [pv_x + 4.0, y6, col4_w - 8.0, 34.0],
                         st_cyan,
-                        "Preset Vis for All",
+                        "Preset Vis All",
+                    );
+
+                    let del_jx = wx + 12.0 + (col4_w + 4.0) * 3.0;
+                    ui.rounded(
+                        del_jx,
+                        y6,
+                        col4_w,
+                        34.0,
+                        11.0,
+                        color::with_alpha(danger_c, 0.24),
+                    );
+                    ui.border(del_jx, y6, col4_w, 34.0, 11.0, danger_c);
+                    ui.centered_fit(
+                        Face::SemiBold,
+                        9.4,
+                        [del_jx + 4.0, y6, col4_w - 8.0, 34.0],
+                        danger_c,
+                        "Delete Joystick",
                     );
                 }
             }
@@ -5582,7 +5630,7 @@ pub fn draw_hud_editor(
                         &mut ui,
                         [wx + 12.0, cards_y, cw3, card_h],
                         &format!("Opacity|{:.0}%", p.opacity * 100.0),
-                        (p.opacity - 0.15) / 0.85,
+                        p.opacity.clamp(0.0, 1.0),
                         st_cyan,
                         st_cyan_soft,
                         st_card,
@@ -6603,10 +6651,16 @@ pub fn draw_hud_editor(
         );
         let gy = py + 50.0;
         let gw = (dw - 28.0 - 12.0) / 4.0;
-        let move_lbl = match tc.settings.mode {
-            crate::touch::Mode::Dpad => "Move: D-Pad",
-            crate::touch::Mode::Crosshair => "Move: Joystick",
-            crate::touch::Mode::Tap => "Move: Tap Stick",
+        let joy_deleted = tc.settings.button_visibility[Control::Move as usize] == 2
+            || !tc.placement(Control::Move).visible_in_game;
+        let move_lbl = if joy_deleted {
+            "+ Restore Joystick"
+        } else {
+            match tc.settings.mode {
+                crate::touch::Mode::Dpad => "Move: D-Pad",
+                crate::touch::Mode::Crosshair => "Move: Joystick",
+                crate::touch::Mode::Tap => "Move: Tap Stick",
+            }
         };
         let area_lbl = match tc.settings.joystick_style.move_area {
             JoystickMoveArea::MidBottomLeft => "Area: Mid-Left",
@@ -6670,11 +6724,11 @@ fn apply_props_slider(
         let slot = tc.settings.slot(Control::Move);
         match (tab, index) {
             (0, 0) => tc.settings.joystick_style.stick_size = (0.20 + t * 0.65).clamp(0.20, 0.85),
-            (0, 1) => tc.settings.joystick_style.stick_opacity = (0.15 + t * 0.85).clamp(0.15, 1.0),
+            (0, 1) => tc.settings.joystick_style.stick_opacity = ((t * 100.0).round() / 100.0).clamp(0.0, 1.0),
             (0, _) => {
                 tc.settings.joystick_style.stick_stroke = ((t * 16.0).round() * 0.5).clamp(0.0, 8.0)
             }
-            (1, 0) => tc.settings.joystick_style.base_opacity = (0.15 + t * 0.85).clamp(0.15, 1.0),
+            (1, 0) => tc.settings.joystick_style.base_opacity = ((t * 100.0).round() / 100.0).clamp(0.0, 1.0),
             (1, 1) => {
                 tc.settings.joystick_style.base_stroke = ((t * 16.0).round() * 0.5).clamp(0.0, 8.0)
             }
@@ -6688,7 +6742,7 @@ fn apply_props_slider(
         return;
     }
     let apply_pl = |pl: &mut crate::touch::Placement| match (tab, index) {
-        (0, 0) => pl.opacity = (0.15 + t * 0.85).clamp(0.15, 1.0),
+        (0, 0) => pl.opacity = ((t * 100.0).round() / 100.0).clamp(0.0, 1.0),
         (1, 0) => pl.stroke_size = ((t * 16.0).round() * 0.5).clamp(0.0, 8.0),
         (1, 1) => {
             pl.roundness = (t * 50.0).round().clamp(0.0, 50.0);
@@ -7270,8 +7324,44 @@ pub fn touch_hud_editor(
                 tc.clicked = true;
                 return false;
             }
+            // Header Delete [🗑] button (deletes Joystick or selected Custom Button from any tab)
+            let is_joy_sel = ed.selected == Some(Control::Move) && ed.selected_custom.is_none();
+            if (is_joy_sel || ed.selected_custom.is_some())
+                && inside([dx + dw - 138.0, dy + 9.0, 26.0, 26.0])
+            {
+                push_undo_snapshot(&mut ed, &tc.settings);
+                if is_joy_sel {
+                    let slot = tc.settings.slot(Control::Move);
+                    tc.settings.button_visibility[Control::Move as usize] = 2;
+                    for m in 0..3 {
+                        tc.settings.layouts[m][slot].visible_in_game = false;
+                        tc.settings.layouts[m][slot].visible_in_menu = false;
+                    }
+                    ed.selected = None;
+                    if !tc.settings.custom_buttons.is_empty() {
+                        ed.selected_custom = Some(0);
+                    }
+                    ed.props_open = false;
+                    ed.status_msg = Some(
+                        "Deleted Joystick. Open Control Manager (=) to restore it anytime.".into(),
+                    );
+                } else if let Some(idx) = ed.selected_custom {
+                    if idx < tc.settings.custom_buttons.len() {
+                        tc.settings.custom_buttons.remove(idx);
+                    }
+                    ed.selected_custom = None;
+                    ed.selected = tc.visible(Control::Move).then_some(Control::Move);
+                    ed.props_open = false;
+                    ed.status_msg = Some("Deleted custom button.".into());
+                }
+                let _ = tc.settings.save();
+                tc.clicked = true;
+                return false;
+            }
             // Center-Snap via telemetry pill OR [⛶] button
-            if inside([dx + dw - 244.0, dy + 9.0, 164.0, 26.0]) {
+            if inside([dx + dw - 266.0, dy + 9.0, 122.0, 26.0])
+                || inside([dx + dw - 106.0, dy + 9.0, 26.0, 26.0])
+            {
                 push_undo_snapshot(&mut ed, &tc.settings);
                 let mode_idx = tc.settings.mode.index();
                 if let Some(idx) = ed.selected_custom {
@@ -7499,27 +7589,51 @@ pub fn touch_hud_editor(
                             return false;
                         }
                         let y6 = area_y + 48.0;
-                        let third = (ww - 24.0 - 8.0) / 3.0;
-                        if inside([wx + 12.0, y6, third, 34.0]) {
+                        let col4_w = (ww - 24.0 - 12.0) / 4.0;
+                        if inside([wx + 12.0, y6, col4_w, 34.0]) {
                             push_undo_snapshot(&mut ed, &tc.settings);
-                            tc.settings.layouts[mode_idx][slot].visible_in_game ^= true;
+                            let next = !tc.settings.layouts[mode_idx][slot].visible_in_game;
+                            tc.settings.layouts[mode_idx][slot].visible_in_game = next;
+                            if next {
+                                tc.settings.button_visibility[Control::Move as usize] = 1;
+                            }
                             let _ = tc.settings.save();
                             tc.clicked = true;
                             return false;
                         }
-                        if inside([wx + 12.0 + third + 4.0, y6, third, 34.0]) {
+                        if inside([wx + 12.0 + col4_w + 4.0, y6, col4_w, 34.0]) {
                             push_undo_snapshot(&mut ed, &tc.settings);
                             tc.settings.layouts[mode_idx][slot].visible_in_menu ^= true;
                             let _ = tc.settings.save();
                             tc.clicked = true;
                             return false;
                         }
-                        if inside([wx + 12.0 + (third + 4.0) * 2.0, y6, third, 34.0]) {
+                        if inside([wx + 12.0 + (col4_w + 4.0) * 2.0, y6, col4_w, 34.0]) {
                             push_undo_snapshot(&mut ed, &tc.settings);
                             tc.settings.apply_visibility_preset_all();
                             let _ = tc.settings.save();
                             ed.status_msg =
                                 Some("Applied preset visibility to all controls.".into());
+                            tc.clicked = true;
+                            return false;
+                        }
+                        if inside([wx + 12.0 + (col4_w + 4.0) * 3.0, y6, col4_w, 34.0]) {
+                            push_undo_snapshot(&mut ed, &tc.settings);
+                            tc.settings.button_visibility[Control::Move as usize] = 2;
+                            for m in 0..3 {
+                                tc.settings.layouts[m][slot].visible_in_game = false;
+                                tc.settings.layouts[m][slot].visible_in_menu = false;
+                            }
+                            ed.selected = None;
+                            if !tc.settings.custom_buttons.is_empty() {
+                                ed.selected_custom = Some(0);
+                            }
+                            ed.props_open = false;
+                            ed.status_msg = Some(
+                                "Deleted Joystick. Open Control Manager (=) to restore it anytime."
+                                    .into(),
+                            );
+                            let _ = tc.settings.save();
                             tc.clicked = true;
                             return false;
                         }
@@ -8013,11 +8127,24 @@ pub fn touch_hud_editor(
                     push_undo_snapshot(&mut ed, &tc.settings);
                     match i {
                         0 => {
-                            tc.settings.mode = match tc.settings.mode {
-                                Mode::Dpad => Mode::Crosshair,
-                                Mode::Crosshair => Mode::Tap,
-                                Mode::Tap => Mode::Dpad,
-                            };
+                            let slot = tc.settings.slot(Control::Move);
+                            if tc.settings.button_visibility[Control::Move as usize] == 2
+                                || !tc.placement(Control::Move).visible_in_game
+                            {
+                                tc.settings.button_visibility[Control::Move as usize] = 1;
+                                for m in 0..3 {
+                                    tc.settings.layouts[m][slot].visible_in_game = true;
+                                }
+                                ed.selected = Some(Control::Move);
+                                ed.selected_custom = None;
+                                ed.status_msg = Some("Restored Joystick to layout.".into());
+                            } else {
+                                tc.settings.mode = match tc.settings.mode {
+                                    Mode::Dpad => Mode::Crosshair,
+                                    Mode::Crosshair => Mode::Tap,
+                                    Mode::Tap => Mode::Dpad,
+                                };
+                            }
                         }
                         1 => {
                             tc.settings.joystick_style.move_area =

@@ -4,13 +4,15 @@
 //! When a player installs any mod from Modrinth / Horizon or imports a `.jar` / `.hnmod` file:
 //! 1. The launcher immediately compiles/transpiles it in real time (zero manual steps, no
 //!    external build server or "Try again" dialog required).
-//! 2. Generates `<profile>/horizon-native-mods/<id>.hnmod` with `horizon-native.json`,
-//!    `src/lib.rs`, and `horizon-compiled.json` (used by the in-process runtime engine in
-//!    `game/android_bundled.rs` so the mod works immediately on the current game start).
-//! 3. Generates `<profile>/horizon-mods/<id>.hmod` with valid lowercase `horizon-mod.toml`
-//!    (`api = "0.2"`, `capabilities = ["registries"]`), `data/<id>/horizon/item/*.json`,
-//!    `data/<id>/horizon/block/*.json`, `horizon-content.json`, and remapped `assets/` & `data/`.
-//! 4. Automatically enables the mod in `<profile>/horizon-mods.txt`.
+//! 2. Reads official Horizon `.hnmod` bundles (`horizon-native.json`, `mixins/<id>/horizon-mixin.toml`,
+//!    `mixins/<id>/*.rs`, `api/src/*.rs`, and `src/lib.rs`) as well as Java `.jar` archives,
+//!    extracting real mod metadata, settings definitions, keybinds, commands, and hook targets.
+//! 3. Generates `<profile>/horizon-native-mods/<id>.hnmod` with `horizon-native.json`,
+//!    `src/lib.rs`, preserved `mixins/`, and `horizon-compiled.json` (used by the in-process
+//!    runtime engine in `game/android_bundled.rs` so the mod works immediately).
+//! 4. Generates `<profile>/horizon-mods/<id>.hmod` when the mod adds items, blocks, recipes, or
+//!    assets (`api = "0.2"`, `capabilities = ["registries"]`).
+//! 5. Automatically enables the mod in `<profile>/horizon-mods.txt`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -146,6 +148,113 @@ fn extract_printable_strings(bytes: &[u8]) -> Vec<String> {
     res
 }
 
+/// Canonical display title and description for well-known Horizon `.hnmod` mods.
+pub fn canonical_horizon_mod_meta(mod_id: &str) -> Option<(&'static str, &'static str)> {
+    match mod_id {
+        "wrench" => Some((
+            "Wrench",
+            "Right-click blocks with a wrench item (Stick by default) to rotate them; sneak + right-click to dismantle redstone machines.",
+        )),
+        "veinminer" | "vein_miner" | "oreexcavator" | "diggusmaximus" => Some((
+            "Veinminer",
+            "Hold Sneak (or toggle Always On) while mining an ore block to harvest the entire connected vein at once with full item drops.",
+        )),
+        "treefall" | "fallingtree" | "treeharvester" | "treecapitator" => Some((
+            "TreeFall",
+            "Break the base log of a tree to fell the entire connected trunk and decay/harvest leaves with full log and sapling drops.",
+        )),
+        "chop" => Some((
+            "Chop!",
+            "Fells connected tree trunks cleanly when chopping logs, dropping all wood and saplings.",
+        )),
+        "appleskin" => Some((
+            "AppleSkin",
+            "Shows food hunger & saturation values in item tooltips and renders saturation/exhaustion + held-food restoration on the HUD.",
+        )),
+        "lookat" => Some((
+            "LookAt",
+            "Displays a top-center HUD tooltip showing the targeted block or entity, its state properties, and harvest info.",
+        )),
+        "jade" | "wthit" | "waila" => Some((
+            "Jade",
+            "Shows what block or mob you are looking at with block state properties, coordinates, and outline highlight.",
+        )),
+        "blockscope" => Some((
+            "BlockScope",
+            "Inspects targeted blocks with detailed state properties, coordinates, and block rim highlighting.",
+        )),
+        "fullbright" | "moregamma" => Some((
+            "Fullbright",
+            "Boosts world brightness and gamma so dark caves, underwater depths, and night scenes are clearly visible.",
+        )),
+        "rightclickharvest" | "right_click_crops" => Some((
+            "RightClickHarvest",
+            "Right-click mature crops (wheat, carrots, potatoes, beetroots, nether wart, cocoa) to harvest and auto-replant.",
+        )),
+        "carryblock" | "carry_block" | "carryon" => Some((
+            "Carry Block",
+            "Sneak + right-click with an empty hand to pick up, carry, and place blocks and containers.",
+        )),
+        "mousetricks" | "mousetweaks" => Some((
+            "Mouse Tricks",
+            "Enhances inventory management with quick slot dragging, wheel item transfer, and container sorting.",
+        )),
+        "fps_overlay" | "fps_counter" => Some((
+            "FPS Counter",
+            "Displays real-time FPS, 1% low frame rate, and frame time in a configurable screen corner.",
+        )),
+        "keystrokes" => Some((
+            "Keystrokes",
+            "Shows live WASD movement keys, Jump, LMB/RMB mouse buttons, and CPS counters on screen.",
+        )),
+        "coords_hud" | "coordinates_hud" => Some((
+            "Coordinates HUD",
+            "Shows X/Y/Z block coordinates, cardinal facing direction, chunk coordinates, and 24h world clock on the HUD.",
+        )),
+        "armor_status" | "armor_hud" => Some((
+            "Armor Status",
+            "Displays equipped armor pieces and held items with remaining durability and color-coded percentages.",
+        )),
+        "held_item_info" => Some((
+            "Held Item Info",
+            "Shows the held item's name, durability, and enchantment summary on the HUD.",
+        )),
+        "status_effect_hud" => Some((
+            "Status Effect HUD",
+            "Renders active potion and status effects with timers on the main HUD without opening inventory.",
+        )),
+        "enchantmenthints" | "enchantment_hints" | "enchdesc" => Some((
+            "Enchantment Hints",
+            "Appends clear explanations of what each enchantment does to enchanted item and book tooltips.",
+        )),
+        "shulkerpeek" | "shulkerboxtooltip" => Some((
+            "ShulkerPeek",
+            "Shows the contents of Shulker Boxes, Bundles, and containers directly inside their item tooltip.",
+        )),
+        "toggle_sprint" | "togglesprint" => Some((
+            "Toggle Sprint",
+            "Lets a single key press toggle continuous sprinting or sneaking with an optional HUD indicator.",
+        )),
+        "waypoints" => Some((
+            "Waypoints",
+            "Save, list, and track custom world waypoints with live distance and compass direction on the HUD.",
+        )),
+        "light_overlay" | "lightoverlay" => Some((
+            "Light Overlay",
+            "Highlights nearby blocks where hostile mobs can spawn due to low block/sky light levels.",
+        )),
+        "eatinganimation" => Some((
+            "Eating Animation",
+            "Adds dynamic eating/drinking visual feedback and progress indicators while consuming food.",
+        )),
+        "immersivethunder" | "immersive_thunder" => Some((
+            "ImmersiveThunder",
+            "Adds distance-scaled thunder acoustics, atmospheric storm soundscapes, and camera rumble during storms.",
+        )),
+        _ => None,
+    }
+}
+
 /// Enables `mod_id` in `<profile_dir>/horizon-mods.txt` and `<private_home>/horizon-mods.txt`
 /// so newly installed or transpiled mods are active immediately without manual toggling.
 pub fn enable_mod_in_profile(profile_dir: &Path, mod_id: &str) {
@@ -159,28 +268,11 @@ pub fn enable_mod_in_profile(profile_dir: &Path, mod_id: &str) {
         roots.push(home);
     }
     for root in roots {
-        let list_path = root.join("horizon-mods.txt");
-        let existing = fs::read_to_string(&list_path).unwrap_or_default();
-        let mut lines: Vec<String> = existing
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .filter(|l| {
-                let id = l
-                    .split_once(':')
-                    .map(|(k, _)| k.trim().strip_prefix("mod.").unwrap_or(k.trim()))
-                    .unwrap_or_else(|| l.strip_prefix("mod.").unwrap_or(l));
-                id != clean_id
-            })
-            .map(str::to_owned)
-            .collect();
-        lines.push(format!("mod.{clean_id}:true"));
-        let mut body = lines.join("\n");
-        if !body.is_empty() {
-            body.push('\n');
-        }
-        let _ = fs::create_dir_all(&root);
-        let _ = fs::write(&list_path, body);
+        let _line = format!("mod.{clean_id}:true");
+        let mut list = crate::mod_list::ModList::load(&root);
+        list.disabled.remove(&clean_id);
+        list.enabled.insert(clean_id.clone());
+        list.save(&root);
     }
 }
 
@@ -193,68 +285,176 @@ pub fn infer_features_from_id_and_signals(
     class_signals: &BTreeSet<String>,
 ) -> BTreeSet<String> {
     let mut features = class_signals.clone();
+    let id_low = mod_id.to_ascii_lowercase();
     let combined = format!(
         "{} {} {} {}",
-        mod_id.to_ascii_lowercase(),
+        id_low,
         title.to_ascii_lowercase(),
         description.to_ascii_lowercase(),
         rust_src.to_ascii_lowercase()
     );
 
-    if combined.contains("appleskin")
+    if id_low == "wrench" || combined.contains("wrench") || combined.contains("takes_apart") {
+        features.insert("wrench".to_owned());
+    }
+    if id_low == "treefall"
+        || id_low == "chop"
+        || id_low == "fallingtree"
+        || id_low == "treeharvester"
+        || id_low == "treecapitator"
+        || combined.contains("treefall")
+        || combined.contains("fallingtree")
+        || combined.contains("treeharvester")
+        || combined.contains("treecapitator")
+        || (combined.contains("chop") && combined.contains("tree"))
+    {
+        features.insert("treefall".to_owned());
+    }
+    if id_low == "veinminer"
+        || id_low == "vein_miner"
+        || id_low == "oreexcavator"
+        || id_low == "diggusmaximus"
+        || id_low == "excavator"
+        || combined.contains("veinminer")
+        || combined.contains("vein_miner")
+        || combined.contains("oreexcavator")
+        || combined.contains("diggusmaximus")
+        || combined.contains("ore_vein")
+    {
+        features.insert("veinminer".to_owned());
+    }
+    if id_low == "appleskin"
+        || combined.contains("appleskin")
         || combined.contains("saturation")
-        || combined.contains("hunger")
         || combined.contains("exhaustion")
-        || combined.contains("food")
+        || combined.contains("foodhelper")
     {
         features.insert("appleskin_hud".to_owned());
         features.insert("tooltip".to_owned());
         features.insert("hud_overlay".to_owned());
     }
-    if combined.contains("thunder")
-        || combined.contains("lightning")
-        || combined.contains("storm")
-        || combined.contains("weather")
-        || combined.contains("sound")
-        || combined.contains("ambient")
-    {
-        features.insert("immersive_thunder".to_owned());
-    }
-    if combined.contains("wrench") || combined.contains("rotate") || combined.contains("facing") {
-        features.insert("wrench".to_owned());
-    }
-    if combined.contains("veinminer")
-        || combined.contains("vein_miner")
-        || combined.contains("treefall")
-        || combined.contains("fallingtree")
-        || combined.contains("treeharvester")
-        || combined.contains("treecapitator")
-        || combined.contains("oreexcavator")
-        || combined.contains("diggusmaximus")
-        || combined.contains("excavator")
-    {
-        features.insert("veinminer".to_owned());
-    }
-    if combined.contains("zoom") || combined.contains("spyglass") || combined.contains("okzoomer") {
-        features.insert("zoom".to_owned());
-    }
-    if combined.contains("jade")
+    if matches!(
+        id_low.as_str(),
+        "lookat" | "jade" | "wthit" | "waila" | "blockscope"
+    ) || combined.contains("jade")
         || combined.contains("wthit")
         || combined.contains("waila")
+        || combined.contains("lookat")
+        || combined.contains("blockscope")
         || combined.contains("what am i looking at")
-        || combined.contains("block_info")
     {
         features.insert("jade_hud".to_owned());
         features.insert("hud_overlay".to_owned());
     }
+    if matches!(id_low.as_str(), "fullbright" | "moregamma")
+        || combined.contains("fullbright")
+        || combined.contains("moregamma")
+    {
+        features.insert("fullbright".to_owned());
+    }
+    if matches!(id_low.as_str(), "rightclickharvest" | "right_click_crops")
+        || combined.contains("rightclickharvest")
+        || combined.contains("right_click_crops")
+        || (combined.contains("harvest") && combined.contains("crop"))
+    {
+        features.insert("rightclickharvest".to_owned());
+    }
+    if matches!(id_low.as_str(), "carryblock" | "carry_block" | "carryon")
+        || combined.contains("carryblock")
+        || combined.contains("carry_block")
+    {
+        features.insert("carryblock".to_owned());
+    }
+    if matches!(id_low.as_str(), "mousetricks" | "mousetweaks")
+        || combined.contains("mousetricks")
+        || combined.contains("mousetweaks")
+    {
+        features.insert("mousetricks".to_owned());
+    }
+    if matches!(id_low.as_str(), "fps_overlay" | "fps_counter" | "fpsdisplay")
+        || combined.contains("fps_overlay")
+        || combined.contains("native_frame_rate")
+    {
+        features.insert("fps_overlay".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if id_low == "keystrokes"
+        || combined.contains("keystrokes")
+        || combined.contains("native_clicks")
+    {
+        features.insert("keystrokes".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if matches!(id_low.as_str(), "coords_hud" | "coordinates_hud" | "directionhud")
+        || combined.contains("coords_hud")
+        || combined.contains("coordinates_hud")
+    {
+        features.insert("coords_hud".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if matches!(
+        id_low.as_str(),
+        "armor_status" | "armor_hud" | "held_item_info" | "durabilityviewer"
+    ) || combined.contains("armor_status")
+        || combined.contains("armor_hud")
+        || combined.contains("held_item_info")
+    {
+        features.insert("armor_status".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if matches!(id_low.as_str(), "status_effect_hud" | "status_effects" | "potionhud")
+        || combined.contains("status_effect_hud")
+    {
+        features.insert("status_effect_hud".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if matches!(
+        id_low.as_str(),
+        "enchantmenthints" | "enchantment_hints" | "enchdesc"
+    ) || combined.contains("enchantmenthints")
+        || combined.contains("enchantment_hints")
+    {
+        features.insert("enchantmenthints".to_owned());
+        features.insert("tooltip".to_owned());
+    }
+    if matches!(id_low.as_str(), "shulkerpeek" | "shulkerboxtooltip")
+        || combined.contains("shulkerpeek")
+        || combined.contains("shulkerboxtooltip")
+    {
+        features.insert("shulkerpeek".to_owned());
+        features.insert("tooltip".to_owned());
+    }
+    if matches!(id_low.as_str(), "toggle_sprint" | "togglesprint" | "bettersprinting")
+        || combined.contains("toggle_sprint")
+        || combined.contains("togglesprint")
+    {
+        features.insert("toggle_sprint".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if id_low == "waypoints" || combined.contains("waypoints") {
+        features.insert("waypoints".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if matches!(id_low.as_str(), "light_overlay" | "lightoverlay")
+        || combined.contains("light_overlay")
+    {
+        features.insert("light_overlay".to_owned());
+    }
+    if id_low == "eatinganimation" || combined.contains("eatinganimation") {
+        features.insert("eatinganimation".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if combined.contains("thunder")
+        || combined.contains("lightning")
+        || combined.contains("immersivethunder")
+    {
+        features.insert("immersive_thunder".to_owned());
+    }
     if combined.contains("dynamiclight") || combined.contains("lambdynamiclights") {
         features.insert("dynamic_lights".to_owned());
     }
-    if combined.contains("fullbright") || combined.contains("gamma") || combined.contains("nightvision") {
-        features.insert("fullbright".to_owned());
-    }
-    if combined.contains("keystroke") || combined.contains("cps") || combined.contains("fps") || combined.contains("hud") {
-        features.insert("hud_overlay".to_owned());
+    if id_low.contains("zoom") || combined.contains("okzoomer") || combined.contains("native_zoom") {
+        features.insert("zoom".to_owned());
     }
     if features.is_empty() {
         features.insert("hud_overlay".to_owned());
@@ -263,7 +463,82 @@ pub fn infer_features_from_id_and_signals(
     features
 }
 
+/// Extracts `pub const DESCRIPTION: &str = "...";` or `description: "...".into()` from Rust source files.
+pub fn parse_rust_mod_metadata(rust_src: &str, mod_id: &str) -> (Option<String>, Option<String>, Vec<String>) {
+    let mut title = None;
+    let mut description = None;
+    let mut custom_buttons = Vec::new();
+
+    if let Some((canon_title, canon_desc)) = canonical_horizon_mod_meta(mod_id) {
+        title = Some(canon_title.to_owned());
+        description = Some(canon_desc.to_owned());
+    }
+
+    for line in rust_src.lines() {
+        let trimmed = line.trim();
+        if title.is_none() {
+            if let Some(rest) = trimmed.strip_prefix("title:") {
+                if let Some(first_quote) = rest.find('"') {
+                    let after = &rest[first_quote + 1..];
+                    if let Some(end_quote) = after.find('"') {
+                        let raw = after[..end_quote].replace("{}", "").trim().to_owned();
+                        if !raw.is_empty() {
+                            title = Some(raw);
+                        }
+                    }
+                }
+            }
+        }
+        if description.is_none() {
+            if trimmed.starts_with("pub const DESCRIPTION:") || trimmed.starts_with("const DESCRIPTION:") {
+                if let Some(first_quote) = trimmed.find('"') {
+                    let after = &trimmed[first_quote + 1..];
+                    let raw = after
+                        .trim_end_matches(';')
+                        .trim_end_matches('\\')
+                        .trim_matches('"')
+                        .trim();
+                    if !raw.is_empty() {
+                        description = Some(raw.to_owned());
+                    }
+                }
+            } else if let Some(rest) = trimmed.strip_prefix("description:") {
+                let clean = rest
+                    .trim()
+                    .trim_end_matches(',')
+                    .trim_end_matches(".into()")
+                    .trim_matches('"');
+                if !clean.is_empty() && !clean.contains("::") {
+                    description = Some(clean.to_owned());
+                }
+            }
+        }
+        // Extract format!("Label: {}", ...) button labels from settings.rs / runtime.rs
+        if trimmed.contains("format!(\"") && trimmed.contains(':') {
+            if let Some(idx) = trimmed.find("format!(\"") {
+                let after = &trimmed[idx + 9..];
+                if let Some(colon_idx) = after.find(':') {
+                    let label_prefix = after[..colon_idx].trim();
+                    if !label_prefix.is_empty()
+                        && label_prefix.len() <= 36
+                        && !label_prefix.contains('{')
+                        && !label_prefix.contains("HUD Overlay & Visuals")
+                        && !label_prefix.contains("Active Gameplay Effect")
+                        && !label_prefix.contains("Effect Intensity")
+                        && !custom_buttons.iter().any(|b| b == label_prefix)
+                    {
+                        custom_buttons.push(label_prefix.to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    (title, description, custom_buttons)
+}
+
 /// Real-time compiler for `.hnmod` archives: validates or upgrades any `.hnmod` file,
+/// parses `mixins/<id>/*.rs`, `mixins/<id>/horizon-mixin.toml`, and `src/lib.rs`,
 /// embeds `horizon-compiled.json` with parsed metadata & hook capabilities so the
 /// in-process runtime engine executes it immediately without external server compilation,
 /// installs it into `<profile_dir>/horizon-native-mods/<id>.hnmod`, removes duplicates in
@@ -284,10 +559,12 @@ pub fn compile_hnmod_bundle_realtime(
 
     let mut mod_id = sanitize_mod_id(fallback_stem);
     let mut version = "1.0.0".to_owned();
+    let mut hooks_ver = 22u32;
     let mut permissions: Vec<String> = Vec::new();
     let mut title = String::new();
     let mut description = String::new();
     let mut lib_rs = String::new();
+    let mut mixin_rs_combined = String::new();
     let mut existing_files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
     for i in 0..zip.len().min(MAX_ZIP_ENTRIES) {
@@ -297,10 +574,7 @@ pub fn compile_hnmod_bundle_realtime(
         if entry.is_dir() {
             continue;
         }
-        let Ok(entry_name) = entry.name() else {
-            continue;
-        };
-        let name = entry_name.replace('\\', "/");
+        let name = entry.name().replace('\\', "/");
         if !is_safe_zip_entry_name(&name) {
             continue;
         }
@@ -317,6 +591,9 @@ pub fn compile_hnmod_bundle_realtime(
                         version = ver.trim().to_owned();
                     }
                 }
+                if let Some(h) = v.get("hooks").and_then(|x| x.as_u64()) {
+                    hooks_ver = h as u32;
+                }
                 if let Some(perms) = v.get("permissions").and_then(|x| x.as_array()) {
                     permissions = perms
                         .iter()
@@ -326,41 +603,26 @@ pub fn compile_hnmod_bundle_realtime(
             }
         } else if name == "src/lib.rs" {
             lib_rs = String::from_utf8_lossy(&buf).into_owned();
+        } else if name.ends_with(".rs") || name.ends_with("horizon-mixin.toml") {
+            mixin_rs_combined.push_str(&String::from_utf8_lossy(&buf));
+            mixin_rs_combined.push('\n');
         }
         existing_files.insert(name, buf);
     }
 
-    // Parse title and description from `src/lib.rs` if present
-    for line in lib_rs.lines() {
-        let trimmed = line.trim();
-        if title.is_empty() {
-            if let Some(rest) = trimmed.strip_prefix("title:") {
-                let clean = rest
-                    .trim()
-                    .trim_end_matches(',')
-                    .trim_end_matches(".into()")
-                    .trim_matches('"');
-                if !clean.is_empty() {
-                    title = clean.to_owned();
-                }
-            }
-        }
-        if description.is_empty() {
-            if let Some(rest) = trimmed.strip_prefix("description:") {
-                let clean = rest
-                    .trim()
-                    .trim_end_matches(',')
-                    .trim_end_matches(".into()")
-                    .trim_matches('"');
-                if !clean.is_empty() {
-                    description = clean.to_owned();
-                }
-            }
-        }
+    let combined_rust = format!("{lib_rs}\n{mixin_rs_combined}");
+    let (parsed_title, parsed_desc, parsed_buttons) =
+        parse_rust_mod_metadata(&combined_rust, &mod_id);
+
+    if let Some(t) = parsed_title {
+        title = t;
+    }
+    if let Some(d) = parsed_desc {
+        description = d;
     }
 
     if title.is_empty() {
-        title = format!("{} {}", title_case_id(&mod_id), version);
+        title = title_case_id(&mod_id);
     }
     if description.is_empty() {
         description = format!("Horizon Native Mod ({mod_id} v{version})");
@@ -370,7 +632,7 @@ pub fn compile_hnmod_bundle_realtime(
         &mod_id,
         &title,
         &description,
-        &lib_rs,
+        &combined_rust,
         &BTreeSet::new(),
     )
     .into_iter()
@@ -393,7 +655,7 @@ pub fn compile_hnmod_bundle_realtime(
     let manifest_json = serde_json::json!({
         "id": mod_id,
         "version": version,
-        "hooks": 22,
+        "hooks": hooks_ver,
         "permissions": permissions,
     });
     let compiled_json = serde_json::json!({
@@ -405,6 +667,7 @@ pub fn compile_hnmod_bundle_realtime(
         "abi": "horizon-inproc-v2",
         "hooks_api": 80,
         "features": features,
+        "custom_buttons": parsed_buttons,
         "items": [],
         "blocks": [],
     });
@@ -596,10 +859,7 @@ pub fn transpile_jar_to_horizon_mods(
         if entry.is_dir() {
             continue;
         }
-        let Ok(entry_name) = entry.name() else {
-            continue;
-        };
-        let name = entry_name.replace('\\', "/");
+        let name = entry.name().replace('\\', "/");
         if !is_safe_zip_entry_name(&name) {
             continue;
         }
@@ -685,11 +945,15 @@ pub fn transpile_jar_to_horizon_mods(
                     {
                         class_signals.insert("immersive_thunder".to_owned());
                     }
-                    if lower.contains("veinminer")
-                        || lower.contains("treeharvester")
+                    if lower.contains("treeharvester")
                         || lower.contains("fallingtree")
-                        || lower.contains("blockbreak")
-                        || lower.contains("playerblockbreak")
+                        || lower.contains("treefall")
+                    {
+                        class_signals.insert("treefall".to_owned());
+                    }
+                    if lower.contains("veinminer")
+                        || lower.contains("oreexcavator")
+                        || lower.contains("diggusmaximus")
                     {
                         class_signals.insert("veinminer".to_owned());
                     }
@@ -698,7 +962,7 @@ pub fn transpile_jar_to_horizon_mods(
                     }
                     if lower.contains("hudrender")
                         || lower.contains("guigraphics")
-                        || lower.contains("inGameHud")
+                        || lower.contains("ingamehud")
                     {
                         class_signals.insert("hud_overlay".to_owned());
                     }
@@ -1144,7 +1408,7 @@ fn generate_hnmod_rust_source(
         .first()
         .map(|it| format!("{mod_id}:{it}"))
         .unwrap_or_else(|| "minecraft:stick".to_owned());
-    let has_vein = features.iter().any(|f| f == "veinminer");
+    let has_vein = features.iter().any(|f| f == "veinminer" || f == "treefall");
     let first_cmd = custom_commands
         .first()
         .cloned()
@@ -1258,7 +1522,7 @@ fn mod_command(game: &mut Game<'_>, command: &str, ran: &mut bool) {{
     )
 }
 
-fn title_case_id(id: &str) -> String {
+pub fn title_case_id(id: &str) -> String {
     id.split(['_', '-', '/'])
         .filter(|s| !s.is_empty())
         .map(|word| {
@@ -1315,7 +1579,7 @@ mod tests {
         assert_eq!(bundle.manifest.id, "appleskin");
 
         // Verify horizon_mods::Package::read and Content::read accept the generated .hmod
-        let pkg = horizon_mods::Package::read(&info.hmod_path).unwrap();
+        let pkg = horizon_mods::Package::read(&info.hmod_path, ).unwrap();
         assert_eq!(pkg.manifest.id, "appleskin");
         let content = horizon_mods::Content::read(&info.hmod_path, &pkg.manifest).unwrap();
         assert_eq!(content.items.len(), 1);

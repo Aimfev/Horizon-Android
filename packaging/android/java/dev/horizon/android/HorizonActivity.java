@@ -8,7 +8,20 @@ public final class HorizonActivity extends android.app.NativeActivity {
     private boolean loaded;
     private java.io.File nativeLibrary;
 
+    private static volatile boolean sCancelFolderCopy = false;
+    private static volatile int sCopyFilesDone = 0;
+    private static volatile int sCopyFilesTotal = 0;
+    private static volatile String sCopyCurrentFile = "";
+
     private native void nativeDocumentResult(int request, int result, String uri);
+
+    public static void cancelFolderCopy() {
+        sCancelFolderCopy = true;
+    }
+
+    public static String getFolderCopyProgress() {
+        return sCopyFilesDone + "|" + sCopyFilesTotal + "|" + (sCopyCurrentFile != null ? sCopyCurrentFile : "");
+    }
 
     @Override protected void onCreate(android.os.Bundle savedInstanceState) {
         loadGame();
@@ -193,21 +206,32 @@ public final class HorizonActivity extends android.app.NativeActivity {
     @Override protected void onActivityResult(int request, int result, android.content.Intent data) {
         super.onActivityResult(request, result, data);
         if (request != 4101 && request != 4102 && request != 4103) return;
-        android.net.Uri uri = (data == null) ? null : data.getData();
-        if (result == -1 && uri != null && request == 4102) {
+        try {
+            android.net.Uri uri = (data == null) ? null : data.getData();
+            if (result == -1 && uri != null && request == 4102) {
+                try {
+                    final int takeFlags = data.getFlags()
+                            & (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                             | android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    getContentResolver().takePersistableUriPermission(
+                            uri,
+                            takeFlags != 0 ? takeFlags : android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (Throwable ignored) {}
+            }
+            nativeDocumentResult(request, result, uri == null ? null : uri.toString());
+        } catch (Throwable err) {
+            android.util.Log.e("HorizonActivity", "onActivityResult failed", err);
             try {
-                final int takeFlags = data.getFlags()
-                        & (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                         | android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                getContentResolver().takePersistableUriPermission(
-                        uri,
-                        takeFlags != 0 ? takeFlags : android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                nativeDocumentResult(request, 0, null);
             } catch (Throwable ignored) {}
         }
-        nativeDocumentResult(request, result, uri == null ? null : uri.toString());
     }
 
     public static String copyFolderTree(android.content.Context context, String treeUriString, String destDirPath) {
+        sCancelFolderCopy = false;
+        sCopyFilesDone = 0;
+        sCopyFilesTotal = 0;
+        sCopyCurrentFile = "Scanning folder...";
         try {
             if (context == null || treeUriString == null || destDirPath == null) {
                 return "ERROR: Invalid folder import arguments";
@@ -266,12 +290,74 @@ public final class HorizonActivity extends android.app.NativeActivity {
             if (!destFolder.mkdirs() && !destFolder.exists()) {
                 return "ERROR: Failed to create destination folder " + destFolder.getName();
             }
-            copyFolderChildren(context.getContentResolver(), treeUri, treeDocId, destFolder, 0, new int[]{0});
+
+            int[] totalCounter = new int[]{0};
+            countFolderFiles(context.getContentResolver(), treeUri, treeDocId, 0, totalCounter);
+            sCopyFilesTotal = Math.max(totalCounter[0], 1);
+
+            int[] fileCount = new int[]{0};
+            copyFolderChildren(context.getContentResolver(), treeUri, treeDocId, destFolder, 0, fileCount);
+            if (sCancelFolderCopy) {
+                deleteRecursive(destFolder);
+                return "ERROR: Import cancelled";
+            }
+            if (fileCount[0] == 0) {
+                deleteRecursive(destFolder);
+                return "ERROR: Selected folder was empty or required direct SAF stream";
+            }
             return destFolder.getName();
         } catch (Throwable err) {
             android.util.Log.e("HorizonActivity", "copyFolderTree failed", err);
             String msg = err.getMessage();
             return "ERROR: " + (msg != null && !msg.isEmpty() ? msg : err.getClass().getSimpleName());
+        }
+    }
+
+    private static void deleteRecursive(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            java.io.File[] children = f.listFiles();
+            if (children != null) {
+                for (java.io.File c : children) {
+                    deleteRecursive(c);
+                }
+            }
+        }
+        try { f.delete(); } catch (Throwable ignored) {}
+    }
+
+    private static void countFolderFiles(android.content.ContentResolver resolver,
+            android.net.Uri treeUri, String parentDocId, int depth, int[] count) {
+        if (sCancelFolderCopy || resolver == null || treeUri == null || parentDocId == null) return;
+        if (depth > 20 || count[0] > 20000) return;
+        android.net.Uri childrenUri;
+        try {
+            childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId);
+        } catch (Throwable e) {
+            return;
+        }
+        String[] projection = new String[] {
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE
+        };
+        java.util.ArrayList<String> subDirs = new java.util.ArrayList<>();
+        try (android.database.Cursor c = resolver.query(childrenUri, projection, null, null, null)) {
+            if (c != null) {
+                while (!sCancelFolderCopy && c.moveToNext()) {
+                    String childId = c.isNull(0) ? null : c.getString(0);
+                    String mime = c.isNull(1) ? "" : c.getString(1);
+                    if (childId == null) continue;
+                    if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
+                        subDirs.add(childId);
+                    } else {
+                        count[0]++;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        for (String subId : subDirs) {
+            if (sCancelFolderCopy) return;
+            countFolderFiles(resolver, treeUri, subId, depth + 1, count);
         }
     }
 
@@ -282,7 +368,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
 
     private static void copyFolderChildren(android.content.ContentResolver resolver,
             android.net.Uri treeUri, String parentDocId, java.io.File destDir, int depth, int[] fileCount) {
-        if (resolver == null || treeUri == null || parentDocId == null || destDir == null) return;
+        if (sCancelFolderCopy || resolver == null || treeUri == null || parentDocId == null || destDir == null) return;
         if (depth > 20 || fileCount[0] > 20000) return;
         if (!destDir.exists()) {
             destDir.mkdirs();
@@ -302,7 +388,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
         java.util.ArrayList<String[]> entries = new java.util.ArrayList<>();
         try (android.database.Cursor c = resolver.query(childrenUri, projection, null, null, null)) {
             if (c != null) {
-                while (c.moveToNext()) {
+                while (!sCancelFolderCopy && c.moveToNext()) {
                     try {
                         String childDocId = c.isNull(0) ? null : c.getString(0);
                         String childName = c.isNull(1) ? null : c.getString(1);
@@ -322,6 +408,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
 
         byte[] buffer = new byte[65536];
         for (String[] entry : entries) {
+            if (sCancelFolderCopy) return;
             String childDocId = entry[0];
             String rawName = entry[1];
             String mimeType = entry[2];
@@ -340,6 +427,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
                 }
             } else {
                 if (++fileCount[0] > 20000) break;
+                sCopyCurrentFile = childName;
                 java.io.File targetFile = new java.io.File(destDir, childName);
                 try {
                     android.net.Uri childUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId);
@@ -347,7 +435,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
                         if (in != null) {
                             try (java.io.FileOutputStream out = new java.io.FileOutputStream(targetFile)) {
                                 int read;
-                                while ((read = in.read(buffer)) != -1) {
+                                while (!sCancelFolderCopy && (read = in.read(buffer)) != -1) {
                                     out.write(buffer, 0, read);
                                 }
                                 out.flush();
@@ -359,6 +447,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
                 } catch (Throwable fileErr) {
                     android.util.Log.w("HorizonActivity", "Skipped unreadable file " + childName, fileErr);
                 }
+                sCopyFilesDone = fileCount[0];
             }
         }
     }

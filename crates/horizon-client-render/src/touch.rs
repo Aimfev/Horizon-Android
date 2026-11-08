@@ -203,6 +203,9 @@ pub struct TouchControls {
     fingers: BTreeMap<u64, (Role, [f32; 2])>,
     passthrough_fingers: BTreeSet<u64>,
     custom_fingers: BTreeMap<u64, String>,
+    custom_last_pos: BTreeMap<u64, [f32; 2]>,
+    custom_swipe_btn: BTreeMap<u64, usize>,
+    builtin_swipe_ctrl: BTreeMap<u64, Control>,
     latched_custom: BTreeSet<String>,
     latched_controls: u16,
     custom_events: Vec<(String, bool)>,
@@ -249,6 +252,9 @@ impl Default for TouchControls {
             fingers: BTreeMap::new(),
             passthrough_fingers: BTreeSet::new(),
             custom_fingers: BTreeMap::new(),
+            custom_last_pos: BTreeMap::new(),
+            custom_swipe_btn: BTreeMap::new(),
+            builtin_swipe_ctrl: BTreeMap::new(),
             latched_custom: BTreeSet::new(),
             latched_controls: 0,
             custom_events: Vec::new(),
@@ -871,6 +877,7 @@ impl TouchControls {
         }
         if ended {
             self.passthrough_fingers.remove(&id);
+            self.builtin_swipe_ctrl.remove(&id);
             if let Some((
                 Role::Look {
                     start,
@@ -903,7 +910,11 @@ impl TouchControls {
                 .any(|(r, _)| matches!(r, Role::Move(_)));
             let joy_zone_supported = self.settings.control_style == ControlStyle::GoyControl
                 || self.settings.mode != Mode::Dpad;
-            if control.is_none() && !has_move && joy_zone_supported && self.visible(Control::Move) {
+            if control.is_none()
+                && !has_move
+                && joy_zone_supported
+                && self.visible_for_state(Control::Move, self.in_menu)
+            {
                 match self.settings.joystick_style.move_area {
                     JoystickMoveArea::MidBottomLeft if point[0] < 0.45 && point[1] > 0.35 => {
                         control = Some(Control::Move);
@@ -1017,6 +1028,12 @@ impl TouchControls {
                     committed: false,
                 },
             };
+            if let Some(c) = control
+                && c != Control::Move
+                && self.placement(c).swipeable
+            {
+                self.builtin_swipe_ctrl.insert(id, c);
+            }
             self.fingers.insert(id, (role, point));
             if let Role::Button(button) = role {
                 match button {
@@ -1026,6 +1043,77 @@ impl TouchControls {
                 }
             }
             return [0.0; 2];
+        }
+        // Built-in Swipe-Through: release a swipeable control when sliding off it,
+        // and activate any swipeable built-in control when a moving finger slides over it.
+        if !self.in_menu {
+            let hit_ctrl = self.control_at(point);
+            if let Some(old_c) = self.builtin_swipe_ctrl.get(&id).copied()
+                && hit_ctrl != Some(old_c)
+            {
+                self.builtin_swipe_ctrl.remove(&id);
+                if let Some((role, _)) = self.fingers.get_mut(&id)
+                    && matches!(role, Role::Button(_) | Role::Shield)
+                {
+                    *role = if self.passthrough_fingers.contains(&id) {
+                        Role::Look {
+                            start: point,
+                            since: Instant::now(),
+                            dragged: true,
+                            held_use: false,
+                            committed: false,
+                        }
+                    } else {
+                        Role::Ignore
+                    };
+                }
+            }
+            if let Some(c) = hit_ctrl
+                && c != Control::Move
+                && self.placement(c).swipeable
+                && self.builtin_swipe_ctrl.get(&id) != Some(&c)
+                && !self
+                    .fingers
+                    .get(&id)
+                    .is_some_and(|(r, _)| matches!(r, Role::Move(_)))
+            {
+                self.builtin_swipe_ctrl.insert(id, c);
+                self.clicked = true;
+                if self.placement(c).passthrough {
+                    self.passthrough_fingers.insert(id);
+                }
+                match c {
+                    Control::Offhand => {
+                        self.custom_events
+                            .push(("action:key.swapOffhand".into(), true));
+                        self.custom_events
+                            .push(("action:key.swapOffhand".into(), false));
+                    }
+                    Control::Sprint
+                        if self.settings.sprint_toggle
+                            || self.placement(Control::Sprint).toggleable =>
+                    {
+                        self.sprint_latched = !self.sprint_latched;
+                    }
+                    other if self.placement(other).toggleable => {
+                        self.latched_controls ^= 1 << (other as u16);
+                    }
+                    Control::Shield => {
+                        self.pending.triggers[0] = 1.0;
+                        self.fingers.insert(id, (Role::Shield, point));
+                    }
+                    other => {
+                        if let Some(button) = Self::button(other) {
+                            match button {
+                                Button::LeftTrigger => self.pending.triggers[0] = 1.0,
+                                Button::RightTrigger => self.pending.triggers[1] = 1.0,
+                                _ => self.pending.set(button, true),
+                            }
+                            self.fingers.insert(id, (Role::Button(button), point));
+                        }
+                    }
+                }
+            }
         }
         let aspect = self.aspect();
         let passthrough_at_point = self.passthrough_fingers.contains(&id)
@@ -1082,6 +1170,7 @@ impl TouchControls {
         self.clear_custom();
         self.fingers.clear();
         self.passthrough_fingers.clear();
+        self.builtin_swipe_ctrl.clear();
         self.latched_controls = 0;
         self.last_sneak_tap = None;
         self.sprint_latched = false;
@@ -1689,65 +1778,112 @@ pub fn draw_goy_static_button(
     } else {
         scale_alpha(p.stroke_color, opacity)
     };
-    // Shape-aware 2D GoyControl button in HudBatch
+    // Shape-aware crisp vector GoyControl button in HudBatch (zero staircase artifacts)
+    let center = [x + w * 0.5, y + h * 0.5];
+    let spec_c = rgba(255, 255, 255, (opacity.clamp(0.0, 1.0) * 58.0) as u8);
+    let draw_convex_poly = |b: &mut HudBatch, pts: &[[f32; 2]]| {
+        let Some(white) = a.sprites.get("horizon/white") else {
+            return;
+        };
+        let uv = [[(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5]; 4];
+        let n = pts.len();
+        if (fill_c >> 24) > 0 {
+            for i in 0..n {
+                let p0 = pts[i];
+                let p1 = pts[(i + 1) % n];
+                b.quad([center, p0, p1, center], uv, fill_c);
+            }
+        }
+        if p.stroke_size > 0.1 && (stroke_c >> 24) > 0 {
+            let t = (p.stroke_size * 0.75).clamp(1.0, 5.0);
+            let sm = p.stroke_margin;
+            let scale_pt = |pt: [f32; 2], off: f32| -> [f32; 2] {
+                let dx = pt[0] - center[0];
+                let dy = pt[1] - center[1];
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                [pt[0] + dx / len * off, pt[1] + dy / len * off]
+            };
+            for i in 0..n {
+                let a0 = scale_pt(pts[i], sm);
+                let a1 = scale_pt(pts[(i + 1) % n], sm);
+                let b0 = scale_pt(pts[i], sm + t);
+                let b1 = scale_pt(pts[(i + 1) % n], sm + t);
+                b.quad([a0, b0, b1, a1], uv, stroke_c);
+                if a0[1] <= center[1] && a1[1] <= center[1] && (spec_c >> 24) > 0 {
+                    let s0 = scale_pt(pts[i], -1.0);
+                    let s1 = scale_pt(pts[(i + 1) % n], -1.0);
+                    b.quad([s0, a0, a1, s1], uv, spec_c);
+                }
+            }
+        }
+    };
     match p.shape {
         2 => {
-            let center = [x + w * 0.5, y + h * 0.5];
             let radius = w.min(h) * 0.5;
             disc(b, a, center, radius, fill_c);
             if p.stroke_size > 0.1 {
                 ring(b, a, center, radius + p.stroke_margin, stroke_c);
             }
         }
-        6 => {
-            let steps = 14;
-            for i in 0..steps {
-                let frac = (i as f32 + 0.7) / steps as f32;
-                let rw = (w * frac.clamp(0.08, 1.0)).max(2.0);
-                let ry = y + (i as f32 / steps as f32) * h;
-                let rh = (h / steps as f32) + 0.5;
-                b.fill(a, x + (w - rw) * 0.5, ry, rw, rh, fill_c);
-            }
-            if p.stroke_size > 0.1 {
-                let t = (p.stroke_size * 0.75).clamp(1.0, 4.0);
-                b.fill(a, x, y + h - t, w, t, stroke_c);
-                for i in 0..steps {
-                    let frac = (i as f32 + 0.5) / steps as f32;
-                    let rw = (w * frac.clamp(0.06, 1.0)).max(t * 2.0);
-                    let ry = y + (i as f32 / steps as f32) * h;
-                    let rh = (h / steps as f32) + 0.5;
-                    let lx = x + (w - rw) * 0.5;
-                    b.fill(a, lx, ry, t, rh, stroke_c);
-                    b.fill(a, lx + rw - t, ry, t, rh, stroke_c);
-                }
-            }
+        3 => {
+            let cx = (w * 0.24).min(h * 0.24).max(2.0);
+            let pts = [
+                [x + cx, y],
+                [x + w - cx, y],
+                [x + w, y + cx],
+                [x + w, y + h - cx],
+                [x + w - cx, y + h],
+                [x + cx, y + h],
+                [x, y + h - cx],
+                [x, y + cx],
+            ];
+            draw_convex_poly(b, &pts);
         }
-        3 | 4 | 5 => {
-            let steps = 12;
-            for i in 0..steps {
-                let frac = (i as f32 + 0.5) / steps as f32;
-                let dist = (frac - 0.5).abs() * 2.0;
-                let factor = match p.shape {
-                    3 => {
-                        let ed = frac.min(1.0 - frac);
-                        if ed < 0.22 { (0.22 - ed) / 0.22 * 0.36 } else { 0.0 }
-                    }
-                    4 => dist * 0.86,
-                    _ => dist * 0.42,
-                };
-                let rw = (w * (1.0 - factor)).max(2.0);
-                let ry = y + (i as f32 / steps as f32) * h;
-                let rh = (h / steps as f32) + 0.5;
-                b.fill(a, x + (w - rw) * 0.5, ry, rw, rh, fill_c);
-            }
-            if p.stroke_size > 0.1 {
-                let t = (p.stroke_size * 0.75).clamp(1.0, 4.0);
-                b.fill(a, x + w * 0.28, y, w * 0.44, t, stroke_c);
-                b.fill(a, x + w * 0.28, y + h - t, w * 0.44, t, stroke_c);
-            }
+        4 => {
+            let cw = (w * 0.08).max(1.5);
+            let ch = (h * 0.08).max(1.5);
+            let pts = [
+                [center[0] - cw, y + ch],
+                [center[0] + cw, y + ch],
+                [x + w - cw, center[1] - ch],
+                [x + w - cw, center[1] + ch],
+                [center[0] + cw, y + h - ch],
+                [center[0] - cw, y + h - ch],
+                [x + cw, center[1] + ch],
+                [x + cw, center[1] - ch],
+            ];
+            draw_convex_poly(b, &pts);
+        }
+        5 => {
+            let inset = (w * 0.23).max(2.0);
+            let pts = [
+                [x + inset, y],
+                [x + w - inset, y],
+                [x + w, center[1]],
+                [x + w - inset, y + h],
+                [x + inset, y + h],
+                [x, center[1]],
+            ];
+            draw_convex_poly(b, &pts);
+        }
+        6 => {
+            let top_w = (w * 0.12).max(2.0);
+            let bot_cut = (h * 0.14).max(2.0);
+            let pts = [
+                [center[0] - top_w * 0.5, y],
+                [center[0] + top_w * 0.5, y],
+                [x + w, y + h - bot_cut],
+                [x + w * 0.90, y + h],
+                [x + w * 0.10, y + h],
+                [x, y + h - bot_cut],
+            ];
+            draw_convex_poly(b, &pts);
         }
         _ => {
             b.fill(a, x, y, w, h, fill_c);
+            if (spec_c >> 24) > 0 && w > 4.0 && h > 4.0 {
+                b.fill(a, x + 1.0, y + 1.0, w - 2.0, 1.2, spec_c);
+            }
             if p.stroke_size > 0.1 {
                 let sm = p.stroke_margin;
                 let sx = x - sm;

@@ -2192,6 +2192,7 @@ impl Game<'_> {
         face: [i32; 3],
         canceled: &mut bool,
     ) {
+        super::android_bundled::native_right_click_block(self, pos, face, canceled);
         let _ = (pos, face, canceled);
     }
     /// An explosion at `center` in `dimension` (`minecraft:overworld`) is
@@ -2899,7 +2900,7 @@ impl Game<'_> {
     /// turned off does nothing (check this first in each hook) until the
     /// launcher's next build leaves it out.
     pub(super) fn native_on(&self, mod_id: &str) -> bool {
-        !self.settings.mods.disabled.contains(mod_id)
+        super::android_bundled::native_on_check(self, mod_id)
     }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
     /// Returns false for another dimension, an invalid state, or no change.
