@@ -2396,11 +2396,10 @@ impl Catalog {
                     match horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(path, &game) {
                         Ok(res) => {
                             log_line(format!(
-                                "  -> Extracted {} Java classes, {} Mixin configs, {} items, {} blocks",
-                                res.class_count,
-                                res.mixin_count,
-                                res.items_extracted,
-                                res.blocks_extracted
+                                "  -> Extracted {} items, {} blocks, {} features",
+                                res.items.len(),
+                                res.blocks.len(),
+                                res.features.len()
                             ));
                             log_line(format!(
                                 "  -> Generated Rust mod_api crate & packaged {} + {}",
@@ -2423,7 +2422,7 @@ impl Catalog {
                         Ok(res) => {
                             log_line(format!(
                                 "  -> Verified horizon-native-mod.toml & src/lib.rs for '{}' ({})",
-                                res.name, res.id
+                                res.title, res.id
                             ));
                             log_line(format!(
                                 "  -> Synthesized companion runtime package horizon-mods/{}.hmod",
