@@ -262,6 +262,7 @@ struct BlockContext<'a> {
     types: &'a UniqueArena<crate::Type>,
     local_vars: &'a Arena<crate::LocalVariable>,
     global_vars: &'a Arena<crate::GlobalVariable>,
+    arguments: &'a [crate::FunctionArgument],
     functions: &'a Arena<crate::Function>,
     special_types: &'a crate::SpecialTypes,
     prev_infos: &'a [FunctionInfo],
@@ -284,6 +285,7 @@ impl<'a> BlockContext<'a> {
             types: &module.types,
             local_vars: &fun.local_variables,
             global_vars: &module.global_variables,
+            arguments: &fun.arguments,
             functions: &module.functions,
             special_types: &module.special_types,
             prev_infos,
@@ -1126,12 +1128,21 @@ impl super::Validator {
                 } => {
                     //Note: this code uses a lot of `FunctionError::InvalidImageStore`,
                     // and could probably be refactored.
-                    let global_var;
-                    let image_ty;
-                    match *context.get_expression(image) {
+                    let image_ty = match *context.get_expression(image) {
                         crate::Expression::GlobalVariable(var_handle) => {
-                            global_var = &context.global_vars[var_handle];
-                            image_ty = global_var.ty;
+                            context.global_vars[var_handle].ty
+                        }
+                        crate::Expression::FunctionArgument(i) => {
+                            context
+                                .arguments
+                                .get(i as usize)
+                                .ok_or_else(|| {
+                                    FunctionError::InvalidImageStore(
+                                        ExpressionError::ExpectedGlobalVariable,
+                                    )
+                                    .with_span_handle(image, context.expressions)
+                                })?
+                                .ty
                         }
                         // The `image` operand is indexing into a binding array,
                         // so punch through the `Access`* expression and look at
@@ -1146,7 +1157,7 @@ impl super::Validator {
                                 )
                                 .with_span_handle(image, context.expressions));
                             };
-                            global_var = &context.global_vars[var_handle];
+                            let global_var = &context.global_vars[var_handle];
 
                             // The global variable must be a binding array.
                             let Ti::BindingArray { base, .. } = context.types[global_var.ty].inner
@@ -1157,7 +1168,7 @@ impl super::Validator {
                                 .with_span_handle(global_var.ty, context.types));
                             };
 
-                            image_ty = base;
+                            base
                         }
                         _ => {
                             return Err(FunctionError::InvalidImageStore(
@@ -1175,10 +1186,10 @@ impl super::Validator {
                     } = context.types[image_ty].inner
                     else {
                         return Err(FunctionError::InvalidImageStore(
-                            ExpressionError::ExpectedImageType(global_var.ty),
+                            ExpressionError::ExpectedImageType(image_ty),
                         )
                         .with_span()
-                        .with_handle(global_var.ty, context.types)
+                        .with_handle(image_ty, context.types)
                         .with_handle(image, context.expressions));
                     };
 
@@ -1280,16 +1291,28 @@ impl super::Validator {
                     fun,
                     value,
                 } => {
-                    let var = match *context.get_expression(image) {
+                    let var_ty = match *context.get_expression(image) {
                         crate::Expression::GlobalVariable(var_handle) => {
-                            &context.global_vars[var_handle]
+                            context.global_vars[var_handle].ty
+                        }
+                        crate::Expression::FunctionArgument(i) => {
+                            context
+                                .arguments
+                                .get(i as usize)
+                                .ok_or_else(|| {
+                                    FunctionError::InvalidImageAtomic(
+                                        ExpressionError::ExpectedGlobalVariable,
+                                    )
+                                    .with_span_handle(image, context.expressions)
+                                })?
+                                .ty
                         }
                         // We're looking at a binding index situation, so punch through the index and look at the global behind it.
                         crate::Expression::Access { base, .. }
                         | crate::Expression::AccessIndex { base, .. } => {
                             match *context.get_expression(base) {
                                 crate::Expression::GlobalVariable(var_handle) => {
-                                    &context.global_vars[var_handle]
+                                    context.global_vars[var_handle].ty
                                 }
                                 _ => {
                                     return Err(FunctionError::InvalidImageAtomic(
@@ -1308,7 +1331,7 @@ impl super::Validator {
                     };
 
                     // Punch through a binding array to get the underlying type
-                    let global_ty = match context.types[var.ty].inner {
+                    let global_ty = match context.types[var_ty].inner {
                         Ti::BindingArray { base, .. } => &context.types[base].inner,
                         ref inner => inner,
                     };
@@ -1445,10 +1468,10 @@ impl super::Validator {
                         }
                         _ => {
                             return Err(FunctionError::InvalidImageAtomic(
-                                ExpressionError::ExpectedImageType(var.ty),
+                                ExpressionError::ExpectedImageType(var_ty),
                             )
                             .with_span()
-                            .with_handle(var.ty, context.types)
+                            .with_handle(var_ty, context.types)
                             .with_handle(image, context.expressions))
                         }
                     };
@@ -1933,7 +1956,11 @@ impl super::Validator {
             info.available_stages &= stages;
 
             if self.flags.contains(super::ValidationFlags::EXPRESSIONS) {
-                if let Some(handle) = self.needs_visit.iter().next() {
+                if let Some(handle) = self
+                    .needs_visit
+                    .iter()
+                    .find(|&h| !matches!(fun.expressions[h], crate::Expression::CallResult(_)))
+                {
                     return Err(FunctionError::UnvisitedExpression(handle)
                         .with_span_handle(handle, &fun.expressions));
                 }

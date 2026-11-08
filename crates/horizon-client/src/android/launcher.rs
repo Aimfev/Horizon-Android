@@ -137,6 +137,14 @@ impl Launcher {
         if crate::diagnostics::previous_unclean(&home) {
             catalog.status = crate::diagnostics::summary(&home);
         }
+        let native_notice = home.join("native/notice");
+        if let Ok(notice) = std::fs::read_to_string(&native_notice) {
+            let _ = std::fs::remove_file(&native_notice);
+            let trimmed = notice.trim();
+            if !trimmed.is_empty() {
+                catalog.status = trimmed.to_owned();
+            }
+        }
         horizon_client::android_runtime::graphics_startup::configure(home.clone());
         if horizon_client::android_runtime::graphics_startup::recover(&home) {
             catalog.config.renderer = crate::catalog::RendererMode::VulkanCompatibility;

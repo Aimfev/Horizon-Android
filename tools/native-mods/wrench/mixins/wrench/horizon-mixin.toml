@@ -1,0 +1,70 @@
+[mod]
+id = "wrench"
+version = "0.1.0"
+# Under Carry Block (250) and Mason (300), which also hook Game::use_item:
+# same-site HEAD hooks run by priority, highest first, and the first that
+# cancels skips the rest. Neither takes a stick (Carry Block wants an empty
+# hand, Mason a wooden axe in creative).
+priority = 210
+
+# No pin: Horizon's mod build sets the commit it builds on. The use hook
+# below is not a hook point (game/native_hooks.rs has none for a right
+# click) and native.rs calls the game's own internals (its aim, the block
+# registry, the level's block behaviour), so a Horizon or Horizon commit that
+# renames them fails this build with the compiler's error.
+
+[[module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "wrench"
+source = "runtime.rs"
+
+[[module]]
+id = "native"
+file = "crates/horizon-client/src/game.rs"
+name = "wrench_native"
+source = "native.rs"
+
+# Not a hook point: turning and taking apart replace a right click (a guest's
+# UseItemOn packet, in-frame single player's use key).
+[[injection]]
+id = "use"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::Game<'_>::use_item"
+helper = "use.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+# Hook points: the row in Options > Mods and its settings page.
+[[injection]]
+id = "list"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_mods"
+helper = "list.rs"
+bindings = [
+  { name = "mods", ty = "&mut Vec<crate::game::native_hooks::NativeMod>", value = "&mut *mods" },
+]
+
+[[injection]]
+id = "settings"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_settings"
+helper = "settings.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "mod_id", ty = "&str", value = "mod_id" },
+  { name = "buttons", ty = "&mut Vec<String>", value = "&mut *buttons" },
+]
+
+[[injection]]
+id = "click"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_settings_click"
+helper = "click.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "mod_id", ty = "&str", value = "mod_id" },
+  { name = "button", ty = "usize", value = "button" },
+]

@@ -1,6 +1,6 @@
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
-#![forbid(unsafe_code)]
+#![cfg_attr(not(target_os = "android"), forbid(unsafe_code))]
 pub mod advancements;
 pub mod ambience;
 pub mod android_resources;
@@ -71,6 +71,7 @@ pub mod gizmos;
 pub mod gossip;
 pub mod health;
 pub mod heartbeat;
+pub mod horizon_releases;
 pub mod hotbar;
 pub mod hunger;
 pub mod ime_edit;
@@ -79,12 +80,14 @@ pub mod item_activation;
 pub mod item_render;
 pub mod item_sync;
 pub mod item_tooltip;
+pub mod jar_transpiler;
 pub mod lan;
 pub mod landing;
 pub mod locator_bar;
 pub mod menu;
 pub mod merchant;
 pub mod mobs;
+pub mod mod_api;
 pub mod mod_content;
 pub mod motion;
 pub mod moved_extras;

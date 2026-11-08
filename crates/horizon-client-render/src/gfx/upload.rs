@@ -60,9 +60,10 @@ impl Uploads {
             .expect("non-zero alignment");
         let slice = self.allocate(size, alignment);
         {
-            let mut view = slice
-                .get_mapped_range_mut()
-                .expect("staging belt slices are mapped");
+            let Ok(mut view) = slice.get_mapped_range_mut() else {
+                log::warn!("Skipping texture upload on unmapped or destroyed staging buffer");
+                return;
+            };
             for (i, src) in pixels.chunks(row).enumerate() {
                 view.slice(i * padded..i * padded + row)
                     .copy_from_slice(src);
@@ -106,12 +107,14 @@ impl Uploads {
         );
         let alignment = NonZeroU64::new(wgpu::COPY_BUFFER_ALIGNMENT).expect("non-zero alignment");
         let slice = self.allocate(size, alignment).slice(..size.get());
+        {
+            let Ok(mut view) = slice.get_mapped_range_mut() else {
+                log::warn!("Skipping buffer upload on unmapped or destroyed staging buffer");
+                return;
+            };
+            view.slice(..).copy_from_slice(bytes);
+        }
         encoder.copy_buffer_to_buffer(slice.buffer(), slice.offset(), target, offset, size.get());
-        slice
-            .get_mapped_range_mut()
-            .expect("staging belt slices are mapped")
-            .slice(..)
-            .copy_from_slice(bytes);
     }
     /// Close this frame's staging buffers: they come back for reuse once the
     /// encoder's submission finishes on the GPU.

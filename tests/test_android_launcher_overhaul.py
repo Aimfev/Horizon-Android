@@ -86,6 +86,36 @@ class LauncherOverhaulTests(unittest.TestCase):
             "crates/horizon-client-render/src/gfx/pack_images.rs",
             "crates/horizon-client-render/src/gfx/flat.rs",
             "crates/horizon-client/src/game/fov.rs",
+            "crates/horizon-client/src/android.rs",
+            "crates/horizon-client/src/android_lib.rs",
+            "crates/horizon-client/src/android_main.rs",
+            "crates/horizon-client/src/horizon_releases.rs",
+            "crates/horizon-client/src/jar_transpiler.rs",
+            "crates/horizon-client/src/mod_api.rs",
+            "crates/horizon-client/src/mod_api/generated.rs",
+            "crates/horizon-client/src/mod_api/generated_host.rs",
+            "crates/horizon-client/src/game/native_builds.rs",
+            "crates/horizon-client/src/game/build_mining.rs",
+            "crates/horizon-client/src/game/setup/fishing.rs",
+            "crates/horizon-client/src/game/mod_api_host.rs",
+            "crates/horizon-client/src/game/mod_api_host_generated.rs",
+            "crates/horizon-client-render/src/gfx/upload.rs",
+            "crates/horizon-client-render/src/logging.rs",
+            "crates/horizon-client-render/src/mod_list.rs",
+            "crates/horizon-client-render/src/crash.rs",
+            "crates/horizon-mods/src/index/native.rs",
+            "crates/horizon-shaders/src/condition.rs",
+            "crates/horizon-shaders/src/preprocess.rs",
+            "third_party/naga/src/front/glsl/parser/functions.rs",
+            "third_party/naga/src/front/glsl/types.rs",
+            "third_party/naga/src/front/glsl/functions.rs",
+            "third_party/naga/src/valid/function.rs",
+            "launcher/src/native_mods.rs",
+            "launcher/src/native_mods/api.rs",
+            "launcher/src/native_mods/crates.rs",
+            "launcher/src/native_mods/dependencies.rs",
+            "launcher/src/native_mods/inject.rs",
+            "launcher/src/native_mods/inject_cache.rs",
         ]
         for rel in modified_files:
             path = ROOT / rel
@@ -758,6 +788,98 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("pub fn read_mod_archive_id(", content_files)
         self.assertIn("content_files::read_mod_archive_id(&staged, &name)?;", documents)
         self.assertIn("horizon_mods::index::native::Bundle::read(&path)", native_hooks)
+
+
+    def test_photon_shader_world_import_ui_fit_and_native_compiler_kit(self) -> None:
+        import json, struct, subprocess, tempfile, zipfile
+
+        doc_bridge = (ROOT / "crates/horizon-client/src/android/document_bridge.rs").read_text(encoding="utf-8")
+        documents = (ROOT / "crates/horizon-client/src/android/documents.rs").read_text(encoding="utf-8")
+        launcher_pages = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
+        upload = (ROOT / "crates/horizon-client-render/src/gfx/upload.rs").read_text(encoding="utf-8")
+        android_main = (ROOT / "crates/horizon-client/src/android_main.rs").read_text(encoding="utf-8")
+        condition = (ROOT / "crates/horizon-shaders/src/condition.rs").read_text(encoding="utf-8")
+        preprocess = (ROOT / "crates/horizon-shaders/src/preprocess.rs").read_text(encoding="utf-8")
+        rewrite = (ROOT / "crates/horizon-shaders/src/translate/rewrite.rs").read_text(encoding="utf-8")
+        pack_post = (ROOT / "crates/horizon-client-render/src/gfx/pack_post.rs").read_text(encoding="utf-8")
+        pack_post_wgsl = (ROOT / "crates/horizon-client-render/src/gfx/pack_post.wgsl").read_text(encoding="utf-8")
+        native_mods_java = (ROOT / "packaging/android/java/dev/horizon/android/NativeMods.java").read_text(encoding="utf-8")
+        activity_java = (ROOT / "packaging/android/java/dev/horizon/android/HorizonActivity.java").read_text(encoding="utf-8")
+        manifest_xml = (ROOT / "packaging/android/AndroidManifest.xml").read_text(encoding="utf-8")
+        android_rs = (ROOT / "crates/horizon-client/src/android.rs").read_text(encoding="utf-8")
+        native_builds = (ROOT / "crates/horizon-client/src/game/native_builds.rs").read_text(encoding="utf-8")
+        jar_transpiler = (ROOT / "crates/horizon-client/src/jar_transpiler.rs").read_text(encoding="utf-8")
+        mod_api = (ROOT / "crates/horizon-client/src/mod_api.rs").read_text(encoding="utf-8")
+
+        # 1. World folder import via document_bridge::copy_tree + nested level.dat unwrapping
+        self.assertIn("pub fn copy_tree(", doc_bridge)
+        self.assertIn("env.get_object_class(activity)", doc_bridge)
+        self.assertIn("flatten_nested_world_dir_if_needed(", doc_bridge)
+        self.assertIn("crate::document_bridge::copy_tree(", documents)
+
+        # 2. UI layout fit & button text auto-step-down
+        self.assertIn("let wb_h = 114.0;", launcher_pages)
+        self.assertIn("let studio_offset = 196.0;", launcher_pages)
+        self.assertIn("let right_cta_w = if compact { 256.0 } else { 296.0 };", launcher_pages)
+
+        # 3. StagingBelt crash guard & ProcessExitGuard
+        self.assertNotIn('.expect("staging belt slices are mapped")', upload)
+        self.assertIn("struct ProcessExitGuard;", android_main)
+
+        # 4. Photon shader compilation, Render Scale < 100% CAS upscale, and ping-pong clear/keep
+        self.assertIn("rest.starts_with(['(', '!'])", condition)
+        self.assertIn('e.contains("without `#if`")', preprocess)
+        self.assertIn("vec3 sh_evaluate_irradiance(vec4 r, vec4 g, vec4 b, vec3 d)", rewrite)
+        self.assertIn("fn vs_uv_direct(@builtin(vertex_index) i: u32) -> Full", pack_post_wgsl)
+        self.assertIn("upscale: (wgpu::RenderPipeline, wgpu::BindGroupLayout),", pack_post)
+        self.assertIn("final_out: wgpu::TextureView,", pack_post)
+        self.assertIn("wgpu::LoadOp::Load", pack_post)
+
+        # 5. NativeMods.java + HorizonActivity.java + android.rs dlopen handoff + native_builds.rs + jar_transpiler.rs + mod_api.rs
+        self.assertIn("static final int TRIES = 2;", native_mods_java)
+        self.assertIn('Os.setenv("HORIZON_GAME_LIBRARY", build.getPath(), true);', activity_java)
+        self.assertIn("System.load(build.getPath());", activity_java)
+        self.assertIn('android:value="horizon_on_create"', manifest_xml)
+        self.assertIn("dlopen(path.as_ptr(), RTLD_NOW)", android_rs)
+        self.assertIn('dlsym(build, c"ANativeActivity_onCreate".as_ptr())', android_rs)
+        self.assertIn("pub(super) fn offer_compile(&mut self)", native_builds)
+        self.assertIn("pub fn transpile_jar_to_horizon_mods(", jar_transpiler)
+        self.assertIn("pub use generated::Hooks;", mod_api)
+
+        # 6. End-to-end execution of standalone real_java_to_hnmod_compiler.py on a synthetic Fabric .jar
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            jar_path = tmp_path / "vein_zoom_wrench.jar"
+            out_hnmod = tmp_path / "vein_zoom_wrench.hnmod"
+            cp_strings = [b"VeinMinerHandler", b"rotateBlock", b"fovZoom", b"KeyMapping", b"/veinmine"]
+            cp_bytes = bytearray()
+            for s in cp_strings:
+                cp_bytes.append(1)
+                cp_bytes.extend(struct.pack(">H", len(s)))
+                cp_bytes.extend(s)
+            cls_bytes = b"\xca\xfe\xba\xbe\x00\x00\x00\x3d" + struct.pack(">H", len(cp_strings) + 1) + bytes(cp_bytes) + b"\x00" * 16
+            with zipfile.ZipFile(jar_path, "w") as zf:
+                zf.writestr("fabric.mod.json", json.dumps({
+                    "id": "vein-zoom-wrench",
+                    "name": "Vein Zoom Wrench",
+                    "version": "1.2.0",
+                    "description": "Test Java mod for bytecode transpiler"
+                }))
+                zf.writestr("com/example/VeinMinerHandler.class", cls_bytes)
+            res = subprocess.run(
+                ["python3", str(ROOT / "packaging/android/real_java_to_hnmod_compiler.py"), str(jar_path), "--out", str(out_hnmod.parent)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertTrue(out_hnmod.is_file(), res.stdout + res.stderr)
+            with zipfile.ZipFile(out_hnmod, "r") as hz:
+                names = set(hz.namelist())
+                self.assertIn("horizon-native.json", names)
+                self.assertIn("mixins/vein_zoom_wrench/horizon-mixin.toml", names)
+                self.assertIn("mixins/vein_zoom_wrench/destroy.rs", names)
+                self.assertIn("mixins/vein_zoom_wrench/use.rs", names)
+                self.assertIn("mixins/vein_zoom_wrench/key.rs", names)
 
 
 if __name__ == "__main__":

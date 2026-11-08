@@ -59,6 +59,18 @@ pub fn set_game_home(home: PathBuf) {
     let _ = HOME.set(home);
 }
 
+static PRIVATE_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Sets the app's private data directory (`getFilesDir()` on Android).
+pub fn set_private_home(home: PathBuf) {
+    let _ = PRIVATE_HOME.set(home);
+}
+
+/// The app's private data directory (`getFilesDir()` on Android), or `game_home()`.
+pub fn private_home() -> PathBuf {
+    PRIVATE_HOME.get().cloned().unwrap_or_else(game_home)
+}
+
 /// Where the launcher runs the game and keeps its saves: `--home`, else `HORIZON_HOME`, else
 /// `horizon` in the platform data folder (launcher/src/backend.rs `game_home`).
 pub fn game_home() -> PathBuf {

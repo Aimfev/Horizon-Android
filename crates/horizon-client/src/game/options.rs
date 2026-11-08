@@ -93,6 +93,16 @@ impl Game<'_> {
             .unwrap_or_default()
             .join("options.txt")
     }
+    pub(super) fn game_dir() -> std::path::PathBuf {
+        Self::options_path()
+            .parent()
+            .map_or_else(|| std::path::PathBuf::from("."), std::path::Path::to_path_buf)
+    }
+    pub(super) fn touch_size(&self) -> [u32; 2] {
+        self.renderer
+            .as_ref()
+            .map_or([1280, 720], |r| [r.config.width, r.config.height])
+    }
     /// `shaderpacks/` beside `options.txt`.
     pub(super) fn shader_packs_dir() -> std::path::PathBuf {
         Self::options_path().with_file_name(horizon_client::shader_pack_list::DIR)
@@ -170,11 +180,15 @@ impl Game<'_> {
         }
     }
     pub(super) fn draw_options(&mut self, batch: &mut HudBatch) {
+        #[cfg(target_os = "android")]
+        self.poll_native_builds();
         self.watch_pack_folder();
         let mut ui = std::mem::take(&mut self.ui.options);
         ui.draw(&self.settings, batch, &self.gui.atlas, self.cursor);
         self.ui.options = ui;
         self.show_calibration(batch.height);
+        #[cfg(target_os = "android")]
+        self.draw_native_builds(batch);
     }
     /// HDR calibration's test picture to the renderer, full screen while it runs: the
     /// window goes fullscreen for it and back after, if it wasn't already.
@@ -212,6 +226,17 @@ impl Game<'_> {
         }
     }
     pub(super) fn options_mouse(&mut self, pressed: bool, right: bool) -> Result<()> {
+        #[cfg(target_os = "android")]
+        if self.native_builds_shown() {
+            if !pressed && !right {
+                let [w, h] = self.touch_size();
+                let d = (w as f32 / 1040.0).min(h as f32 / 700.0).clamp(1.0, 4.0);
+                let b = HudBatch::new([w, h]);
+                let at = [self.cursor.0 * b.scale / d, self.cursor.1 * b.scale / d];
+                self.native_builds_press(at);
+            }
+            return Ok(());
+        }
         if !pressed {
             if right {
                 return Ok(());

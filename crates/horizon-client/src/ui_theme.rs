@@ -89,6 +89,10 @@ pub enum Face {
     /// Counts, timestamps and the boot screen's console lines.
     Mono,
 }
+impl Face {
+    #[allow(non_upper_case_globals)]
+    pub const Semibold: Self = Self::SemiBold;
+}
 
 /// Vector icons used by the Material You 3 Android launcher navigation rail,
 /// top bar, and progress controls.
@@ -1496,7 +1500,7 @@ impl<'a> Ui<'a> {
     pub fn text(&mut self, face: Face, size: f32, x: f32, y: f32, color: u32, text: &str) -> f32 {
         self.text_line(face, size, (size * 1.45).round(), x, y, color, text)
     }
-    pub(crate) fn text_centered(
+    pub fn text_centered(
         &mut self,
         face: Face,
         size: f32,

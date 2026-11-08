@@ -4267,60 +4267,6 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
-        // Also scan horizon-mods/ and horizon-native-mods/ for any imported .hnmod bundles
-        // that aren't already listed by the compiled-in hooks.
-        let base_dir = Self::options_path();
-        for folder in [
-            base_dir.with_file_name(horizon_client::mod_list::DIR),
-            base_dir.with_file_name(horizon_client::mod_list::NATIVE_DIR),
-        ] {
-            if let Ok(rd) = std::fs::read_dir(&folder) {
-                for entry in rd.flatten() {
-                    let path = entry.path();
-                    if !path.extension().is_some_and(|e| e == "hnmod") {
-                        continue;
-                    }
-                    if let Ok(bundle) = horizon_mods::index::native::Bundle::read(&path) {
-                        let id = bundle.manifest.id;
-                        if !mods.iter().any(|m| m.id == id) {
-                            let prefix = format!("mixins/{id}/horizon-mixin.toml");
-                            let (title, desc) = bundle
-                                .files
-                                .get(&prefix)
-                                .and_then(|b| std::str::from_utf8(b).ok())
-                                .and_then(|s| toml::from_str::<toml::Value>(s).ok())
-                                .map(|v| {
-                                    let name = v
-                                        .get("mod")
-                                        .and_then(|m| m.get("name"))
-                                        .and_then(|n| n.as_str())
-                                        .unwrap_or(&id)
-                                        .to_owned();
-                                    let d = v
-                                        .get("mod")
-                                        .and_then(|m| m.get("description"))
-                                        .and_then(|n| n.as_str())
-                                        .unwrap_or("Imported Horizon native mod (.hnmod)")
-                                        .to_owned();
-                                    (format!("{name} {}", bundle.manifest.version), d)
-                                })
-                                .unwrap_or_else(|| {
-                                    (
-                                        format!("{id} {}", bundle.manifest.version),
-                                        "Imported Horizon native mod (.hnmod)".into(),
-                                    )
-                                });
-                            mods.push(NativeMod {
-                                id,
-                                title,
-                                description: desc,
-                                keys: Vec::new(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
         // A WebAssembly mod of the same id doesn't run (`start_mods`): the
         // native row stands for it, and alone toggles its `mod.<id>` line.
         self.settings
@@ -4344,10 +4290,62 @@ impl Game<'_> {
                 native: Some(page),
             });
         }
+        #[cfg(target_os = "android")]
+        let built = super::native_builds::running_build_info().unwrap_or_default();
+        #[cfg(not(target_os = "android"))]
+        let built = std::fs::read_to_string(Self::options_path().with_file_name("native-mods.json"))
+            .unwrap_or_default();
+        let info: serde_json::Value = serde_json::from_str(&built).unwrap_or_default();
+        let in_build = |id: &str| {
+            info["mods"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|m| m["id"] == id))
+        };
+        let base_dir = Self::options_path();
+        let mut paths = Vec::new();
+        for folder in [
+            base_dir.with_file_name(horizon_client::mod_list::NATIVE_DIR),
+            base_dir.with_file_name(horizon_client::mod_list::DIR),
+            horizon_client::logging::private_home().join(horizon_client::mod_list::NATIVE_DIR),
+            horizon_client::logging::private_home().join(horizon_client::mod_list::DIR),
+        ] {
+            if let Ok(rd) = std::fs::read_dir(&folder) {
+                paths.extend(rd.flatten().map(|e| e.path()));
+            }
+        }
+        paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+        paths.sort();
+        for path in paths {
+            let Ok(bundle) = horizon_mods::index::native::Bundle::read(&path) else {
+                continue;
+            };
+            let m = bundle.manifest;
+            let listed = self.settings.mods.installed.iter().any(|row| row.id == m.id);
+            if !listed && !in_build(&m.id) {
+                self.settings.mods.installed.push(Installed {
+                    title: format!("{} {}", m.id, m.version),
+                    id: m.id,
+                    description: String::new(),
+                    problem: Some(horizon_client::mod_list::NOT_BUILT.to_owned()),
+                    dev: false,
+                    has_settings: false,
+                    native: None,
+                });
+            }
+        }
+        #[cfg(target_os = "android")]
+        {
+            self.offer_compile();
+            self.list_native_builds_row();
+        }
     }
     /// A click on button `button` of native mod `i`'s page (its index in
     /// Options > Mods), and the page's labels after it.
     pub(super) fn native_settings_event(&mut self, i: usize, button: usize) {
+        #[cfg(target_os = "android")]
+        if self.native_builds_button(i) {
+            return;
+        }
         let Some(id) = self.settings.mods.installed.get(i).map(|m| m.id.clone()) else {
             return;
         };
@@ -4357,6 +4355,13 @@ impl Game<'_> {
     /// Native mod `i`'s page opened: its labels asked again, so that they
     /// follow the language (and the mod's state) since the list was made.
     pub(super) fn native_settings_refresh(&mut self, i: usize) {
+        #[cfg(target_os = "android")]
+        if self.settings.mods.installed.get(i).is_some_and(|m| {
+            m.id == "horizon-native-builds"
+                || m.problem.as_deref() == Some(horizon_client::mod_list::NOT_BUILT)
+        }) {
+            return;
+        }
         let Some(id) = self.settings.mods.installed.get(i).map(|m| m.id.clone()) else {
             return;
         };

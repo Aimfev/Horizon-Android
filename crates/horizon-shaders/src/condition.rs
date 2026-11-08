@@ -37,7 +37,10 @@ pub(crate) fn split_directive(after_hash: &str) -> Option<(&str, &str)> {
         .find(|c: char| !c.is_ascii_alphabetic())
         .unwrap_or(line.len());
     let (word, rest) = line.split_at(len);
-    let ok = rest.is_empty() || rest.starts_with(char::is_whitespace) || rest.starts_with("//");
+    let ok = rest.is_empty()
+        || rest.starts_with(char::is_whitespace)
+        || rest.starts_with("//")
+        || (matches!(word, "if" | "elif") && rest.starts_with(['(', '!']));
     ok.then(|| (word, rest.split("//").next().unwrap_or("").trim()))
 }
 

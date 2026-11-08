@@ -2,12 +2,129 @@ package dev.horizon.android;
 
 /** SAF result callback only. The native activity, UI and file operations stay Rust. */
 public final class HorizonActivity extends android.app.NativeActivity {
-    static { System.loadLibrary("horizon_android"); }
+    private static final int REQUEST_MOD_PERMISSIONS = 3;
+    private static final String RELEASE_SIGNER =
+            "b83e95a3ff2ff82509300f132506d61b1ca3572a61e80b8588f8be815f7b9b05";
+    private boolean loaded;
+    private java.io.File nativeLibrary;
+
     private native void nativeDocumentResult(int request, int result, String uri);
 
     @Override protected void onCreate(android.os.Bundle savedInstanceState) {
+        loadGame();
         super.onCreate(savedInstanceState);
         applyHighRefreshRate(this, 0);
+    }
+
+    private void loadGame() {
+        if (loaded) {
+            return;
+        }
+        loaded = true;
+        java.io.File build = NativeMods.chosen(this, versionName());
+        if (build != null) {
+            try {
+                android.system.Os.setenv("HORIZON_GAME_LIBRARY", build.getPath(), true);
+                System.load(build.getPath());
+                nativeLibrary = build;
+                return;
+            } catch (Throwable e) {
+                NativeMods.setAside(
+                        this,
+                        "The native-mod build could not be loaded ("
+                                + e.getClass().getSimpleName()
+                                + "); starting without native mods.");
+            }
+        }
+        try {
+            android.system.Os.unsetenv("HORIZON_GAME_LIBRARY");
+        } catch (android.system.ErrnoException ignored) {
+        }
+        System.loadLibrary("horizon_android");
+    }
+
+    public String versionName() {
+        try {
+            String v = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            return v != null ? v : "";
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return "";
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    public boolean releaseBuild() {
+        try {
+            android.content.pm.Signature[] sigs =
+                    getPackageManager()
+                            .getPackageInfo(
+                                    getPackageName(),
+                                    android.content.pm.PackageManager.GET_SIGNATURES)
+                            .signatures;
+            if (sigs == null || sigs.length == 0) {
+                return false;
+            }
+            byte[] digest =
+                    java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(sigs[0].toByteArray());
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(String.format("%02x", b & 0xff));
+            }
+            return RELEASE_SIGNER.equals(hex.toString());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public void firstFrame() {
+        NativeMods.started(this);
+        askModPermissions();
+    }
+
+    private void askModPermissions() {
+        final String[] permissions = NativeMods.permissions(nativeLibrary);
+        if (permissions.length == 0) {
+            return;
+        }
+        runOnUiThread(
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        java.util.ArrayList<String> missing = new java.util.ArrayList<>();
+                        for (String p : permissions) {
+                            if (checkSelfPermission(p)
+                                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                missing.add(p);
+                            }
+                        }
+                        if (!missing.isEmpty()) {
+                            requestPermissions(
+                                    missing.toArray(new String[0]), REQUEST_MOD_PERMISSIONS);
+                        }
+                    }
+                });
+    }
+
+    public void restart() {
+        runOnUiThread(
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        android.content.Intent launch =
+                                getPackageManager().getLaunchIntentForPackage(getPackageName());
+                        if (launch == null) {
+                            launch =
+                                    new android.content.Intent(
+                                            HorizonActivity.this, HorizonActivity.class);
+                        }
+                        launch.addFlags(
+                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                        | android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                        startActivity(launch);
+                        Runtime.getRuntime().exit(0);
+                    }
+                });
     }
 
     @Override protected void onResume() {

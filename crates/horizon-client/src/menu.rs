@@ -338,6 +338,16 @@ pub struct Anvil {
     pub only_renaming: bool,
 }
 
+/// The inputs and result of an anvil craft (`AnvilCraftEvent.Pre` / `.Post`).
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct AnvilCraft {
+    pub left: Option<ItemStack>,
+    pub right: Option<ItemStack>,
+    pub output: ItemStack,
+    pub cost: i32,
+    pub repair_count: u32,
+}
+
 /// `StonecutterMenu`'s state besides its slots and `selectedRecipeIndex`.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Stonecutter {

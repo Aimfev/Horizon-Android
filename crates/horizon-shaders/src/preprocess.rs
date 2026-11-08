@@ -166,7 +166,7 @@ impl Run<'_> {
         };
         match self.conditionals.apply(word, rest, &self.macros) {
             // As Iris loads such a pack: the branch is skipped, the program kept.
-            Err(e) if e.ends_with("read as false") => {
+            Err(e) if e.ends_with("read as false") || e.contains("without `#if`") => {
                 return self.out.warnings.push(Diagnostic { origin, message: e });
             }
             Err(e) => return self.diagnose(origin, &e),

@@ -1514,7 +1514,6 @@ pub fn draw_goy_hud(
     ui.finish();
 }
 
-#[allow(dead_code)]
 fn draw_mcpe_custom_plate(
     ui: &mut crate::ui_theme::Ui,
     rect: [f32; 4],

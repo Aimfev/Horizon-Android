@@ -18,24 +18,37 @@ use crate::{
 impl ParsingContext<'_> {
     pub fn peek_parameter_qualifier(&mut self, frontend: &mut Frontend) -> bool {
         self.peek(frontend).is_some_and(|t| match t.value {
-            TokenValue::In | TokenValue::Out | TokenValue::InOut | TokenValue::Const => true,
+            TokenValue::In
+            | TokenValue::Out
+            | TokenValue::InOut
+            | TokenValue::Const
+            | TokenValue::MemoryQualifier(_)
+            | TokenValue::Restrict
+            | TokenValue::PrecisionQualifier(_) => true,
             _ => false,
         })
     }
 
     /// Returns the parsed `ParameterQualifier` or `ParameterQualifier::In`
     pub fn parse_parameter_qualifier(&mut self, frontend: &mut Frontend) -> ParameterQualifier {
-        if self.peek_parameter_qualifier(frontend) {
+        let mut qualifier = ParameterQualifier::In;
+        while self.peek_parameter_qualifier(frontend) {
             match self.bump(frontend).unwrap().value {
-                TokenValue::In => ParameterQualifier::In,
-                TokenValue::Out => ParameterQualifier::Out,
-                TokenValue::InOut => ParameterQualifier::InOut,
-                TokenValue::Const => ParameterQualifier::Const,
+                TokenValue::In => qualifier = ParameterQualifier::In,
+                TokenValue::Out => qualifier = ParameterQualifier::Out,
+                TokenValue::InOut => qualifier = ParameterQualifier::InOut,
+                TokenValue::Const => {
+                    if matches!(qualifier, ParameterQualifier::In) {
+                        qualifier = ParameterQualifier::Const;
+                    }
+                }
+                TokenValue::MemoryQualifier(_)
+                | TokenValue::Restrict
+                | TokenValue::PrecisionQualifier(_) => {}
                 _ => unreachable!(),
             }
-        } else {
-            ParameterQualifier::In
         }
+        qualifier
     }
 
     pub fn parse_statement(

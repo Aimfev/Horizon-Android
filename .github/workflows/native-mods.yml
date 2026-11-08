@@ -1,0 +1,279 @@
+name: native-mods
+# Horizon with native mods (docs/horizon-native-mods.md): a release's game library with a set of the mods in
+# native-mods/ compiled in (packaging/android/native_build.sh), published as two assets of the native-builds release,
+# where the game looks for it (game/native_builds.rs): NAME.json (what went in, the library's SHA-256) and NAME.so,
+# NAME being v<version>__<mod ids, sorted, joined by __>.
+#
+# Asked for two ways: a player's issue from the game's Request button (the native-build issue form: the version and
+# the mods), and workflow_dispatch: by hand, or by android.yml once it published a release, with no mods, which builds
+# the sets in native-mods/prebuilt.txt. Only mods in native-mods/ build: each was read before it was added there, since
+# its code is compiled into a game players run.
+#
+# Until 2026-11-21 it builds on the build VM when that is set up (repository variable HORIZON_VM = on, Azure's
+# federated login in the variables AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID): it starts the VM, builds
+# on its self-hosted runner (label horizon-vm) and deallocates it when no other build waits. After that date, or
+# without the VM, on GitHub's runners.
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Horizon version (0.1.4); its tag v0.1.4 is built
+        required: true
+      mods:
+        description: Mod ids from native-mods/, separated by spaces or commas (none, the sets of native-mods/prebuilt.txt)
+        required: false
+permissions:
+  contents: read
+env:
+  VM_UNTIL: '2026-11-21'
+  REPO_URL: https://github.com/${{ github.repository }}
+jobs:
+  request:
+    if: github.event_name != 'issues' || startsWith(github.event.issue.title, '[native build]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      builds: ${{ steps.read.outputs.builds }}
+      runner: ${{ steps.runner.outputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Read from the environment, never pasted into the script: an issue's text is anyone's.
+      - id: read
+        env:
+          EVENT: ${{ github.event_name }}
+          BODY: ${{ github.event.issue.body }}
+          VERSION: ${{ inputs.version }}
+          MODS: ${{ inputs.mods }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, pathlib, re, subprocess, sys
+          event = os.environ["EVENT"]
+          def field(name):
+              m = re.search(rf"^### {name}\s*$(.*?)(?=^### |\Z)", os.environ.get("BODY") or "", re.S | re.M)
+              return m.group(1).strip() if m else ""
+          if event == "issues":
+              sets = [(field("Horizon version"), field("Mods"))]
+          elif os.environ["MODS"].strip():
+              sets = [(os.environ["VERSION"], os.environ["MODS"])]
+          else:
+              lines = pathlib.Path("native-mods/prebuilt.txt").read_text().splitlines()
+              sets = [(os.environ["VERSION"], l) for l in lines if l.strip() and not l.startswith("#")]
+          builds, problems = [], []
+          for version, mods in sets:
+              version = version.strip().removeprefix("v")
+              ids = sorted(set(m for m in re.split(r"[\s,]+", mods.lower()) if m))
+              if not re.fullmatch(r"\d+(\.\d+){1,3}", version):
+                  problems.append(f"`{version[:40]}` is not a Horizon version (0.1.4)")
+                  continue
+              tag = subprocess.run(["git", "ls-remote", "--tags", os.environ["REPO_URL"], f"refs/tags/v{version}"],
+                                   capture_output=True, text=True).stdout.strip()
+              if not tag:
+                  problems.append(f"Horizon {version} has no release tag")
+              unknown = [i for i in ids if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", i)
+                         or not pathlib.Path(f"native-mods/{i}/mixins/{i}/horizon-mixin.toml").is_file()]
+              if not ids:
+                  problems.append("no mods named")
+              if unknown:
+                  problems.append("not in native-mods/: " + ", ".join(f"`{u[:40]}`" for u in unknown))
+              if tag and ids and not unknown:
+                  builds.append({"version": version, "mods": " ".join(ids),
+                                 "name": f"v{version}__" + "__".join(ids)})
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"builds={json.dumps(builds)}\n")
+          if problems:
+              pathlib.Path("problems.txt").write_text("\n".join(f"- {p}" for p in problems))
+              sys.exit("; ".join(problems))
+          EOF
+      - name: Say why nothing builds
+        if: failure() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          { echo "Nothing to build:"; echo; cat problems.txt 2>/dev/null; echo; \
+            echo "The mods that build are the folders of native-mods/."; } > comment.md
+          gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" -F comment.md
+          gh issue close "$NUMBER" -R "$GITHUB_REPOSITORY" --reason "not planned"
+      - id: runner
+        env:
+          VM: ${{ vars.HORIZON_VM }}
+        run: |
+          if [ "$VM" = on ] && [ "$(date -u +%F)" \< "$VM_UNTIL" ]; then
+            echo 'runner=["self-hosted","horizon-vm"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner="ubuntu-latest"' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Say it builds
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" \
+            --body "Building ([progress]($RUN)); the game finds the build once it is published, in about 15 minutes."
+
+  vm-start:
+    needs: request
+    if: contains(needs.request.outputs.runner, 'horizon-vm')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: az vm start -g horizon-build -n horizon-build
+
+  build:
+    needs: [request, vm-start]
+    if: >-
+      always() && needs.request.result == 'success' && needs.request.outputs.builds != '[]'
+      && needs.vm-start.result != 'failure'
+    runs-on: ${{ fromJSON(needs.request.outputs.runner) }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.request.outputs.builds) }}
+    env:
+      NATIVE_CACHE: ${{ github.workspace }}/../native-cache
+    steps:
+      # No token left in the checkouts: the mods' code is compiled here.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: tools
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: v${{ matrix.build.version }}
+          path: source
+      - uses: actions/setup-python@v5
+        if: runner.environment == 'github-hosted'
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        if: runner.environment == 'github-hosted'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install the build-tools, platform and NDK build_apk.py pins
+        if: runner.environment == 'github-hosted'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "build-tools;35.0.0" "platforms;android-36" "ndk;28.2.13676358" > /dev/null
+      - name: Install Rust for Android and cargo-ndk
+        if: runner.environment == 'github-hosted'
+        run: |
+          rustup toolchain install stable --profile minimal --target aarch64-linux-android
+          rustup default stable
+          cargo install cargo-ndk --version 3.5.4 --locked
+      # As android.yml's release build: the fast profile needs more than the runner's 16 GB.
+      - name: Make room for the release build
+        if: runner.environment == 'github-hosted'
+        run: |
+          sudo swapoff -a || true
+          where=/mnt size=20G
+          avail=$(df --output=avail -BG "$where" 2>/dev/null | tail -1 | tr -dc 0-9)
+          if [ "${avail:-0}" -lt 30 ]; then where=$RUNNER_TEMP size=10G; fi
+          sudo fallocate -l "$size" "$where/release.swap"
+          sudo chmod 600 "$where/release.swap"
+          sudo mkswap "$where/release.swap" > /dev/null
+          sudo swapon "$where/release.swap"
+          echo "CARGO_BUILD_JOBS=3" >> "$GITHUB_ENV"
+      - name: Build
+        env:
+          MODS: ${{ matrix.build.mods }}
+        run: |
+          bundles=()
+          for id in $MODS; do bundles+=("tools/native-mods/$id/mixins/$id"); done
+          bash tools/packaging/android/native_build.sh source out "${bundles[@]}"
+          mv out/libhorizon_android.so "out/${{ matrix.build.name }}.so"
+          mv out/build.json "out/${{ matrix.build.name }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.build.name }}
+          path: |
+            out/${{ matrix.build.name }}.so
+            out/${{ matrix.build.name }}.json
+            out/*.apk
+          retention-days: 7
+
+  publish:
+    needs: [request, build]
+    if: always() && needs.request.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      # What built, when some of the sets did not.
+      - uses: actions/download-artifact@v4
+        if: needs.build.result == 'success' || needs.build.result == 'failure'
+        continue-on-error: true
+        with:
+          path: built
+          merge-multiple: true
+      - name: Publish the builds
+        if: needs.build.result == 'success' || needs.build.result == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          built=(built/*.so built/*.json)
+          [ ${#built[@]} -gt 0 ] || exit 0
+          gh release view native-builds -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 || \
+            gh release create native-builds -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
+              --title "Native mod builds" \
+              --notes "Horizon's game library with native mods compiled in, which the game downloads by itself. Not an install: use the APKs of the releases."
+          gh release upload native-builds -R "$GITHUB_REPOSITORY" --clobber "${built[@]}"
+      - name: Tell the player
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          OK: ${{ needs.build.result == 'success' }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$OK" = true ]; then
+            gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" \
+              --body "Built: Horizon's Native mods page has it now (tap Check)."
+            gh issue close "$NUMBER" -R "$GITHUB_REPOSITORY" --reason completed
+          else
+            gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" \
+              --body "The build failed ([log]($RUN)): these mods do not build on this version yet."
+          fi
+
+  vm-stop:
+    needs: [request, build]
+    if: always() && contains(needs.request.outputs.runner, 'horizon-vm')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      actions: read
+    steps:
+      # Another build waiting for the VM keeps it on; its own run stops it.
+      - id: others
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow native-mods.yml --json databaseId,status \
+            --jq "[.[] | select(.databaseId != $GITHUB_RUN_ID and (.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\"))] | length")
+          echo "waiting=$n" >> "$GITHUB_OUTPUT"
+      - uses: azure/login@v2
+        if: steps.others.outputs.waiting == '0'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - if: steps.others.outputs.waiting == '0'
+        run: az vm deallocate -g horizon-build -n horizon-build --no-wait

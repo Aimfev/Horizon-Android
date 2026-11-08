@@ -11,7 +11,7 @@ use std::{
     io,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlockStateId(pub u32);
 
 pub struct BlockRegistry {

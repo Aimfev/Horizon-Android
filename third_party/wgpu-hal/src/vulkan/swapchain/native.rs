@@ -172,7 +172,6 @@ impl Surface for NativeSurface {
             current_extent,
             usage: conv::map_vk_image_usage(caps.supported_usage_flags),
             present_modes: {
-                #[allow(unused_mut)]
                 let mut modes: Vec<wgt::PresentMode> = raw_present_modes
                     .into_iter()
                     .flat_map(conv::map_vk_present_mode)

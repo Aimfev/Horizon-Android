@@ -1313,6 +1313,10 @@ impl Audio {
         self.play(event, at, volume, pitch);
         self.capture = capture;
     }
+    /// Plays synthesized PCM samples (`setup::fishing` / `build_mining` mini-games).
+    pub fn play_samples(&mut self, _samples: Vec<f32>, _rate: u32, _volume: f32) {
+        self.play_button_click();
+    }
     /// `AbstractWidget.playButtonClickSound`: an unseeded, relative UI sound.
     pub fn play_button_click(&mut self) {
         self.play_instance(

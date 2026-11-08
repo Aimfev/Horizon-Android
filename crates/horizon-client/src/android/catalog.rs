@@ -837,7 +837,12 @@ impl Catalog {
                 } else if name.ends_with(".hnmod") {
                     "Horizon Native Mod (.hnmod)"
                 } else if name.ends_with(".jar") {
-                    "Java Mod (.jar)"
+                    let stem = name.strip_suffix(".jar").unwrap_or(&name);
+                    let cid = horizon_client::jar_transpiler::sanitize_mod_id(stem);
+                    if !game.join("horizon-native-mods").join(format!("{cid}.hnmod")).is_file() {
+                        let _ = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&entry.path(), &game);
+                    }
+                    "Java Mod (.jar -> .hnmod)"
                 } else if name.ends_with(".hshader") {
                     "Horizon Shader (.hshader)"
                 } else if kind == horizon_client::content_files::Kind::Shaders {
@@ -2217,6 +2222,12 @@ fn install_modrinth_jar_fallback(
     }
     std::fs::rename(&downloaded, &target).map_err(|e| e.to_string())?;
     browser::java::set_enabled(home, &slug, true)?;
+    if let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&target, home) {
+        let mut on = horizon_client::mod_list::ModList::load(home);
+        on.disabled.remove(&transpiled.id);
+        on.enabled.insert(transpiled.id);
+        on.save(home);
+    }
     let (algo, hash) = file.checksum().unwrap_or(("SHA-1", ""));
     let mut installed = Installed::load(home);
     installed

@@ -444,15 +444,19 @@ pub(super) fn button(
     if !accent {
         ui.border(x, y, w, h, radius, my3_border());
     }
-    let padding = (w * 0.10).clamp(8.0, 14.0);
-    let font = if w < 90.0 {
+    let padding = (w * 0.07).clamp(5.0, 11.0);
+    let avail_w = (w - 2.0 * padding).max(16.0);
+    let mut font = if w < 90.0 {
         13.0
     } else if h <= 36.0 {
         14.0
     } else {
         15.0
     };
-    let fitted = ui.fit_text(Face::Medium, font, label, (w - 2.0 * padding).max(16.0));
+    while font > 11.0 && ui.measure(Face::Medium, font, label) > avail_w {
+        font -= 0.5;
+    }
+    let fitted = ui.fit_text(Face::Medium, font, label, avail_w);
     let text_w = ui.measure(Face::Medium, font, &fitted);
     let left_align = matches!(action, Action::Field(_)) || label.ends_with(" v");
     let tx = if left_align {
@@ -1058,6 +1062,9 @@ impl Launcher {
             return Ok(());
         };
         let result = self.draw_pages_with(&mut r, &gui);
+        if result.is_ok() {
+            crate::android::first_frame_shown();
+        }
         self.renderer = Some(r);
         self.gui = Some(gui);
         result
@@ -1589,7 +1596,7 @@ impl Launcher {
                     );
                 }
 
-                let btn_y = (h - 92.0).max(log_y + log_h + 12.0);
+                let btn_y = (h - 92.0).max(card_y + card_h + 12.0);
                 let play_w = content_w.min(256.0);
                 let is_launching = self.launching || self.session_worker.is_some();
                 if is_launching && installed {
@@ -2757,9 +2764,9 @@ impl Launcher {
             has_up,
         );
 
-        let right_cta_w = if compact { 224.0 } else { 260.0 };
-        let imp_btn_w = (right_cta_w - 8.0) * 0.28;
-        let imp_fld_w = (right_cta_w - 8.0) * 0.44;
+        let right_cta_w = if compact { 256.0 } else { 296.0 };
+        let imp_btn_w = (right_cta_w - 8.0) * 0.26;
+        let imp_fld_w = (right_cta_w - 8.0) * 0.46;
         let new_folder_w = right_cta_w - 8.0 - imp_btn_w - imp_fld_w;
         let btn1_x = content_x + content_w - right_cta_w;
         let btn2_x = btn1_x + imp_btn_w + 4.0;
@@ -2978,7 +2985,7 @@ impl Launcher {
             let card_h = 46.0;
             let selected = self.catalog.fm_selected.contains(&entry.rel_path);
             let check_r = [content_x + 6.0, y + 7.0, 32.0, 32.0];
-            let actions_w = if compact { 224.0 } else { 276.0 };
+            let actions_w = if compact { 248.0 } else { 296.0 };
             let open_r = [
                 content_x + 40.0,
                 y,
@@ -5258,7 +5265,7 @@ impl Launcher {
                 ui.set_clip(None);
             }
             SettingsCategory::Controls => {
-                let studio_offset = 166.0;
+                let studio_offset = 196.0;
                 let count = 26;
                 let max_scroll =
                     (studio_offset + count as f32 * step_y - (list_bottom - list_top)).max(0.0);
@@ -5660,14 +5667,15 @@ impl Launcher {
                     }
                 }
 
-                // Material Design 3 Control Studio Workbench Card (Active Preset + Quick Editor / Import / Export Bar)
+                // Material Design 3 Control Studio Workbench Card (Two-tier: Full-width Header + 3-Button Action Bar)
                 let wb_y = list_top + 74.0 - self.catalog.scroll;
-                if wb_y + 84.0 >= list_top && wb_y <= list_bottom {
-                    ui.rounded(content_x, wb_y, content_w, 84.0, 20.0, my3_surface());
-                    ui.border(content_x, wb_y, content_w, 84.0, 20.0, my3_accent());
+                let wb_h = 114.0;
+                if wb_y + wb_h >= list_top && wb_y <= list_bottom {
+                    ui.rounded(content_x, wb_y, content_w, wb_h, 20.0, my3_surface());
+                    ui.border(content_x, wb_y, content_w, wb_h, 20.0, my3_accent());
                     ui.rounded(
                         content_x + 14.0,
-                        wb_y + 14.0,
+                        wb_y + 12.0,
                         42.0,
                         42.0,
                         13.0,
@@ -5676,7 +5684,7 @@ impl Launcher {
                     ui.icon(
                         Icon::Gamepad,
                         content_x + 25.0,
-                        wb_y + 25.0,
+                        wb_y + 23.0,
                         20.0,
                         my3_accent(),
                     );
@@ -5684,13 +5692,13 @@ impl Launcher {
                         "{} Studio  •  Active Preset: {}",
                         sys_name, touch_cfg.preset_name
                     );
-                    let hdr_max = (content_w - 310.0).max(90.0);
+                    let hdr_max = (content_w - 82.0).max(120.0);
                     let fitted_hdr = ui.fit_text(Face::SemiBold, 14.0, &studio_hdr, hdr_max);
                     ui.text(
                         Face::SemiBold,
                         14.0,
                         content_x + 66.0,
-                        wb_y + 12.0,
+                        wb_y + 10.0,
                         my3_text(),
                         &fitted_hdr,
                     );
@@ -5709,7 +5717,7 @@ impl Launcher {
                         Face::Regular,
                         11.2,
                         content_x + 66.0,
-                        wb_y + 34.0,
+                        wb_y + 30.0,
                         my3_muted(),
                         &fitted_path,
                     );
@@ -5719,26 +5727,25 @@ impl Launcher {
                         Face::Regular,
                         10.8,
                         content_x + 66.0,
-                        wb_y + 54.0,
+                        wb_y + 47.0,
                         my3_accent(),
                         &fitted_desc,
                     );
 
-                    // Studio Quick Action Buttons on the right of the Workbench Card
-                    let btn_w_sm = 88.0;
-                    let btn_y_wb = wb_y + 23.0;
-                    let r_export = [content_x + content_w - btn_w_sm - 12.0, btn_y_wb, btn_w_sm, 38.0];
-                    let r_import = [r_export[0] - btn_w_sm - 8.0, btn_y_wb, btn_w_sm, 38.0];
-                    let r_editor = [r_import[0] - 96.0 - 8.0, btn_y_wb, 96.0, 38.0];
+                    // Studio Quick Action Buttons along the bottom row of the Workbench Card
+                    let btn_gap = 8.0;
+                    let btn_w_sm = ((content_w - 28.0 - 2.0 * btn_gap) / 3.0).max(76.0);
+                    let btn_y_wb = wb_y + 68.0;
+                    let r_editor = [content_x + 14.0, btn_y_wb, btn_w_sm, 36.0];
+                    let r_import = [r_editor[0] + btn_w_sm + btn_gap, btn_y_wb, btn_w_sm, 36.0];
+                    let r_export = [r_import[0] + btn_w_sm + btn_gap, btn_y_wb, btn_w_sm, 36.0];
                     for (rect, lbl, act, primary) in [
                         (r_editor, "Open Editor", Action::OpenControlEditor, true),
                         (r_import, "Import JSON", Action::ImportControlProfile, false),
                         (r_export, "Export Save", Action::ExportControlProfile, false),
                     ] {
-                        if rect[0] > content_x + 160.0 {
-                            button(ui, &mut self.targets, rect, lbl, act, primary);
-                            self.list_targets.push((rect, act));
-                        }
+                        button(ui, &mut self.targets, rect, lbl, act, primary);
+                        self.list_targets.push((rect, act));
                     }
                 }
 

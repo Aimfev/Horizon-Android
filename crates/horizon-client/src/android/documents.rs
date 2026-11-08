@@ -525,29 +525,16 @@ pub extern "system" fn document_result(
                     let target_dir = pending
                         .target_dir
                         .ok_or_else(|| "No target directory for folder import")?;
-                    let target_str = target_dir.to_string_lossy().into_owned();
-                    let j_uri = env.new_string(&uri)?;
-                    let j_target = env.new_string(&target_str)?;
-                    let res = env.call_static_method(
-                        "dev/horizon/android/HorizonActivity",
-                        "copyFolderTree",
-                        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                        &[
-                            jni::objects::JValue::Object(activity.as_obj()),
-                            jni::objects::JValue::Object(&j_uri.into()),
-                            jni::objects::JValue::Object(&j_target.into()),
-                        ],
+                    let copied = crate::document_bridge::copy_tree(
+                        &mut env,
+                        activity.as_obj(),
+                        &uri,
+                        &target_dir,
                     );
-                    if let Err(err) = res {
+                    if copied.is_err() {
                         let _ = env.exception_clear();
-                        return Err(format!("Folder copy failed: {err}").into());
                     }
-                    let res_obj = res?.l()?;
-                    let folder_name: String = if res_obj.is_null() {
-                        "folder".into()
-                    } else {
-                        env.get_string((&res_obj).into())?.into()
-                    };
+                    let folder_name = copied.map_err(|e| format!("Folder copy failed: {e}"))?;
                     if let Some(err_msg) = folder_name.strip_prefix("ERROR:") {
                         return Err(err_msg.trim().to_owned().into());
                     }
@@ -692,6 +679,23 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 let mut on = horizon_client::mod_list::ModList::load(profile_root);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id.clone());
+                if ext == "jar"
+                    && let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&dest, profile_root)
+                {
+                    on.disabled.remove(&transpiled.id);
+                    on.enabled.insert(transpiled.id.clone());
+                    on.save(profile_root);
+                    imported(
+                        format!(
+                            "Transpiled '{canon_name}' -> {}.hnmod{} ({}). Open Play -> Options -> Mods -> Compile.",
+                            transpiled.id,
+                            if transpiled.hmod_path.is_some() { " + 26.3 .hmod" } else { "" },
+                            transpiled.detected_features.join(", ")
+                        ),
+                        Kind::Mods,
+                    );
+                    return Ok(());
+                }
                 on.save(profile_root);
                 imported(
                     format!("Imported & enabled mod '{canon_name}' ({mod_id})."),
@@ -818,6 +822,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 std::fs::copy(&staged, &target)?;
                 let _ = std::fs::remove_file(&staged);
             }
+            let mut transpiled_msg: Option<String> = None;
             if let Some((mod_id, ext)) = imported_mod_id {
                 if ext == "hnmod" {
                     let native_dir = request.home.join("horizon-native-mods");
@@ -829,14 +834,29 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 let mut on = horizon_client::mod_list::ModList::load(&request.home);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id);
+                if ext == "jar"
+                    && let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&target, &request.home)
+                {
+                    on.disabled.remove(&transpiled.id);
+                    on.enabled.insert(transpiled.id.clone());
+                    transpiled_msg = Some(format!(
+                        "Transpiled {} -> {}.hnmod{} ({}). Open Play -> Options -> Mods -> Compile.",
+                        target.file_name().unwrap_or_default().to_string_lossy(),
+                        transpiled.id,
+                        if transpiled.hmod_path.is_some() { " + 26.3 .hmod" } else { "" },
+                        transpiled.detected_features.join(", ")
+                    ));
+                }
                 on.save(&request.home);
             }
             imported(
-                format!(
-                    "Imported {} into {} and enabled it.",
-                    target.file_name().unwrap_or_default().to_string_lossy(),
-                    request.kind.label()
-                ),
+                transpiled_msg.unwrap_or_else(|| {
+                    format!(
+                        "Imported {} into {} and enabled it.",
+                        target.file_name().unwrap_or_default().to_string_lossy(),
+                        request.kind.label()
+                    )
+                }),
                 request.kind,
             );
         }
@@ -926,6 +946,12 @@ pub fn resolve(choice: Choice) {
             let mut on = horizon_client::mod_list::ModList::load(profile_root);
             on.disabled.remove(mod_id);
             on.enabled.insert(mod_id.to_owned());
+            if fname.ends_with(".jar")
+                && let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&c.target, profile_root)
+            {
+                on.disabled.remove(&transpiled.id);
+                on.enabled.insert(transpiled.id);
+            }
             on.save(profile_root);
         }
         Ok(())

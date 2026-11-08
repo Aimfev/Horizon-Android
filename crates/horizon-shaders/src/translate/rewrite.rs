@@ -47,6 +47,18 @@ impl Stage<'_> {
         if self.inverse {
             p.push_str(INVERSE);
         }
+        if self.pp.code.contains("sh_evaluate_irradiance")
+            && !self.pp.code.contains("vec3 sh_evaluate_irradiance")
+        {
+            p.push_str(
+                "vec3 sh_evaluate_irradiance(vec3 sh[4], vec3 d) { const float c0 = 0.886226925, c1 = 1.02332671; return max(sh[0] * c0 + (sh[1] * d.y + sh[2] * d.z + sh[3] * d.x) * c1, vec3(0.0)); }
+                 vec3 sh_evaluate_irradiance(vec4 sh[3], vec3 d) { vec4 b = vec4(0.886226925, d.yzx * 1.02332671); return max(vec3(dot(sh[0], b), dot(sh[1], b), dot(sh[2], b)), vec3(0.0)); }
+                 vec3 sh_evaluate_irradiance(vec4 r, vec4 g, vec4 b, vec3 d) { vec4 v = vec4(0.886226925, d.yzx * 1.02332671); return max(vec3(dot(r, v), dot(g, v), dot(b, v)), vec3(0.0)); }
+                 vec3 sh_evaluate_irradiance(vec4 sh[3], vec3 d, float s) { vec4 b = vec4(0.886226925, d.yzx * (1.02332671 * s)); return max(vec3(dot(sh[0], b), dot(sh[1], b), dot(sh[2], b)), vec3(0.0)); }
+                 vec3 sh_evaluate_irradiance(vec3 sh[9], vec3 d) { return max(sh[0] * 0.886226925 + (sh[1] * d.y + sh[2] * d.z + sh[3] * d.x) * 1.02332671, vec3(0.0)); }
+",
+            );
+        }
         if self.gbuffers {
             // Set by our `main` from the frame's matrices (gbuffers.rs).
             p.push_str(
@@ -192,6 +204,14 @@ impl Stage<'_> {
             if t == "const" && depth > 0 && self.calls_not_constant(i) {
                 continue;
             }
+            // Strip memory qualifiers (`writeonly`, `readonly`, `coherent`, `volatile`, `restrict`)
+            // inside function parameter lists (`void f(writeonly uimage3D img)` in Photon's LPV).
+            if depth == 0
+                && calls.len() == 1
+                && matches!(t, "readonly" | "writeonly" | "coherent" | "volatile" | "restrict")
+            {
+                continue;
+            }
             // A function definition's sampler parameters: `sampler2D s` → `texture2D s, sampler hz_s_s`.
             if depth == 0 && is_sampler_type(t) && calls.len() == 1 {
                 if let Some(n) = next(i).filter(|&n| is_ident(self.tokens[n])) {
@@ -253,13 +273,21 @@ impl Stage<'_> {
                         "if (true) discard".into()
                     },
                 ),
-                "return" if next(i).is_some_and(|j| self.tokens[j] == ";") => Some(
-                    if next(i).and_then(&next).is_some_and(|k| self.tokens[k] == "else") {
-                        "{ if (true) return; }".into()
-                    } else {
-                        "if (true) return".into()
-                    },
-                ),
+                "return"
+                    if next(i).is_some_and(|j| self.tokens[j] == ";")
+                        || (prev(i).is_some_and(|p| matches!(self.tokens[p], "{" | ";" | "}" | ":"))
+                            && self.return_has_code_after(i)) =>
+                {
+                    Some(
+                        if next(i).is_some_and(|j| self.tokens[j] == ";")
+                            && next(i).and_then(&next).is_some_and(|k| self.tokens[k] == "else")
+                        {
+                            "{ if (true) return; }".into()
+                        } else {
+                            "if (true) return".into()
+                        },
+                    )
+                }
                 "dot" if called => Some("hz_dot".into()),
                 "normalMatrix" if !uniforms.contains_key("normalMatrix") => Some("hz_NormalMatrix".into()),
                 // GLSL's `modf`, which naga's frontend lacks.
@@ -331,6 +359,31 @@ impl Stage<'_> {
 }
 
 impl Stage<'_> {
+    /// Whether a `return` statement starting at token `i` is followed by more statements in the
+    /// same compound block (before the closing `}`).
+    pub(super) fn return_has_code_after(&self, i: usize) -> bool {
+        let mut paren = 0i32;
+        let mut j = i + 1;
+        while let Some(&tok) = self.tokens.get(j) {
+            match tok {
+                "(" | "[" | "{" => paren += 1,
+                ")" | "]" | "}" => {
+                    if paren == 0 {
+                        return false;
+                    }
+                    paren -= 1;
+                }
+                ";" if paren == 0 => {
+                    let after = (j + 1..self.tokens.len()).find(|&k| significant(self.tokens[k]));
+                    return after.is_some_and(|k| !matches!(self.tokens[k], "}" | "case" | "default"));
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        false
+    }
+
     /// Whether the declaration after token `i` calls a built-in in `NOT_CONSTANT` before its `;`.
     pub(super) fn calls_not_constant(&self, i: usize) -> bool {
         for (j, &t) in self.tokens.iter().enumerate().skip(i + 1) {

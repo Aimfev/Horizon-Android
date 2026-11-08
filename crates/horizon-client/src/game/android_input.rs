@@ -1386,6 +1386,9 @@ impl Game<'_> {
         events: &dyn super::event_loop::EventLoopCtl,
         id: WindowId,
     ) {
+        if self.native_builds_touch(t) {
+            return;
+        }
         self.android_sync_pointer();
         if self.pad.touch_ui.virtual_mouse {
             self.android_virtual_touch(t, events, id);

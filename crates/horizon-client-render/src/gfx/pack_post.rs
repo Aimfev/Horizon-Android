@@ -498,6 +498,10 @@ struct Targets {
     sizes: [[u32; 2]; BUFFERS],
     /// The attachment of passes that write only images.
     sink: wgpu::TextureView,
+    /// Intermediate render target for `final` at `size` when `size != window`.
+    final_out: wgpu::TextureView,
+    /// Whether both A/B sides of all used buffers have been initially cleared after resize.
+    cleared: bool,
 }
 
 /// What a pack's gbuffers programs read and draw from the game's world.
@@ -665,6 +669,9 @@ pub struct PackPost {
     blit_group: Option<([u32; 2], wgpu::BindGroup)>,
     /// Shows colortex0 when the pack has no `final` (OQ-5).
     copy: (wgpu::RenderPipeline, wgpu::BindGroupLayout),
+    /// Upscales `final_out` (rendered at `size`) onto `screen` (`window` size).
+    upscale: (wgpu::RenderPipeline, wgpu::BindGroupLayout),
+    screen_format: wgpu::TextureFormat,
     uniforms: FrameUniforms,
 }
 
@@ -2429,6 +2436,20 @@ impl PackPost {
             &[target(screen)],
             None,
         );
+        let upscale = helper(
+            device,
+            "vs_uv_direct",
+            "fs_copy",
+            &[
+                texture_entry(0, float),
+                entry(
+                    2,
+                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                ),
+            ],
+            &[target(screen)],
+            None,
+        );
         let filterable = |b: usize| {
             formats[b].sample_type(None, Some(device.features()))
                 == Some(wgpu::TextureSampleType::Float { filterable: true })
@@ -2600,6 +2621,8 @@ impl PackPost {
             nearest_repeat: sampler(device, wgpu::FilterMode::Nearest, wgpu::AddressMode::Repeat),
             blit,
             copy,
+            upscale,
+            screen_format: screen,
             uniforms: {
                 let mut u = FrameUniforms::default();
                 u.atlas = world.atlas.map_or([0; 2], |a| a.1);
@@ -3615,9 +3638,17 @@ impl PackPost {
             wgpu::TextureUsages::RENDER_ATTACHMENT,
         )
         .create_view(&Default::default());
+        let final_out = texture(
+            "Shader pack final_out",
+            self.screen_format,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        )
+        .create_view(&Default::default());
         self.targets = Some(Targets {
             size,
             sink,
+            final_out,
+            cleared: false,
             sizes,
             scratch,
             color,
@@ -3925,6 +3956,33 @@ impl PackPost {
             &mut self.zeros,
         );
         self.run_shadow(device, queue, encoder, terrain, frame);
+        if let Some(targets) = &mut self.targets
+            && !targets.cleared
+        {
+            targets.cleared = true;
+            for b in 0..BUFFERS {
+                let Some(sides) = &targets.color[b] else {
+                    continue;
+                };
+                let c = self.clears[b].unwrap_or_default();
+                let op = wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: c[0].into(),
+                        g: c[1].into(),
+                        b: c[2].into(),
+                        a: c[3].into(),
+                    }),
+                    store: wgpu::StoreOp::Store,
+                };
+                for side in sides {
+                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Shader pack initial buffer clear"),
+                        color_attachments: &[attach(side, op)],
+                        ..Default::default()
+                    });
+                }
+            }
+        }
         let Some(targets) = &self.targets else { return };
         let main = |m: u16, i: usize| usize::from(m & 1 << i != 0);
         let view = |m: u16, i: usize, alt: bool| {
@@ -4090,9 +4148,15 @@ impl PackPost {
             }
             self.mips_valid |= stale;
             let final_pass = pass.group == Group::Final;
+            let keep = wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            };
             // A pass writing buffers of a size of their own draws at that size (they share it).
+            // `final` also runs at `size` so `gl_FragCoord.xy * texelSize` matches `viewWidth`/`viewHeight`
+            // and `colortex0` 1:1 even when render scale < 100% with Image Sharpening enabled.
             let out = match pass.writes.first() {
-                _ if final_pass => window,
+                _ if final_pass => size,
                 Some(&(_, b)) => self.targets.as_ref().map_or(size, |t| t.sizes[b]),
                 None => size,
             };
@@ -4104,8 +4168,14 @@ impl PackPost {
                     .map(|t| &t[usize::from(self.main & 1 << i == 0)])
             };
             let mut attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = Vec::new();
+            let needs_upscale = final_pass && size != window;
             if final_pass {
-                attachments.push(attach(screen, overwrite));
+                let dst = if needs_upscale {
+                    &targets.final_out
+                } else {
+                    screen
+                };
+                attachments.push(attach(dst, overwrite));
                 shown = true;
             } else if pass.sink {
                 attachments.push(attach(&targets.sink, overwrite));
@@ -4115,7 +4185,7 @@ impl PackPost {
                     if attachments.len() <= l {
                         attachments.resize(l + 1, None);
                     }
-                    attachments[l] = view(buffer).and_then(|v| attach(v, overwrite));
+                    attachments[l] = view(buffer).and_then(|v| attach(v, keep));
                 }
             }
             {
@@ -4134,6 +4204,30 @@ impl PackPost {
                     rp.set_bind_group(slot, g, &[]);
                 }
                 rp.draw(0..6, 0..1);
+            }
+            if needs_upscale {
+                let up_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Shader pack final upscale"),
+                    layout: &self.upscale.1,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&targets.final_out),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.linear),
+                        },
+                    ],
+                });
+                let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Shader pack final upscale"),
+                    color_attachments: &[attach(screen, overwrite)],
+                    ..Default::default()
+                });
+                rp.set_pipeline(&self.upscale.0);
+                rp.set_bind_group(0, &up_group, &[]);
+                rp.draw(0..3, 0..1);
             }
             self.main ^= pass.flip;
             self.mips_valid &= !pass.written;

@@ -1,0 +1,3 @@
+# The native mod builds made for every release (native-mods.yml): one set a line, mod ids from
+# this folder separated by spaces. The game offers these at once; other sets are asked for.
+wrench

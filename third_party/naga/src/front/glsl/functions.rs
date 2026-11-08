@@ -624,12 +624,9 @@ impl Frontend {
                 {
                     // Images size must match otherwise the overload isn't what we want
                     let good_size = call_dim == overload_dim && call_arrayed == overload_arrayed;
-                    // Glsl requires the formats to strictly match unless you are builtin
-                    // function overload and have not been replaced, in which case we only
-                    // check that the format scalar kind matches
+                    // Glsl requires the formats to match scalar kind when passed as an image parameter
                     let good_format = overload_format == call_format
-                        || (overload.internal
-                            && Scalar::from(overload_format) == Scalar::from(call_format));
+                        || Scalar::from(overload_format).kind == Scalar::from(call_format).kind;
                     if !(good_size && good_format) {
                         continue 'outer;
                     }
@@ -658,8 +655,11 @@ impl Frontend {
                     // The images satisfy the conditions to be considered as an exact match
                     new_conversions[i] = Conversion::Exact;
                     continue;
-                } else if overload_param_ty == call_arg_ty {
-                    // If the types match there's no need to check for conversions so continue
+                } else if overload_param_ty == call_arg_ty
+                    || array_types_compatible(&ctx.module.types, overload_param_ty, call_arg_ty)
+                {
+                    // If the types match (or are arrays differing only in std140/std430 stride)
+                    // there's no need to check for conversions so continue
                     new_conversions[i] = Conversion::Exact;
                     continue;
                 }
@@ -832,6 +832,38 @@ impl Frontend {
             // Apply implicit conversions as needed
             if let Some(scalar) = scalar_comps {
                 ctx.implicit_conversion(&mut handle, meta, scalar)?;
+            }
+
+            ctx.typifier_grow(handle, meta)?;
+            if ctx.get_type(handle) != &ctx.module.types[*parameter].inner {
+                if let (
+                    TypeInner::Array {
+                        size: crate::ArraySize::Constant(n),
+                        ..
+                    },
+                    TypeInner::Array { .. },
+                ) = (&ctx.module.types[*parameter].inner, ctx.get_type(handle))
+                {
+                    let count = n.get();
+                    let mut components = Vec::with_capacity(count as usize);
+                    for idx in 0..count {
+                        let elem = ctx.add_expression(
+                            Expression::AccessIndex {
+                                base: handle,
+                                index: idx,
+                            },
+                            meta,
+                        )?;
+                        components.push(elem);
+                    }
+                    handle = ctx.add_expression(
+                        Expression::Compose {
+                            ty: *parameter,
+                            components,
+                        },
+                        meta,
+                    )?;
+                }
             }
 
             arguments.push(handle)
@@ -1710,4 +1742,30 @@ fn builtin_required_variations<'a>(args: impl Iterator<Item = &'a TypeInner>) ->
     }
 
     variations
+}
+
+fn array_types_compatible(
+    types: &crate::UniqueArena<Type>,
+    a: &TypeInner,
+    b: &TypeInner,
+) -> bool {
+    match (a, b) {
+        (
+            &TypeInner::Array {
+                base: base_a,
+                size: size_a,
+                ..
+            },
+            &TypeInner::Array {
+                base: base_b,
+                size: size_b,
+                ..
+            },
+        ) => {
+            size_a == size_b
+                && (&types[base_a].inner == &types[base_b].inner
+                    || array_types_compatible(types, &types[base_a].inner, &types[base_b].inner))
+        }
+        _ => false,
+    }
 }

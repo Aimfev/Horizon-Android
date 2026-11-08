@@ -19,6 +19,8 @@ mod account;
 #[allow(dead_code)]
 #[path = "../../../launcher/src/browser.rs"]
 mod browser;
+#[path = "android.rs"]
+pub(crate) mod android;
 #[path = "android/dns.rs"]
 mod android_dns;
 #[path = "android/catalog.rs"]
@@ -49,7 +51,6 @@ mod native_ime;
 mod performance;
 #[path = "android/platform.rs"]
 mod platform;
-pub use horizon_client_render::mod_list;
 #[rustfmt::skip]
 #[allow(dead_code)]
 #[path = "../../../launcher/src/proxy.rs"]
@@ -212,12 +213,23 @@ fn android_main(app: AndroidApp) {
         return;
     };
     backend::initialize(home.clone());
+    horizon_client::logging::set_private_home(home.clone());
     if let Err(error) = diagnostics::initialize(&home, serde_json::json!({})) {
         log::error!("Cannot initialize local diagnostics: {error}");
     }
     if let Ok(vm) = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
         secure_store::initialize(vm);
     }
+    struct ProcessExitGuard;
+    impl Drop for ProcessExitGuard {
+        fn drop(&mut self) {
+            diagnostics::finish();
+            platform::finish();
+            APP.with(|slot| *slot.borrow_mut() = None);
+            std::process::exit(0);
+        }
+    }
+    let _exit_guard = ProcessExitGuard;
     let engine_data = app.asset_manager().open(c"engine-data.zip");
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     let Some(cache) = platform::cache_dir() else {
@@ -270,11 +282,8 @@ fn android_main(app: AndroidApp) {
         let _ = std::fs::write(home.join("android-error.txt"), error.to_string());
     }
     // Winit permits one EventLoop per process. NativeActivity otherwise keeps
-    // this process cached after Quit, making the next launch fail. run_app's
-    // exiting callback has completed the world save before we get here.
+    // this process cached after Quit or unwind, making the next launch fail with
+    // "The EventLoop can't be recreated".
     drop(launcher);
-    diagnostics::finish();
-    platform::finish();
-    APP.with(|slot| *slot.borrow_mut() = None);
-    std::process::exit(0);
+    drop(_exit_guard);
 }

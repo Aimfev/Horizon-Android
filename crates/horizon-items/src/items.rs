@@ -342,6 +342,17 @@ pub struct ItemStack {
     /// Components beyond count and damage (see `item_data`); None when default.
     pub extra: Option<Box<crate::item_data::StackData>>,
 }
+
+impl Default for ItemStack {
+    fn default() -> Self {
+        Self {
+            item: Arc::from(""),
+            count: 0,
+            damage: 0,
+            extra: None,
+        }
+    }
+}
 /// `order`'s items in the registry's order (`command-registries.json`'s
 /// `items`, exported from the game); `order` itself when that is missing.
 fn registry_order(root: &Path, order: &[Arc<str>]) -> Vec<Arc<str>> {

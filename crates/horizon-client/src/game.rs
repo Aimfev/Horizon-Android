@@ -183,6 +183,7 @@ mod mob_blocks;
 mod mob_gear;
 mod mob_looting;
 mod mob_sounds;
+mod mod_api_host;
 mod mod_input;
 #[cfg(feature = "mods")]
 mod mod_panel;
@@ -195,6 +196,14 @@ mod moving_pistons;
 mod music;
 mod names;
 mod narrator;
+#[cfg(target_os = "android")]
+mod build_mining;
+#[cfg(target_os = "android")]
+mod native_builds;
+#[cfg(target_os = "android")]
+mod setup {
+    pub(super) mod fishing;
+}
 mod native_block_entity_draw;
 mod native_components;
 mod native_criteria;
@@ -2668,6 +2677,8 @@ struct Game<'a> {
     native_lifecycle: native_lifecycle::NativeLifecycle,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
+    #[cfg(target_os = "android")]
+    native_builds: native_builds::NativeBuilds,
     /// Meshed sections waiting for an upload budget (Horizon settings).
     pending_uploads: Vec<((i32, i32, i32), horizon_client::mesher::SectionMesh)>,
     /// This frame's view frustum, for culling entities and block entities.
@@ -8100,6 +8111,11 @@ impl Game<'_> {
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
             self.draw_music_toast(&mut batch, false);
+            #[cfg(target_os = "android")]
+            {
+                self.poll_native_builds();
+                self.draw_native_builds(&mut batch);
+            }
             return batch;
         }
         let atlas_ptr: *const HudAtlas = &self.gui.atlas;
@@ -18169,6 +18185,8 @@ impl Game<'_> {
                         self.frame_stats.record(elapsed.as_secs_f32() * 1000.0);
                         self.debug_charts.frame_times.log(elapsed.as_nanos() as i64);
                         if self.frames == 0 {
+                            #[cfg(target_os = "android")]
+                            crate::android::first_frame_shown();
                             // The launcher times Play to this line (launcher/src/perf.rs).
                             log::info!(
                                 "Horizon: first frame after {} ms",
@@ -18719,6 +18737,8 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_lifecycle: Default::default(),
             native_net: Default::default(),
+            #[cfg(target_os = "android")]
+            native_builds: Default::default(),
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),

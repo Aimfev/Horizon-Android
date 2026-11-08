@@ -5,6 +5,8 @@ use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const MANIFEST: &str = "horizon-native.json";
 
+pub const PERMISSIONS: &[&str] = &["microphone"];
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
@@ -13,14 +15,19 @@ pub struct Manifest {
     pub version: String,
     pub game: String,
     /// Exact source revisions tested together, never mutable tags.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub horizon: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub mixins: String,
     /// The version of Horizon's native hook points (`game/native_hooks.rs`,
     /// `NATIVE_HOOKS_API`) a mod that hooks nothing else needs: the launcher
     /// builds it on any Horizon with that version or a later one, and
     /// `horizon` is only the revision it was tested on.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "api")]
     pub hooks: Option<u32>,
+    /// System permissions the mod asks for (`PERMISSIONS`), shown to the player on Android.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<String>,
 }
 
 pub fn revision(value: &str) -> bool {
@@ -32,13 +39,22 @@ pub fn revision(value: &str) -> bool {
 
 impl Manifest {
     pub fn check(&self) -> Result<(), String> {
+        let rev_ok = if self.hooks.is_some() {
+            (self.horizon.is_empty() || revision(&self.horizon))
+                && (self.mixins.is_empty() || revision(&self.mixins))
+        } else {
+            revision(&self.horizon) && revision(&self.mixins)
+        };
         if self.schema != 1
             || !valid_id(&self.id)
             || self.version.is_empty()
             || self.game.is_empty()
-            || !revision(&self.horizon)
-            || !revision(&self.mixins)
+            || !rev_ok
             || self.hooks == Some(0)
+            || self
+                .permissions
+                .iter()
+                .any(|p| !PERMISSIONS.contains(&p.as_str()))
         {
             return Err(
                 "invalid native manifest: schema 1, id, version, game and exact revisions required"
@@ -157,6 +173,14 @@ impl Bundle {
         let source: toml::Value =
             toml::from_str(std::str::from_utf8(source).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
+        let compat_rev = source
+            .get("compatibility")
+            .and_then(|v| v.get("horizon_revision"))
+            .and_then(|v| v.as_str());
+        let rev_matches = match compat_rev {
+            Some(r) => r == manifest.horizon,
+            None => manifest.hooks.is_some(),
+        };
         if source
             .get("mod")
             .and_then(|v| v.get("id"))
@@ -167,11 +191,7 @@ impl Bundle {
                 .and_then(|v| v.get("version"))
                 .and_then(|v| v.as_str())
                 != Some(&manifest.version)
-            || source
-                .get("compatibility")
-                .and_then(|v| v.get("horizon_revision"))
-                .and_then(|v| v.as_str())
-                != Some(&manifest.horizon)
+            || !rev_matches
         {
             return Err("native manifest and mixin identity/revision differ".into());
         }
@@ -193,6 +213,7 @@ mod tests {
             horizon: "a".repeat(40),
             mixins: "b".repeat(40),
             hooks: None,
+            permissions: Vec::new(),
         }
     }
     fn read(name: &str, extras: &[(&str, &[u8])], mixin: &str) -> Result<Bundle, String> {
