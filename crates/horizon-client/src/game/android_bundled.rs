@@ -1763,7 +1763,7 @@ pub(super) fn native_hud(
                 format!("{fps} FPS")
             };
             let w = game.native_text_width(&label) + 10.0;
-            let [x, y] = corners.place(corner, w, 14.0);
+            let (x, y) = corners.place(corner, w, 14.0);
             if setting_bool(game, &m.id, "backdrop", true) {
                 game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
             }
@@ -1792,7 +1792,7 @@ pub(super) fn native_hud(
             };
             let label = format!("{keys_str}{cps_str}");
             let w = game.native_text_width(&label) + 10.0;
-            let [x, y] = corners.place(corner, w, 14.0);
+            let (x, y) = corners.place(corner, w, 14.0);
             game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
             game.native_text(batch, &label, [x + 5.0, y + 3.0], 0x90CAF9, true);
             continue;
@@ -1837,7 +1837,7 @@ pub(super) fn native_hud(
                     p.x, p.y, p.z, dir_str, clock_str
                 );
                 let w = game.native_text_width(&label) + 10.0;
-                let [x, y] = corners.place(corner, w, 14.0);
+                let (x, y) = corners.place(corner, w, 14.0);
                 game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
                 game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xFFF59D, true);
             }
@@ -1868,7 +1868,7 @@ pub(super) fn native_hud(
             if !pieces.is_empty() {
                 let label = format!("Armor: {}", pieces.join(" | "));
                 let w = game.native_text_width(&label) + 10.0;
-                let [x, y] = corners.place(corner, w, 14.0);
+                let (x, y) = corners.place(corner, w, 14.0);
                 game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
                 game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xB39DDB, true);
             }
@@ -1883,7 +1883,7 @@ pub(super) fn native_hud(
         {
             let label = "[Sprint (Toggled)]";
             let w = game.native_text_width(label) + 10.0;
-            let [x, y] = corners.place(Corner::BottomLeft, w, 14.0);
+            let (x, y) = corners.place(Corner::BottomLeft, w, 14.0);
             game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
             game.native_text(batch, label, [x + 5.0, y + 3.0], 0x80DEEA, true);
             continue;
@@ -1912,7 +1912,7 @@ pub(super) fn native_hud(
                         coords[0], coords[1], coords[2], dist
                     );
                     let w = game.native_text_width(&label) + 10.0;
-                    let [x, y] = corners.place(Corner::TopRight, w, 14.0);
+                    let (x, y) = corners.place(Corner::TopRight, w, 14.0);
                     game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
                     game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xCE93D8, true);
                 }
