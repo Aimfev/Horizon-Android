@@ -16349,6 +16349,10 @@ impl Game<'_> {
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && let PhysicalKey::Code(key) = event.physical_key
         {
+            let _ = horizon_client::android_runtime::note_input(
+                horizon_client::android_gamepad::InputMode::KeyboardMouse,
+            );
+            crate::touch_input(false);
             if event.state == ElementState::Pressed {
                 self.pad.hardware_keys.insert(key);
             } else {
@@ -16364,13 +16368,11 @@ impl Game<'_> {
         | WindowEvent::MouseWheel { device_id, .. } = &event
             && winit::platform::android::native_pointer_device(*device_id)
         {
-            let accepted = horizon_client::android_runtime::note_input(
+            let _ = horizon_client::android_runtime::note_input(
                 horizon_client::android_gamepad::InputMode::KeyboardMouse,
             );
-            if !accepted && !self.pad_in_menu() {
-                return;
-            }
-            if crate::keyboard_mouse_input() && self.captured && !self.os_mouse_captured {
+            crate::touch_input(false);
+            if self.captured && !self.os_mouse_captured {
                 self.os_mouse_captured = crate::platform::capture_mouse(true);
             }
         }
@@ -16407,6 +16409,8 @@ impl Game<'_> {
             && matches!(&event, WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed
                     && !matches!(event.logical_key, winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape | winit::keyboard::NamedKey::BrowserBack)))
+            && !matches!(&event, WindowEvent::KeyboardInput { event, .. }
+                if matches!(event.physical_key, PhysicalKey::Code(_)))
         {
             return;
         }
@@ -16510,6 +16514,42 @@ impl Game<'_> {
                     self.android_custom_token_tap(&token);
                     return;
                 }
+            }
+        }
+        #[cfg(target_os = "android")]
+        if let WindowEvent::KeyboardInput { event, .. } = &event
+            && event.state == ElementState::Pressed
+            && self
+                .pad
+                .touch
+                .editor
+                .as_ref()
+                .is_some_and(|e| e.editing_button_label)
+        {
+            if let PhysicalKey::Code(code) = event.physical_key {
+                if matches!(code, KeyCode::Backspace | KeyCode::Enter | KeyCode::Escape) {
+                    let out = horizon_client::osk::Output::Key(code);
+                    horizon_client::touch_ui::apply_editor_button_label_output(
+                        &mut self.pad.touch,
+                        &out,
+                    );
+                    self.settings.touch = self.pad.touch.settings.clone();
+                    if horizon_client::touch_ui::output_dismisses(&out) {
+                        crate::platform::hide();
+                    }
+                    return;
+                }
+            }
+            if let Some(txt) = event.text.as_deref()
+                && !txt.is_empty()
+            {
+                let out = horizon_client::osk::Output::Text(txt.to_owned());
+                horizon_client::touch_ui::apply_editor_button_label_output(
+                    &mut self.pad.touch,
+                    &out,
+                );
+                self.settings.touch = self.pad.touch.settings.clone();
+                return;
             }
         }
         #[cfg(target_os = "android")]
@@ -17540,6 +17580,7 @@ impl Game<'_> {
                         Screen::Playing => {
                             if pressed && !self.captured {
                                 self.capture(true);
+                                #[cfg(not(target_os = "android"))]
                                 return Ok(());
                             }
                             self.extras_mouse(button, pressed);

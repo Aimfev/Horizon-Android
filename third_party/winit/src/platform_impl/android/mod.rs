@@ -472,10 +472,16 @@ impl<T: 'static> EventLoop<T> {
         match event {
             InputEvent::MotionEvent(motion_event) => {
                 let source = motion_event.source();
-                if matches!(
-                    source,
-                    Source::Mouse | Source::MouseRelative | Source::Touchpad
-                ) {
+                let is_mouse_tool = motion_event
+                    .pointers()
+                    .next()
+                    .is_some_and(|p| p.tool_type() == android_activity::input::ToolType::Mouse);
+                if is_mouse_tool
+                    || matches!(
+                        source,
+                        Source::Mouse | Source::MouseRelative | Source::Touchpad
+                    )
+                {
                     {
                         let mut devices = POINTER_DEVICES.lock().unwrap();
                         if !devices.contains(&motion_event.device_id()) {
@@ -499,13 +505,38 @@ impl<T: 'static> EventLoop<T> {
                         self.mouse = mouse_state::MouseState::default();
                         return InputStatus::Handled;
                     };
+                    let raw_buttons = motion_event.button_state().0;
+                    let effective_buttons = if raw_buttons == 0
+                        && source != Source::Touchpad
+                        && matches!(
+                            motion_event.action(),
+                            MotionAction::Down
+                                | MotionAction::PointerDown
+                                | MotionAction::Move
+                                | MotionAction::ButtonPress
+                        )
+                        && (is_mouse_tool || matches!(source, Source::Mouse | Source::MouseRelative))
+                        && matches!(
+                            motion_event.action(),
+                            MotionAction::Down | MotionAction::PointerDown | MotionAction::ButtonPress
+                        )
+                    {
+                        1
+                    } else if raw_buttons == 0
+                        && self.mouse.buttons() == 1
+                        && matches!(motion_event.action(), MotionAction::Move)
+                    {
+                        1
+                    } else {
+                        raw_buttons
+                    };
                     let sample = mouse_state::Sample {
                         action: motion_event.action().into(),
                         x: f64::from(pointer.x()),
                         y: f64::from(pointer.y()),
                         rel_x: f64::from(pointer.axis_value(Axis::RelativeX)),
                         rel_y: f64::from(pointer.axis_value(Axis::RelativeY)),
-                        buttons: motion_event.button_state().0,
+                        buttons: effective_buttons,
                         wheel: (
                             pointer.axis_value(Axis::Hscroll),
                             pointer.axis_value(Axis::Vscroll),
@@ -670,6 +701,32 @@ impl<T: 'static> EventLoop<T> {
                 // Keep controller buttons separate from keyboard bindings and IME.
                 // A hardware phone D-pad remains a keyboard, not a gamepad.
                 let source = u32::from(key.source());
+                let is_mouse_device = key.source() == Source::Mouse
+                    || key.source() == Source::MouseRelative
+                    || (source & 0x00002002 == 0x00002002)
+                    || POINTER_DEVICES.lock().unwrap().contains(&key.device_id());
+                if is_mouse_device && key.key_code() == Keycode::Back {
+                    if key.action() == KeyAction::Down && key.repeat_count() > 0 {
+                        return InputStatus::Handled;
+                    }
+                    let state = if key.action() == KeyAction::Down {
+                        event::ElementState::Pressed
+                    } else {
+                        event::ElementState::Released
+                    };
+                    callback(
+                        event::Event::WindowEvent {
+                            window_id: window::WindowId(WindowId),
+                            event: event::WindowEvent::MouseInput {
+                                device_id: event::DeviceId(DeviceId(key.device_id())),
+                                state,
+                                button: event::MouseButton::Right,
+                            },
+                        },
+                        self.window_target(),
+                    );
+                    return InputStatus::Handled;
+                }
                 if source & 0x401 == 0x401
                     || source & 0x01000010 == 0x01000010
                     || GAMEPAD_DEVICES.lock().unwrap().contains(&key.device_id())

@@ -1220,7 +1220,9 @@ impl Game<'_> {
         if let Some(ed) = self.pad.touch.editor.as_mut()
             && std::mem::take(&mut ed.keyboard_request)
         {
-            let text = if ed.editing_save_desc {
+            let text = if ed.editing_button_label {
+                ed.button_label_input.clone()
+            } else if ed.editing_save_desc {
                 ed.save_desc_input.clone()
             } else {
                 ed.save_name_input.clone()
@@ -1272,6 +1274,13 @@ impl Game<'_> {
                     self.android_custom_token_tap(&token);
                     continue;
                 }
+            }
+            if horizon_client::touch_ui::apply_editor_button_label_output(&mut self.pad.touch, &out) {
+                self.settings.touch = self.pad.touch.settings.clone();
+                if horizon_client::touch_ui::output_dismisses(&out) {
+                    crate::platform::hide();
+                }
+                continue;
             }
             if self.android_preset_typing(&out) {
                 continue;

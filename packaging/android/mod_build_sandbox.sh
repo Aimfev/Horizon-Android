@@ -17,6 +17,7 @@ job=$3
 seconds=870
 base_build=${MOD_BUILD_BASE:-0}
 
+[[ "$commit" =~ ^[0-9a-f]{40}$ ]] || exit 1
 git -C "$root/source" checkout -q --detach "$commit" || exit 1
 
 mods=()
@@ -59,7 +60,7 @@ back() {
 }
 back rustup .rustup ro
 back android android ro
-back cargo .cargo rw
+back cargo .cargo ro
 back cache .cache/horizon-native rw
 back source source ro
 back mods job/mods ro

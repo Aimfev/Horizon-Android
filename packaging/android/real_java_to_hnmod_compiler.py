@@ -173,8 +173,32 @@ def build_working_hnmod(src_path: str, out_dir: str) -> tuple[str, str]:
 
     if os.path.isfile(src_path) and src_path.lower().endswith((".jar", ".zip")):
         temp_dir = tempfile.mkdtemp(prefix="horizon_jar_")
+        real_root = os.path.realpath(temp_dir)
+        total_bytes = 0
         with zipfile.ZipFile(src_path, "r") as zf:
-            zf.extractall(temp_dir)
+            infos = [i for i in zf.infolist() if not i.is_dir()]
+            if len(infos) > 4096:
+                raise ValueError("Archive has too many entries (> 4096)")
+            for info in infos:
+                norm_name = info.filename.replace("\\", "/").lstrip("/")
+                parts = [p for p in norm_name.split("/") if p]
+                mode = info.external_attr >> 16
+                if (
+                    not parts
+                    or any(p in (".", "..") for p in parts)
+                    or ":" in norm_name
+                    or (mode & 0o170000 and (mode & 0o170000) != 0o100000)
+                ):
+                    continue
+                if info.file_size > 16 * 1024 * 1024 or total_bytes + info.file_size > 128 * 1024 * 1024:
+                    raise ValueError("Archive exceeds safe extraction size limit")
+                dest_path = os.path.realpath(os.path.join(real_root, *parts))
+                if not dest_path.startswith(real_root + os.sep):
+                    raise ValueError(f"Unsafe zip path refused: {info.filename}")
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                with zf.open(info, "r") as src_f, open(dest_path, "wb") as dst_f:
+                    shutil.copyfileobj(src_f, dst_f, length=65536)
+                total_bytes += info.file_size
         work_src = temp_dir
     elif os.path.isdir(src_path):
         work_src = src_path

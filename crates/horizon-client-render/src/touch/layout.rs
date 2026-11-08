@@ -287,7 +287,7 @@ pub struct Placement {
     /// GoyControl Swipeable: sliding a finger from outside onto this button activates it.
     #[serde(default)]
     pub swipeable: bool,
-    /// Button shape: 0 = Rounded, 1 = Square, 2 = Circle/Pill, 3 = CutOctagon, 4 = Diamond, 5 = Hexagon.
+    /// Button shape: 0 = Rounded, 1 = Square (Sharp 0px), 2 = Round/Circle, 3 = CutOctagon, 4 = Diamond, 5 = Hexagon, 6 = Triangle.
     #[serde(default)]
     pub shape: u8,
     /// Optional vector icon badge (0 = None/Text only, 1..=12 = built-in vector icon).
@@ -387,7 +387,7 @@ impl Placement {
         }
         self.size = self.size.clamp(0.045, 0.45);
         self.opacity = self.opacity.clamp(0.0, 1.0);
-        self.shape = self.shape.min(5);
+        self.shape = self.shape.min(6);
         self.icon_id = self.icon_id.min(12);
         self.width_ratio = if self.width_ratio.is_finite() && self.width_ratio > 0.05 {
             self.width_ratio.clamp(0.4, 3.2)
@@ -513,6 +513,9 @@ pub struct Settings {
     pub floating_menu_pos: [f32; 2],
     #[serde(default)]
     pub snap_to_grid: bool,
+    /// Optional custom display names for the 14 built-in controls (empty = default Control::name()).
+    #[serde(default)]
+    pub control_labels: [String; 14],
     #[serde(deserialize_with = "deserialize_layouts")]
     pub layouts: [[Placement; 14]; 3],
 }
@@ -643,6 +646,7 @@ impl Default for Settings {
             joystick_style: JoystickStyle::default(),
             floating_menu_pos: default_floating_pos(),
             snap_to_grid: false,
+            control_labels: std::array::from_fn(|_| String::new()),
             layouts,
         }
     }
@@ -2086,6 +2090,14 @@ impl Settings {
                 self.sprint_button && self.mode != Mode::Dpad && !self.sprint_with_joystick
             }
             _ => true,
+        }
+    }
+    pub fn control_label(&self, c: Control) -> &str {
+        let custom = self.control_labels[c as usize].trim();
+        if custom.is_empty() {
+            c.name()
+        } else {
+            custom
         }
     }
     pub fn slot(&self, c: Control) -> usize {

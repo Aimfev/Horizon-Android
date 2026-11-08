@@ -423,6 +423,8 @@ struct Pass {
     samplers: Vec<Binding>,
     /// (location, buffer) of each output that reaches a buffer.
     writes: Vec<(u32, usize)>,
+    /// Bitmask of attachment locations (1 << location) that use hardware blending and require LoadOp::Load.
+    blends: u16,
     /// Buffers flipped after the pass.
     flip: u16,
     /// Buffers sampled, for the bind group cache key.
@@ -500,6 +502,8 @@ struct Targets {
     sink: wgpu::TextureView,
     /// Intermediate render target for `final` at `size` when `size != window`.
     final_out: wgpu::TextureView,
+    /// Cached bind group for upscaling `final_out` to `screen`.
+    upscale_group: wgpu::BindGroup,
     /// Whether both A/B sides of all used buffers have been initially cleared after resize.
     cleared: bool,
 }
@@ -1463,6 +1467,7 @@ fn build_pass(
     let max_attachments = device.limits().max_color_attachments.clamp(1, 8) as usize;
     let mut targets = Vec::new();
     let mut writes = Vec::new();
+    let mut blends = 0u16;
     for &location in &interface.outputs {
         let l = location as usize;
         if l >= max_attachments {
@@ -1485,6 +1490,9 @@ fn build_pass(
                     .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
             {
                 t.blend = Some(blend_state(b));
+                if l < 16 {
+                    blends |= 1 << l;
+                }
             }
             targets[l] = state;
             writes.push((location, buffer as usize));
@@ -1706,6 +1714,7 @@ fn build_pass(
         layout,
         samplers,
         writes,
+        blends,
         flip,
         shadow_reads,
         written,
@@ -1845,6 +1854,7 @@ fn build_compute(
         layout,
         samplers,
         writes: Vec::new(),
+        blends: 0,
         flip: 0,
         copies: written & reads | before_colors,
         reads: reads | written,
@@ -3644,10 +3654,25 @@ impl PackPost {
             wgpu::TextureUsages::RENDER_ATTACHMENT,
         )
         .create_view(&Default::default());
+        let upscale_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Shader pack final upscale"),
+            layout: &self.upscale.1,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&final_out),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.linear),
+                },
+            ],
+        });
         self.targets = Some(Targets {
             size,
             sink,
             final_out,
+            upscale_group,
             cleared: false,
             sizes,
             scratch,
@@ -4185,7 +4210,13 @@ impl PackPost {
                     if attachments.len() <= l {
                         attachments.resize(l + 1, None);
                     }
-                    attachments[l] = view(buffer).and_then(|v| attach(v, keep));
+                    let uses_blend = l < 16 && (pass.blends & (1 << l)) != 0;
+                    let op = if uses_blend || pass.geometry > 0 {
+                        keep
+                    } else {
+                        overwrite
+                    };
+                    attachments[l] = view(buffer).and_then(|v| attach(v, op));
                 }
             }
             {
@@ -4206,27 +4237,13 @@ impl PackPost {
                 rp.draw(0..6, 0..1);
             }
             if needs_upscale {
-                let up_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Shader pack final upscale"),
-                    layout: &self.upscale.1,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&targets.final_out),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&self.linear),
-                        },
-                    ],
-                });
                 let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Shader pack final upscale"),
                     color_attachments: &[attach(screen, overwrite)],
                     ..Default::default()
                 });
                 rp.set_pipeline(&self.upscale.0);
-                rp.set_bind_group(0, &up_group, &[]);
+                rp.set_bind_group(0, &targets.upscale_group, &[]);
                 rp.draw(0..3, 0..1);
             }
             self.main ^= pass.flip;

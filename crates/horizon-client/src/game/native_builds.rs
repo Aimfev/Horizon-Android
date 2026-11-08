@@ -468,36 +468,15 @@ fn compile(version: &str, shared: &Mutex<Shared>) -> Result<String, String> {
 }
 
 impl Game<'_> {
-    /// The Mods page's mods not in this game get a Compile button (`native_builds_button`).
-    pub(super) fn offer_compile(&mut self) {
-        for row in &mut self.settings.mods.installed {
-            if row.problem.as_deref() == Some(horizon_client::mod_list::NOT_BUILT) {
-                row.native = Some(horizon_client::mod_list::NativePage {
-                    keys: Vec::new(),
-                    buttons: vec!["Compile".into()],
-                });
-            }
-        }
-    }
+    /// Disabled: `.hnmod` and `.jar` mods auto-compile in real time inside the Horizon Launcher
+    /// and execute live in-process via `android_bundled.rs`.
+    #[allow(dead_code)]
+    pub(super) fn offer_compile(&mut self) {}
 
-    /// Options > Mods' Native mods row, put back after `list_native_mods` made the native rows.
+    /// Disabled: eliminates the "Native mods -> Choose a build... / Try again" row and dialog.
+    #[allow(dead_code)]
     pub(super) fn list_native_builds_row(&mut self) {
-        let installed = &mut self.settings.mods.installed;
-        installed.retain(|row| row.id != ID);
-        installed.push(horizon_client::mod_list::Installed {
-            id: ID.into(),
-            title: "Native mods".into(),
-            description: "This game with native mods compiled in: choose a build, or play \
-                          without."
-                .into(),
-            problem: None,
-            dev: false,
-            has_settings: false,
-            native: Some(horizon_client::mod_list::NativePage {
-                keys: Vec::new(),
-                buttons: vec!["Choose a build...".into()],
-            }),
-        });
+        self.settings.mods.installed.retain(|row| row.id != ID);
     }
 
     /// A button of the native mod page `i` of Options > Mods: true when it was the Native mods
@@ -551,6 +530,10 @@ impl Game<'_> {
 
     /// The activity's notice, once: a build it set aside (NativeMods.java), on the title screen.
     pub(super) fn poll_native_builds(&mut self) {
+        self.native_builds.stage = None;
+        if true {
+            return;
+        }
         if self.native_builds.stage == Some(Stage::Compiling) {
             self.native_builds.fishing.update(Instant::now());
             let [w, h] = self.touch_size();
@@ -595,7 +578,7 @@ impl Game<'_> {
     }
 
     pub(super) fn native_builds_shown(&self) -> bool {
-        self.native_builds.stage.is_some()
+        false
     }
 
     /// A card in the middle of the screen, the rest dimmed, as the update's.

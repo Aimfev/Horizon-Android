@@ -48,6 +48,9 @@ struct State {
     hits: Vec<([f32; 4], Choice)>,
     toast: Option<(String, std::time::Instant)>,
     cursor: (f32, f32),
+    status_title: String,
+    status_detail: String,
+    progress: Option<f32>,
 }
 #[derive(Clone, Copy)]
 pub enum Choice {
@@ -63,6 +66,9 @@ static STATE: Mutex<State> = Mutex::new(State {
     hits: Vec::new(),
     toast: None,
     cursor: (0.0, 0.0),
+    status_title: String::new(),
+    status_detail: String::new(),
+    progress: None,
 });
 static CANCEL: AtomicBool = AtomicBool::new(false);
 pub fn busy() -> bool {
@@ -470,7 +476,13 @@ pub extern "system" fn document_result(
     }
 
     if request == 4103 {
-        STATE.lock().unwrap_or_else(|e| e.into_inner()).working = true;
+        {
+            let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+            st.working = true;
+            st.status_title = "Exporting file...".into();
+            st.status_detail = "Writing archive to chosen location...".into();
+            st.progress = Some(0.3);
+        }
         let spawned = std::thread::Builder::new()
             .name("File export".into())
             .spawn(move || {
@@ -516,7 +528,13 @@ pub extern "system" fn document_result(
     }
 
     if request == 4102 {
-        STATE.lock().unwrap_or_else(|e| e.into_inner()).working = true;
+        {
+            let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+            st.working = true;
+            st.status_title = "Importing folder...".into();
+            st.status_detail = "Copying world folder contents into profile directory...".into();
+            st.progress = Some(0.2);
+        }
         let spawned = std::thread::Builder::new()
             .name("Folder import".into())
             .spawn(move || {
@@ -552,7 +570,13 @@ pub extern "system" fn document_result(
         }
         return;
     }
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).working = true;
+    {
+        let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        st.working = true;
+        st.status_title = "Importing package...".into();
+        st.status_detail = "Extracting files into profile directory...".into();
+        st.progress = Some(0.3);
+    }
     let spawned = std::thread::Builder::new()
         .name("Content import".into())
         .spawn(move || {
@@ -671,14 +695,24 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                     std::fs::copy(&staged, &dest)?;
                     let _ = std::fs::remove_file(&staged);
                 }
-                if ext == "hnmod" {
-                    let native_dir = profile_root.join("horizon-native-mods");
-                    let _ = std::fs::create_dir_all(&native_dir);
-                    let _ = std::fs::copy(&dest, native_dir.join(&canon_name));
-                }
                 let mut on = horizon_client::mod_list::ModList::load(profile_root);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id.clone());
+                if ext == "hnmod" {
+                    if let Ok(compiled) = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&dest, profile_root) {
+                        on.disabled.remove(&compiled.id);
+                        on.enabled.insert(compiled.id.clone());
+                        on.save(profile_root);
+                        imported(
+                            format!(
+                                "Auto-compiled & enabled '{}' ({}.hnmod) — ready in game!",
+                                compiled.title, compiled.id
+                            ),
+                            Kind::Mods,
+                        );
+                        return Ok(());
+                    }
+                }
                 if ext == "jar"
                     && let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&dest, profile_root)
                 {
@@ -687,10 +721,10 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                     on.save(profile_root);
                     imported(
                         format!(
-                            "Transpiled '{canon_name}' -> {}.hnmod{} ({}). Open Play -> Options -> Mods -> Compile.",
+                            "Auto-compiled & enabled '{}' -> {}.hnmod + .hmod ({}) — ready in game!",
+                            transpiled.title,
                             transpiled.id,
-                            if transpiled.hmod_path.is_some() { " + 26.3 .hmod" } else { "" },
-                            transpiled.detected_features.join(", ")
+                            transpiled.features.join(", ")
                         ),
                         Kind::Mods,
                     );
@@ -824,27 +858,28 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             }
             let mut transpiled_msg: Option<String> = None;
             if let Some((mod_id, ext)) = imported_mod_id {
-                if ext == "hnmod" {
-                    let native_dir = request.home.join("horizon-native-mods");
-                    let _ = std::fs::create_dir_all(&native_dir);
-                    if let Some(fname) = target.file_name() {
-                        let _ = std::fs::copy(&target, native_dir.join(fname));
-                    }
-                }
                 let mut on = horizon_client::mod_list::ModList::load(&request.home);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id);
-                if ext == "jar"
+                if ext == "hnmod"
+                    && let Ok(compiled) = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&target, &request.home)
+                {
+                    on.disabled.remove(&compiled.id);
+                    on.enabled.insert(compiled.id.clone());
+                    transpiled_msg = Some(format!(
+                        "Auto-compiled & enabled '{}' ({}.hnmod) — ready in game!",
+                        compiled.title, compiled.id
+                    ));
+                } else if ext == "jar"
                     && let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&target, &request.home)
                 {
                     on.disabled.remove(&transpiled.id);
                     on.enabled.insert(transpiled.id.clone());
                     transpiled_msg = Some(format!(
-                        "Transpiled {} -> {}.hnmod{} ({}). Open Play -> Options -> Mods -> Compile.",
-                        target.file_name().unwrap_or_default().to_string_lossy(),
+                        "Auto-compiled & enabled '{}' -> {}.hnmod + .hmod ({}) — ready in game!",
+                        transpiled.title,
                         transpiled.id,
-                        if transpiled.hmod_path.is_some() { " + 26.3 .hmod" } else { "" },
-                        transpiled.detected_features.join(", ")
+                        transpiled.features.join(", ")
                     ));
                 }
                 on.save(&request.home);
@@ -1006,10 +1041,74 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     s.hits.clear();
     if s.conflict.is_none() && !s.working {
-        // The launcher already shows the result in its status line. Keep only
-        // actionable overlays (progress/cancel and a name-conflict choice).
         return;
     }
+
+    if s.conflict.is_none() && s.working {
+        // Material 3 [Importing...] Dialog with progress bar
+        let w = 460.0f32.min(ui.w - 28.0);
+        let h = 160.0;
+        let x = (ui.w - w) / 2.0;
+        let y = ((ui.h - h) / 2.0).max(0.0);
+
+        // Dim background scrim
+        ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, rgba(0, 0, 0, 175));
+
+        // Card container
+        ui.rounded(x, y, w, h, 14.0, rgba(24, 22, 34, 252));
+        ui.border(x, y, w, h, 14.0, rgba(255, 255, 255, 24));
+
+        // [Importing...] badge chip
+        let chip_w = 98.0;
+        ui.rounded(x + 16.0, y + 16.0, chip_w, 24.0, 6.0, rgba(130, 110, 245, 45));
+        ui.centered_fit(Face::SemiBold, 11.5, [x + 16.0, y + 16.0, chip_w, 24.0], rgba(195, 180, 255, 255), "[Importing...]");
+
+        let title_text = if !s.status_title.is_empty() {
+            s.status_title.as_str()
+        } else {
+            "Processing package..."
+        };
+        ui.text(Face::SemiBold, 16.0, x + 16.0 + chip_w + 10.0, y + 19.0, color::TEXT, title_text);
+
+        let detail_text = if !s.status_detail.is_empty() {
+            s.status_detail.as_str()
+        } else {
+            "Please wait, copying files into profile directory..."
+        };
+        let detail_fitted = ui.fit_text(Face::Regular, 13.0, detail_text, w - 32.0);
+        ui.text(Face::Regular, 13.0, x + 18.0, y + 54.0, rgba(195, 190, 210, 240), &detail_fitted);
+
+        // Progress bar (Track + Fill)
+        let pb_x = x + 18.0;
+        let pb_y = y + 80.0;
+        let pb_w = w - 36.0;
+        ui.rounded(pb_x, pb_y, pb_w, 8.0, 4.0, rgba(255, 255, 255, 24));
+
+        let elapsed = s.toast.as_ref().map(|t| t.1.elapsed().as_secs_f32()).unwrap_or(0.0);
+        let fill_ratio = s.progress.unwrap_or_else(|| {
+            ((elapsed * 0.45).sin().abs() * 0.55 + 0.35).clamp(0.2, 0.95)
+        });
+        ui.rounded(pb_x, pb_y, pb_w * fill_ratio, 8.0, 4.0, rgba(145, 120, 255, 255));
+
+        // Cancel button
+        let btn_w = 90.0;
+        let btn_x = x + w - btn_w - 18.0;
+        let btn_y = y + 108.0;
+        ui.rounded(btn_x, btn_y, btn_w, 34.0, 8.0, rgba(255, 255, 255, 18));
+        ui.border(btn_x, btn_y, btn_w, 34.0, 8.0, rgba(255, 255, 255, 30));
+        ui.centered_fit(Face::Medium, 13.0, [btn_x, btn_y, btn_w, 34.0], color::TEXT, "Cancel");
+        s.hits.push((
+            [
+                btn_x * ui.density,
+                btn_y * ui.density,
+                btn_w * ui.density,
+                34.0 * ui.density,
+            ],
+            Choice::Cancel,
+        ));
+        return;
+    }
+
     let (name, choices) = if let Some(c) = &s.conflict {
         (
             c.target
@@ -1043,37 +1142,32 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
     let x = (ui.w - w) / 2.0;
     let y = ((ui.h - height) / 2.0).max(0.0);
     ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, rgba(0, 0, 0, 180));
-    ui.rounded(x, y, w, height, 2.0, color::BG);
+    ui.rounded(x, y, w, height, 12.0, rgba(26, 24, 36, 252));
+    ui.border(x, y, w, height, 12.0, rgba(255, 255, 255, 24));
     ui.text(
-        Face::Medium,
-        20.0,
-        x + 12.0,
-        y + 12.0,
+        Face::SemiBold,
+        18.0,
+        x + 16.0,
+        y + 14.0,
         color::TEXT,
         if s.conflict.is_some() {
-            "File exists"
+            "File or folder exists"
         } else {
             "Importing file"
         },
     );
-    let name = ui.fit_text(Face::Regular, 16.0, &name, w - 24.0);
-    ui.text(Face::Regular, 16.0, x + 12.0, y + 46.0, color::MUTED, &name);
-    let width = (w - 24.0) / choices.len() as f32;
+    let name = ui.fit_text(Face::Regular, 14.0, &name, w - 32.0);
+    ui.text(Face::Regular, 14.0, x + 16.0, y + 46.0, rgba(195, 190, 210, 240), &name);
+    let width = (w - 32.0) / choices.len() as f32;
     for (i, (label, choice)) in choices.into_iter().enumerate() {
         let rect = if vertical {
-            [x + 12.0, y + 86.0 + i as f32 * 44.0, w - 24.0, 38.0]
+            [x + 16.0, y + 86.0 + i as f32 * 44.0, w - 32.0, 36.0]
         } else {
-            [x + 12.0 + i as f32 * width, y + 92.0, width - 4.0, 38.0]
+            [x + 16.0 + i as f32 * width, y + 92.0, width - 4.0, 36.0]
         };
-        ui.rounded(rect[0], rect[1], rect[2], rect[3], 2.0, color::RAISED);
-        ui.text(
-            Face::Medium,
-            16.0,
-            rect[0] + 8.0,
-            rect[1] + 7.0,
-            color::TEXT,
-            label,
-        );
+        ui.rounded(rect[0], rect[1], rect[2], rect[3], 8.0, rgba(255, 255, 255, 18));
+        ui.border(rect[0], rect[1], rect[2], rect[3], 8.0, rgba(255, 255, 255, 30));
+        ui.centered_fit(Face::Medium, 13.0, rect, color::TEXT, label);
         s.hits.push((
             [
                 rect[0] * ui.density,

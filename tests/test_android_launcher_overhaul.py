@@ -19,6 +19,10 @@ def strip_rust_comments_and_literals(source: str) -> str:
     return token_re.sub(" ", source)
 
 
+
+def _read_repo_file(rel: str) -> str:
+    return (ROOT / rel).read_text(encoding="utf-8")
+
 class LauncherOverhaulTests(unittest.TestCase):
     def test_rust_delimiter_and_syntax_sanity_across_modified_files(self) -> None:
         modified_files = [
@@ -78,6 +82,12 @@ class LauncherOverhaulTests(unittest.TestCase):
             "crates/horizon-client-render/src/gfx/arena.rs",
             "crates/horizon-client-render/src/graphics.rs",
             "crates/horizon-client/src/game/shader_packs.rs",
+            "third_party/winit/src/platform_impl/android/mod.rs",
+            "third_party/winit/src/platform_impl/android/mouse_state.rs",
+            "third_party/winit/src/event_loop.rs",
+            "third_party/naga/src/back/glsl/writer.rs",
+            "crates/horizon-client/src/game/android_bundled.rs",
+            "crates/horizon-client/src/game/mods.rs",
             "crates/horizon-shaders/src/custom.rs",
             "crates/horizon-shaders/src/translate/scan.rs",
             "crates/horizon-shaders/src/translate/rewrite.rs",
@@ -787,7 +797,7 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn('lower.ends_with(".hmod") || lower.ends_with(".hnmod") || lower.ends_with(".jar")', content_files)
         self.assertIn("pub fn read_mod_archive_id(", content_files)
         self.assertIn("content_files::read_mod_archive_id(&staged, &name)?;", documents)
-        self.assertIn("horizon_mods::index::native::Bundle::read(&path)", native_hooks)
+        self.assertIn("ensure_dynamic_mods_loaded", _read_repo_file("crates/horizon-client/src/game/android_bundled.rs"))
 
 
     def test_photon_shader_world_import_ui_fit_and_native_compiler_kit(self) -> None:
@@ -880,6 +890,143 @@ class LauncherOverhaulTests(unittest.TestCase):
                 self.assertIn("mixins/vein_zoom_wrench/destroy.rs", names)
                 self.assertIn("mixins/vein_zoom_wrench/use.rs", names)
                 self.assertIn("mixins/vein_zoom_wrench/key.rs", names)
+
+
+
+    def test_realtime_hnmod_runtime_shader_fps_gles_mouse_and_button_shapes(self):
+        # 1. native_hooks.rs must satisfy hook_points_stay_hookable (no #[cfg] or ! before #[cfg(test)])
+        native_hooks = _read_repo_file("crates/horizon-client/src/game/native_hooks.rs")
+        prod_hooks = native_hooks.split("#[cfg(test)]")[0]
+        self.assertNotIn("#[cfg", prod_hooks)
+        for line in prod_hooks.splitlines():
+            if not line.lstrip().startswith("//"):
+                for mac in ["!(", "![", "! {", "!{"]:
+                    self.assertNotIn(mac, line)
+        self.assertIn("super::android_bundled::native_tick(self);", prod_hooks)
+        self.assertIn("super::android_bundled::native_visuals(self, rims, lights);", prod_hooks)
+        self.assertIn("super::android_bundled::native_hud(self, batch, corners);", prod_hooks)
+
+        # 2. native_builds.rs has "Choose a build..." / "Try again" UI disabled
+        native_builds = _read_repo_file("crates/horizon-client/src/game/native_builds.rs")
+        self.assertIn("pub(super) fn native_builds_shown(&self) -> bool {\n        false\n    }", native_builds)
+
+        # 3. Real-time compilation in jar_transpiler.rs, catalog.rs, document_store.rs, documents.rs
+        jar_transpiler = _read_repo_file("crates/horizon-client/src/jar_transpiler.rs")
+        self.assertIn("pub fn compile_hnmod_bundle_realtime(", jar_transpiler)
+        self.assertIn("horizon-compiled.json", jar_transpiler)
+        self.assertIn("enable_mod_in_profile(profile_dir, &mod_id);", jar_transpiler)
+
+        catalog = _read_repo_file("crates/horizon-client/src/android/catalog.rs")
+        self.assertIn("seen_mod_ids", catalog)
+        self.assertIn("compile_hnmod_bundle_realtime(&p, &game)", catalog)
+
+        # 4. In-process live .hnmod execution in android_bundled.rs
+        android_bundled = _read_repo_file("crates/horizon-client/src/game/android_bundled.rs")
+        for feat in [
+            "appleskin_hud",
+            "immersive_thunder",
+            "wrench",
+            "veinminer",
+            "jade_hud",
+            "dynamic_lights",
+            "zoom",
+        ]:
+            self.assertIn(feat, android_bundled)
+
+        # 5. Shader FPS overwrite vs keep and upscale_group caching in pack_post.rs
+        pack_post = _read_repo_file("crates/horizon-client-render/src/gfx/pack_post.rs")
+        self.assertIn("blends: u16", pack_post)
+        self.assertIn("upscale_group: wgpu::BindGroup", pack_post)
+
+        # 6. Naga GLSL writer supports ImageClass::Depth in write_image_load
+        naga_glsl = _read_repo_file("third_party/naga/src/back/glsl/writer.rs")
+        self.assertIn('crate::ImageClass::Depth { multi: _ } => ("texelFetch", self.policies.image_load)', naga_glsl)
+
+        # 7. Shader persistence in shader_packs.rs
+        shader_packs = _read_repo_file("crates/horizon-client/src/game/shader_packs.rs")
+        fn_failed = shader_packs.split("fn shader_pack_failed")[1].split("pub(super) fn")[0]
+        self.assertNotIn("self.settings.horizon.shader_pack = String::new()", fn_failed)
+
+        # 8. Winit EventLoop recreation allowed on Android & mouse ToolType/button mapping
+        event_loop = _read_repo_file("third_party/winit/src/event_loop.rs")
+        self.assertIn("#[cfg(not(android_platform))]", event_loop)
+        android_mod = _read_repo_file("third_party/winit/src/platform_impl/android/mod.rs")
+        self.assertIn("is_mouse_tool", android_mod)
+        mouse_state = _read_repo_file("third_party/winit/src/platform_impl/android/mouse_state.rs")
+        self.assertIn("pub fn buttons(&self) -> u32", mouse_state)
+
+        # 9. Control Editor custom button naming & 7 shapes (0..=6)
+        layout = _read_repo_file("crates/horizon-client-render/src/touch/layout.rs")
+        self.assertIn("pub control_labels: [String; 14]", layout)
+        self.assertIn(".min(6)", layout)
+        editor = _read_repo_file("crates/horizon-client-render/src/touch/editor.rs")
+        self.assertIn("pub editing_button_label: bool", editor)
+        touch_ui = _read_repo_file("crates/horizon-client/src/touch_ui.rs")
+        self.assertIn("Square (Sharp)", touch_ui)
+        self.assertIn("Triangle", touch_ui)
+
+
+
+    def test_shader_sprites_vulkan_mode_lod32_keyboard_and_material_import(self):
+        # 1. Shader pack horizon_terrain_sprites fix
+        mat_src = _read_repo_file("crates/horizon-client-render/src/gfx/native_material.rs")
+        self.assertNotIn("horizon_terrain_sprites_0", mat_src)
+        self.assertIn("horizon_terrain_sprites", mat_src)
+
+        # 2. PowerVR broad img driver check fixed
+        gfx_src = _read_repo_file("crates/horizon-client-render/src/gfx.rs")
+        self.assertNotIn('driver.contains("img")', gfx_src)
+
+        # 3. Vulkan graphics API selection
+        rt_src = _read_repo_file("crates/horizon-client-render/src/android_runtime.rs")
+        self.assertIn("PREFER_VULKAN", rt_src)
+        self.assertIn("GraphicsApi::Vulkan", rt_src)
+
+        # 4. LOD chunks down to 32
+        gui_src = _read_repo_file("crates/horizon-client-render/src/graphics_ui.rs")
+        self.assertIn("0,\n    32,\n    64,", gui_src)
+
+        # 5. ModList::parse supports mod.id:true and bare id
+        modlist_src = _read_repo_file("crates/horizon-client-render/src/mod_list.rs")
+        self.assertIn('line.strip_prefix("mod.").unwrap_or(line)', modlist_src)
+
+        # 6. jar_transpiler enable_mod_in_profile and treefall
+        jt_src = _read_repo_file("crates/horizon-client/src/jar_transpiler.rs")
+        self.assertIn('format!("mod.{clean_id}:true")', jt_src)
+        self.assertIn('combined.contains("treefall")', jt_src)
+
+        # 7. android_bundled scans mods/ folder
+        ab_src = _read_repo_file("crates/horizon-client/src/game/android_bundled.rs")
+        self.assertIn('"mods",', ab_src)
+
+        # 8. Keyboard input switches to KeyboardMouse and is never dropped
+        game_src = _read_repo_file("crates/horizon-client/src/game.rs")
+        self.assertIn("InputMode::KeyboardMouse", game_src)
+
+        # 9. Material 3 [Importing...] dialog with progress bar
+        doc_src = _read_repo_file("crates/horizon-client/src/android/documents.rs")
+        self.assertIn("[Importing...]", doc_src)
+        self.assertIn("pb_w * fill_ratio", doc_src)
+        self.assertIn("Importing folder...", doc_src)
+
+
+    def test_icons_atlas_partition_missing_glyphs_and_security_hardening(self):
+        ui_theme = (ROOT / "crates/horizon-client/src/ui_theme.rs").read_text(encoding="utf-8")
+        self.assertIn("Icon::Skins =>", ui_theme)
+        self.assertIn("image_shelf: (u32, u32, u32)", ui_theme)
+        self.assertIn("fn place_image(&mut self, atlas: &HudAtlas, w: u32, h: u32)", ui_theme)
+        self.assertIn("self.upload_image_rgba(atlas, tw, th, masked)?;", ui_theme)
+
+        launcher_pages = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
+        self.assertIn("Page::Skins => Icon::Skins,", launcher_pages)
+        self.assertIn("while font > 9.5 && ui.measure(Face::Medium, font, label) > avail_w", launcher_pages)
+
+        jar_transpiler = (ROOT / "crates/horizon-client/src/jar_transpiler.rs").read_text(encoding="utf-8")
+        self.assertIn("fn is_safe_zip_entry_name(name: &str) -> bool", jar_transpiler)
+        self.assertIn("fn read_zip_entry_bounded<R: Read>(entry: R)", jar_transpiler)
+
+        sandbox = (ROOT / "packaging/android/mod_build_sandbox.sh").read_text(encoding="utf-8")
+        self.assertIn("back cargo .cargo ro", sandbox)
 
 
 if __name__ == "__main__":

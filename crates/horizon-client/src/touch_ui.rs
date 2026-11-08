@@ -298,6 +298,54 @@ pub fn apply_editor_or_preset_output(
     }
     false
 }
+
+/// Applies keyboard input to the currently selected button's custom name in the Control Editor.
+pub fn apply_editor_button_label_output(
+    tc: &mut crate::touch::TouchControls,
+    out: &Output,
+) -> bool {
+    let Some(ed) = tc.editor.as_mut() else {
+        return false;
+    };
+    if !ed.editing_button_label {
+        return false;
+    }
+    let max_len = 18;
+    match out {
+        Output::Text(txt) => {
+            for ch in txt.chars() {
+                if !ch.is_control() && ed.button_label_input.chars().count() < max_len {
+                    ed.button_label_input.push(ch);
+                }
+            }
+        }
+        Output::Backspace | Output::Key(KeyCode::Backspace) => {
+            ed.button_label_input.pop();
+        }
+        Output::Enter | Output::Close | Output::Key(KeyCode::Enter | KeyCode::Escape) => {
+            ed.editing_button_label = false;
+        }
+        Output::Key(code) => {
+            if let Some(ch) = key_code_to_char(*code)
+                && ed.button_label_input.chars().count() < max_len
+            {
+                ed.button_label_input.push(ch);
+            }
+        }
+    }
+    let new_label = ed.button_label_input.clone();
+    let sel_custom = ed.selected_custom;
+    let sel_ctrl = ed.selected;
+    if let Some(idx) = sel_custom {
+        if let Some(btn) = tc.settings.custom_buttons.get_mut(idx) {
+            btn.custom_label = new_label;
+        }
+    } else if let Some(c) = sel_ctrl {
+        tc.settings.control_labels[c as usize] = new_label;
+    }
+    let _ = tc.settings.save();
+    true
+}
 struct RelativeTouch {
     id: u64,
     origin: [f32; 2],
@@ -1206,7 +1254,7 @@ fn draw_input_picker_modal(
                 10.8,
                 r_sys,
                 accent,
-                "⌨ Type / Capture Key (System / Physical Keyboard)",
+                "Type / Capture Key (System / Physical Keyboard)",
             );
             if for_custom_send {
                 let r_can = [dx + 16.0, dy + 180.0, dw - 32.0, 36.0];
@@ -1262,7 +1310,7 @@ fn draw_input_picker_modal(
             let b_right = [dx + dw - 134.0, dy + 8.0, 56.0, 26.0];
             let b_back = [dx + dw - 72.0, dy + 8.0, 58.0, 26.0];
             for (r, lbl) in [
-                (b_ime, "⌨ Sys Key"),
+                (b_ime, "Sys Key"),
                 (b_left, "◀ Left"),
                 (b_right, "Right ▶"),
                 (b_back, "Back"),
@@ -1401,11 +1449,14 @@ pub fn draw_goy_hud(
     }
     let is_goy_system = tc.settings.control_style == ControlStyle::GoyControl;
     let has_goy_move = is_goy_system || tc.placement(Control::Move).use_goy_style;
+    let has_goy_builtin = Control::ALL
+        .into_iter()
+        .any(|c| c != Control::Move && tc.visible_for_state(c, in_menu) && (is_goy_system || tc.placement(c).use_goy_style));
     let has_goy_custom = is_goy_system
         || (0..tc.settings.custom_buttons.len()).any(|i| {
             tc.custom_visible_for_state(i, in_menu) && tc.custom_placement(i).use_goy_style
         });
-    if !has_goy_move && !has_goy_custom {
+    if !has_goy_move && !has_goy_builtin && !has_goy_custom {
         return;
     }
     let hud_scale = tc.hud_opacity_scale.clamp(0.0, 1.0);
@@ -1447,6 +1498,44 @@ pub fn draw_goy_hud(
         if js.stick_stroke > 0.1 {
             ui.stroke_rounded(kx, ky, kside, kside, kr, js.stick_stroke, stick_stroke);
         }
+    }
+
+    // 1b. Built-in Controls configured with GoyControl Static Style
+    for c in Control::ALL {
+        if c == Control::Move || !tc.visible_for_state(c, in_menu) {
+            continue;
+        }
+        let p = tc.placement(c);
+        if !is_goy_system && !p.use_goy_style {
+            continue;
+        }
+        let [nx, ny, nw, nh] = p.rect(tc.aspect());
+        let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
+        let alpha = (p.opacity.clamp(0.15, 1.0) * hud_scale).clamp(0.0, 1.0);
+        if alpha <= 0.001 {
+            continue;
+        }
+        let fill_c = color::with_alpha(p.button_color, alpha);
+        let stroke_c = color::with_alpha(p.stroke_color, alpha);
+        let shadow_c = color::with_alpha(p.shadow_color, alpha);
+        ui.goy_box(
+            rx,
+            ry,
+            rw,
+            rh,
+            p.shape,
+            p.roundness,
+            fill_c,
+            p.stroke_size,
+            p.stroke_margin,
+            p.stroke_roundness,
+            stroke_c,
+            0.0,
+            shadow_c,
+        );
+        let fg_col = color::with_alpha(text_c, (alpha.max(0.75) * hud_scale).clamp(0.0, 1.0));
+        let lbl = tc.settings.control_label(c);
+        draw_button_icon_and_label(&mut ui, [rx, ry, rw, rh], p.icon_id, lbl, fg_col);
     }
 
     // 2. Custom GoyControl Static Buttons (MCPE custom buttons are drawn by `TouchControls::draw_custom` via `text_button`)
@@ -4052,11 +4141,12 @@ fn clamp_editor_custom_selection(ed: &mut crate::touch::Editor, settings: &crate
 
 fn shape_name(shape: u8) -> &'static str {
     match shape {
-        1 => "Square",
-        2 => "Circle/Pill",
+        1 => "Square (Sharp)",
+        2 => "Round / Circle",
         3 => "Cut Octagon",
         4 => "Diamond",
         5 => "Hexagon",
+        6 => "Triangle",
         _ => "Rounded",
     }
 }
@@ -4493,12 +4583,12 @@ pub fn draw_hud_editor(
                 p.shadow_size,
                 shadow_c,
             );
-            ui.centered_fit(
-                Face::SemiBold,
-                (rh * 0.28).clamp(9.0, 14.0),
-                [rx + 3.0, ry + 2.0, (rw - 6.0).max(6.0), (rh - 4.0).max(6.0)],
+            draw_button_icon_and_label(
+                &mut ui,
+                [rx, ry, rw, rh],
+                p.icon_id,
+                tc.settings.control_label(c),
                 text_c,
-                c.name(),
             );
         } else {
             // Authentic MCPE Sprite / Bevel rendering matching in-game MCPE controls!
@@ -4524,7 +4614,7 @@ pub fn draw_hud_editor(
             );
         }
         if is_sel {
-            selected_rect_and_title = Some(([rx, ry, rw, rh], c.name().to_owned()));
+            selected_rect_and_title = Some(([rx, ry, rw, rh], tc.settings.control_label(c).to_owned()));
         }
     }
 
@@ -4939,7 +5029,8 @@ pub fn draw_hud_editor(
         ui.rounded(
             close_r[0], close_r[1], close_r[2], close_r[3], 13.0, st_cyan,
         );
-        ui.centered_fit(Face::SemiBold, 10.2, close_r, st_cyan_fg, "✓ Done");
+        ui.icon(Icon::Check, close_r[0] + 6.0, close_r[1] + (close_r[3] - 11.0) * 0.5, 11.0, st_cyan_fg);
+        ui.centered_fit(Face::SemiBold, 10.2, [close_r[0] + 15.0, close_r[1], close_r[2] - 17.0, close_r[3]], st_cyan_fg, "Done");
 
         // Full-Width M3 Workspace Area (single clean top segmented tab bar, no duplicate left rail)
         let wx = dx + 14.0;
@@ -5020,9 +5111,9 @@ pub fn draw_hud_editor(
                     let st_lbl = if tc.settings.control_style == ControlStyle::GoyControl
                         || p_move.use_goy_style
                     {
-                        "● Style: Custom GoyControl Stick ⌄"
+                        "● Style: Custom GoyControl Stick  v"
                     } else {
-                        "● Style: Default MCPE Stick ⌄"
+                        "● Style: Default MCPE Stick  v"
                     };
                     ui.centered_fit(Face::SemiBold, 8.8, st_pill_r, st_cyan, st_lbl);
 
@@ -5188,9 +5279,9 @@ pub fn draw_hud_editor(
                         st_cyan,
                     );
                     let mode_txt = if tc.settings.mode == crate::touch::Mode::Dpad {
-                        "● Mode: D-Pad ⌄"
+                        "● Mode: D-Pad  v"
                     } else {
-                        "● Mode: Analog Stick ⌄"
+                        "● Mode: Analog Stick  v"
                     };
                     ui.centered_fit(Face::SemiBold, 8.8, mode_pill_r, st_cyan, mode_txt);
 
@@ -5429,14 +5520,16 @@ pub fn draw_hud_editor(
             } else {
                 crate::touch::Placement::new(0.5, 0.5, 0.12)
             };
-            let cur_hint = if let Some(idx) = ed.selected_custom {
+            let cur_hint = if ed.editing_button_label {
+                format!("{}|", ed.button_label_input)
+            } else if let Some(idx) = ed.selected_custom {
                 tc.settings
                     .custom_buttons
                     .get(idx)
                     .map(|b| b.label())
                     .unwrap_or_default()
             } else if let Some(c) = ed.selected {
-                c.name().to_owned()
+                tc.settings.control_label(c).to_owned()
             } else {
                 String::new()
             };
@@ -5476,9 +5569,9 @@ pub fn draw_hud_editor(
                         st_cyan,
                     );
                     let st_lbl = if is_goy {
-                        "● Style: Static (GoyControl) ⌄"
+                        "● Style: Static (GoyControl)  v"
                     } else {
-                        "● Style: Default (MCPE) ⌄"
+                        "● Style: Default (MCPE)  v"
                     };
                     ui.centered_fit(Face::SemiBold, 8.8, st_pill_r, st_cyan, st_lbl);
 
@@ -5510,7 +5603,7 @@ pub fn draw_hud_editor(
                     draw_m3_selector_cell(
                         &mut ui,
                         [wx + 12.0 + (cw3 + 8.0) * 2.0, cards_y, cw3, card_h],
-                        "Hint Label",
+                        if ed.editing_button_label { "Typing Name..." } else { "Button Name (Edit)" },
                         &cur_hint,
                         st_cyan,
                         st_cyan_soft,
@@ -5662,7 +5755,7 @@ pub fn draw_hud_editor(
                         8.8,
                         sh_pill_r,
                         st_cyan,
-                        &format!("● Shape: {} ⌄", shape_name(p.shape)),
+                        &format!("● Shape: {}  v", shape_name(p.shape)),
                     );
 
                     let cards_y = body_y + 28.0;
@@ -7494,20 +7587,48 @@ pub fn touch_hud_editor(
                                     });
                                 }
                                 _ => {
-                                    if let Some(idx) = ed.selected_custom {
+                                    if p[0] > rx + cw3 * 0.78 {
                                         let hints = [
                                             "PRI", "SEC", "JUMP", "SNEAK", "SPRINT", "INV", "SWAP",
                                             "DROP", "CHAT", "DEBUG", "3RD", "MOUSE", "MACRO",
                                             "CLICK",
                                         ];
-                                        if let Some(btn) = tc.settings.custom_buttons.get_mut(idx) {
+                                        if let Some(idx) = ed.selected_custom {
+                                            if let Some(btn) = tc.settings.custom_buttons.get_mut(idx) {
+                                                let pos = hints
+                                                    .iter()
+                                                    .position(|h| *h == btn.custom_label)
+                                                    .map(|idx_h| (idx_h + 1) % hints.len())
+                                                    .unwrap_or(0);
+                                                btn.custom_label = hints[pos].to_owned();
+                                                ed.button_label_input = btn.custom_label.clone();
+                                            }
+                                        } else if let Some(c) = ed.selected {
+                                            let cur = tc.settings.control_label(c).to_owned();
                                             let pos = hints
                                                 .iter()
-                                                .position(|h| *h == btn.custom_label)
+                                                .position(|h| *h == cur)
                                                 .map(|idx_h| (idx_h + 1) % hints.len())
                                                 .unwrap_or(0);
-                                            btn.custom_label = hints[pos].to_owned();
+                                            tc.settings.control_labels[c as usize] = hints[pos].to_owned();
+                                            ed.button_label_input = hints[pos].to_owned();
                                         }
+                                    } else {
+                                        let initial = if let Some(idx) = ed.selected_custom {
+                                            tc.settings
+                                                .custom_buttons
+                                                .get(idx)
+                                                .map(|b| b.label())
+                                                .unwrap_or_default()
+                                        } else if let Some(c) = ed.selected {
+                                            tc.settings.control_label(c).to_owned()
+                                        } else {
+                                            String::new()
+                                        };
+                                        ed.button_label_input = initial;
+                                        ed.editing_button_label = true;
+                                        ed.keyboard_request = true;
+                                        ed.status_msg = Some("Type custom button name on keyboard (Enter to finish).".into());
                                     }
                                 }
                             }
@@ -7580,7 +7701,16 @@ pub fn touch_hud_editor(
                     let sh_pill_w = 192.0f32.min(ww * 0.44);
                     if inside([wx + ww - sh_pill_w - 12.0, body_y - 2.0, sh_pill_w, 24.0]) {
                         push_undo_snapshot(&mut ed, &tc.settings);
-                        mutate_placement(tc, &ed, &|pl| pl.shape = (pl.shape + 1) % 6);
+                        mutate_placement(tc, &ed, &|pl| {
+                            pl.shape = (pl.shape + 1) % 7;
+                            if pl.shape == 1 {
+                                pl.roundness = 0.0;
+                                pl.stroke_roundness = 0.0;
+                            } else if pl.shape == 0 && pl.roundness < 1.0 {
+                                pl.roundness = 10.0;
+                                pl.stroke_roundness = 10.0;
+                            }
+                        });
                         let _ = tc.settings.save();
                         tc.clicked = true;
                         return false;
@@ -7631,7 +7761,16 @@ pub fn touch_hud_editor(
                     let prev_r = [wx + ww - preview_w - 12.0, cards_y, preview_w, 74.0];
                     if inside(prev_r) {
                         push_undo_snapshot(&mut ed, &tc.settings);
-                        mutate_placement(tc, &ed, &|pl| pl.shape = (pl.shape + 1) % 6);
+                        mutate_placement(tc, &ed, &|pl| {
+                            pl.shape = (pl.shape + 1) % 7;
+                            if pl.shape == 1 {
+                                pl.roundness = 0.0;
+                                pl.stroke_roundness = 0.0;
+                            } else if pl.shape == 0 && pl.roundness < 1.0 {
+                                pl.roundness = 10.0;
+                                pl.stroke_roundness = 10.0;
+                            }
+                        });
                         let _ = tc.settings.save();
                         tc.clicked = true;
                         return false;

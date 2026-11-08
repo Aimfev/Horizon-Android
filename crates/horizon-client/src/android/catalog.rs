@@ -1,6 +1,7 @@
 //! Mobile launcher state. Browser operations reuse the desktop backend unchanged.
 use crate::browser::{self, Kind, Project, Query, Source, installed::Installed};
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -337,6 +338,16 @@ impl Config {
         settings.horizon.cave_culling = true;
         settings.horizon.entity_culling = true;
         settings.horizon.resolution_scale = self.render_scale.percent().clamp(25, 100);
+        match self.renderer {
+            RendererMode::OpenGl => {
+                settings.horizon.api = horizon_client::graphics::GraphicsApi::OpenGl;
+                settings.file.set("preferredGraphicsBackend", horizon_client::options_file::V::Str("opengl".into()));
+            }
+            RendererMode::Vulkan | RendererMode::VulkanCompatibility => {
+                settings.horizon.api = horizon_client::graphics::GraphicsApi::Vulkan;
+                settings.file.set("preferredGraphicsBackend", horizon_client::options_file::V::Str("vulkan".into()));
+            }
+        }
         settings.save(&options_path);
         let touch_path = game.join("horizon-touch.json");
         let mut touch_cfg = horizon_client::touch::Settings::load_from(&touch_path);
@@ -976,6 +987,115 @@ impl Catalog {
                 }
             }
         }
+        // Deduplicate Kind::Mods entries by canonical mod ID so a mod with both .hmod and .hnmod
+        // appears as a single unified card in Installed -> Content Library.
+        let mut seen_mod_ids: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut deduped: Vec<LocalItem> = Vec::with_capacity(self.local.len());
+        for mut item in self.local.drain(..) {
+            if item.kind == horizon_client::content_files::Kind::Mods
+                && !item.file.starts_with("builtin:")
+            {
+                let raw_id = item
+                    .file
+                    .strip_prefix("horizon-native-mods/")
+                    .or_else(|| item.file.strip_prefix("horizon-mods/"))
+                    .unwrap_or(&item.file);
+                let raw_id = raw_id
+                    .strip_suffix(".hnmod")
+                    .or_else(|| raw_id.strip_suffix(".hmod"))
+                    .or_else(|| raw_id.strip_suffix(".jar"))
+                    .unwrap_or(raw_id);
+                let canon_id = horizon_client::jar_transpiler::sanitize_mod_id(raw_id);
+                let has_hnmod = game
+                    .join("horizon-native-mods")
+                    .join(format!("{canon_id}.hnmod"))
+                    .is_file();
+                let has_hmod = game
+                    .join("horizon-mods")
+                    .join(format!("{canon_id}.hmod"))
+                    .is_file();
+                if has_hnmod && has_hmod {
+                    item.subtitle = format!(
+                        "Horizon Native Mod (.hnmod + .hmod)  •  {}  •  {canon_id}.hnmod",
+                        format_file_size(item.size_bytes)
+                    );
+                }
+                if let Some(&existing_idx) = seen_mod_ids.get(&canon_id) {
+                    deduped[existing_idx].enabled |= item.enabled;
+                    deduped[existing_idx].size_bytes =
+                        deduped[existing_idx].size_bytes.max(item.size_bytes);
+                    if item.title.contains('(') && !deduped[existing_idx].title.contains('(') {
+                        deduped[existing_idx].title = item.title;
+                    }
+                    continue;
+                }
+                seen_mod_ids.insert(canon_id, deduped.len());
+            }
+            deduped.push(item);
+        }
+        self.local = deduped;
+        // Extract embedded PNG icons (icon.png, logo.png, pack.png, assets/<id>/icon.png) from
+        // local mod/pack/shader archives so Content Library displays real icons immediately.
+        for item in &self.local {
+            let raw_id = item
+                .file
+                .strip_prefix("horizon-native-mods/")
+                .or_else(|| item.file.strip_prefix("horizon-mods/"))
+                .or_else(|| item.file.strip_prefix("builtin:"))
+                .unwrap_or(&item.file);
+            let raw_id = raw_id
+                .strip_suffix(".hnmod")
+                .or_else(|| raw_id.strip_suffix(".hmod"))
+                .or_else(|| raw_id.strip_suffix(".jar"))
+                .or_else(|| raw_id.strip_suffix(".hshader"))
+                .or_else(|| raw_id.strip_suffix(".zip"))
+                .unwrap_or(raw_id);
+            let canon_id = horizon_client::jar_transpiler::sanitize_mod_id(raw_id);
+            if self.icons.contains_key(&canon_id) || self.icons.contains_key(&item.file) {
+                continue;
+            }
+            let candidates = [
+                game.join("horizon-mods").join(format!("{canon_id}.hmod")),
+                game.join("horizon-native-mods").join(format!("{canon_id}.hnmod")),
+                game.join(item.kind.folder()).join(&item.file),
+                game.join(&item.file),
+            ];
+            for archive_path in candidates {
+                if !archive_path.is_file() {
+                    continue;
+                }
+                if let Ok(file) = std::fs::File::open(&archive_path)
+                    && let Ok(mut zip) = zip::ZipArchive::new(file)
+                {
+                    let mut icon_bytes = None;
+                    for i in 0..zip.len().min(512) {
+                        let Ok(mut entry) = zip.by_index(i) else { continue };
+                        let ename = entry.name().to_ascii_lowercase();
+                        if matches!(ename.as_str(), "icon.png" | "logo.png" | "pack.png")
+                            || (ename.starts_with("assets/") && ename.ends_with("/icon.png"))
+                            || (ename.starts_with("assets/") && ename.ends_with("/logo.png"))
+                        {
+                            let mut buf = Vec::new();
+                            if std::io::Read::take(&mut entry, 2 * 1024 * 1024)
+                                .read_to_end(&mut buf)
+                                .is_ok()
+                                && !buf.is_empty()
+                            {
+                                icon_bytes = Some(buf);
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(bytes) = icon_bytes
+                        && let Ok((iw, ih, rgba)) = horizon_client::hud::decode_bytes(&bytes)
+                    {
+                        self.icons.insert(canon_id.clone(), (iw, ih, rgba.clone()));
+                        self.icons.insert(item.file.clone(), (iw, ih, rgba));
+                        break;
+                    }
+                }
+            }
+        }
         self.sort_local_items();
         self.refresh_fm(home);
     }
@@ -1398,6 +1518,31 @@ impl Catalog {
                 }
             }
         }
+        for item in &self.local {
+            let raw_id = item
+                .file
+                .strip_prefix("horizon-native-mods/")
+                .or_else(|| item.file.strip_prefix("horizon-mods/"))
+                .or_else(|| item.file.strip_prefix("builtin:"))
+                .unwrap_or(&item.file);
+            let raw_id = raw_id
+                .strip_suffix(".hnmod")
+                .or_else(|| raw_id.strip_suffix(".hmod"))
+                .or_else(|| raw_id.strip_suffix(".jar"))
+                .or_else(|| raw_id.strip_suffix(".hshader"))
+                .or_else(|| raw_id.strip_suffix(".zip"))
+                .unwrap_or(raw_id);
+            let canon_id = horizon_client::jar_transpiler::sanitize_mod_id(raw_id);
+            if !self.icons.contains_key(&canon_id) && !self.icons.contains_key(&item.file) {
+                let b_kind = match item.kind {
+                    horizon_client::content_files::Kind::Mods => Kind::Mod,
+                    horizon_client::content_files::Kind::Packs => Kind::ResourcePack,
+                    horizon_client::content_files::Kind::Shaders => Kind::Shader,
+                };
+                let clean_q = item.title.split('(').next().unwrap_or(&item.title).trim().to_owned();
+                tasks.push((canon_id, clean_q, None, b_kind));
+            }
+        }
         for p in &self.results {
             if self.icons.contains_key(&p.id) {
                 continue;
@@ -1664,7 +1809,7 @@ impl Catalog {
             && self.config.mod_source == crate::shader_catalog::Origin::Modrinth
         {
             format!(
-                "{} Java mods - browsing only; this Rust client cannot run Java loaders",
+                "{} Modrinth mods — tap Install to auto-compile into Horizon Native (.hnmod)",
                 items.len()
             )
         } else if self.page == Page::Mods {
@@ -1817,20 +1962,20 @@ impl Catalog {
                 && project.source == browser::SourceId::Modrinth
             {
                 crate::shader_catalog::install(source.as_ref(), &project, &game, &report)?
+            } else if project.kind == Kind::Mod
+                && project.source == browser::SourceId::Modrinth
+            {
+                install_modrinth_jar_fallback(source.as_ref(), &project, &game, &report)?
             } else {
-                match browser::installed::install(source.as_ref(), &project, true, &game, &report) {
-                    Ok(entries) => entries.len(),
-                    Err(first_err)
-                        if project.kind == Kind::Mod
-                            && project.source == browser::SourceId::Modrinth =>
-                    {
-                        // Fallback for Modrinth Java mods without port-pack content: download the
-                        // primary .jar into horizon-mods/ and register it in Installed.
-                        install_modrinth_jar_fallback(source.as_ref(), &project, &game, &report)
-                            .map_err(|_| first_err)?
+                let entries =
+                    browser::installed::install(source.as_ref(), &project, true, &game, &report)?;
+                for e in &entries {
+                    let p = game.join(&e.file);
+                    if e.file.ends_with(".hnmod") && p.is_file() {
+                        let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&p, &game);
                     }
-                    Err(e) => return Err(e),
                 }
+                entries.len()
             };
             if cancelled.load(Ordering::Relaxed) {
                 return Err("Download cancelled".into());
@@ -1950,6 +2095,23 @@ impl Catalog {
                     .or_else(|| id.strip_suffix(".hnmod"))
                     .or_else(|| id.strip_suffix(".jar"))
                     .unwrap_or(id);
+                for companion in [
+                    game.join("horizon-native-mods").join(format!("{id}.hnmod")),
+                    game.join("horizon-mods").join(format!("{id}.hmod")),
+                    game.join("horizon-mods").join(format!("{id}.hnmod")),
+                    game.join("horizon-mods").join(format!("{id}.jar")),
+                ] {
+                    if companion.is_file() {
+                        let _ = std::fs::remove_file(&companion);
+                    }
+                }
+                installed.entries.retain(|e| {
+                    e.slug != id
+                        && e.file != format!("horizon-native-mods/{id}.hnmod")
+                        && e.file != format!("horizon-mods/{id}.hmod")
+                        && e.file != format!("horizon-mods/{id}.jar")
+                });
+                let _ = installed.save(&game);
                 on.enabled.remove(id);
                 on.save(&game);
                 return Ok(());
@@ -1995,8 +2157,26 @@ impl Catalog {
                 if let Some(id) = item
                     .file
                     .strip_suffix(".hmod")
+                    .or_else(|| item.file.strip_suffix(".hnmod"))
                     .or_else(|| item.file.strip_suffix(".jar"))
                 {
+                    for companion in [
+                        game.join("horizon-native-mods").join(format!("{id}.hnmod")),
+                        game.join("horizon-mods").join(format!("{id}.hmod")),
+                        game.join("horizon-mods").join(format!("{id}.hnmod")),
+                        game.join("horizon-mods").join(format!("{id}.jar")),
+                    ] {
+                        if companion.is_file() {
+                            let _ = std::fs::remove_file(&companion);
+                        }
+                    }
+                    installed.entries.retain(|e| {
+                        e.slug != id
+                            && e.file != format!("horizon-native-mods/{id}.hnmod")
+                            && e.file != format!("horizon-mods/{id}.hmod")
+                            && e.file != format!("horizon-mods/{id}.jar")
+                    });
+                    let _ = installed.save(&game);
                     on.enabled.remove(id);
                 }
                 on.save(&game);
@@ -2215,18 +2395,28 @@ fn install_modrinth_jar_fallback(
     } else {
         slug
     };
-    let relative = format!("horizon-mods/{slug}.jar");
-    let target = home.join(&relative);
+    let relative_jar = format!("horizon-mods/{slug}.jar");
+    let target = home.join(&relative_jar);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::rename(&downloaded, &target).map_err(|e| e.to_string())?;
-    browser::java::set_enabled(home, &slug, true)?;
+    progress(
+        &format!("Auto-compiling {} into Horizon Native (.hnmod)...", project.title),
+        0.88,
+    );
+    let mut final_id = horizon_client::jar_transpiler::sanitize_mod_id(&slug);
+    let mut relative_final = format!("horizon-native-mods/{final_id}.hnmod");
     if let Ok(transpiled) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&target, home) {
+        final_id = transpiled.id.clone();
+        relative_final = format!("horizon-native-mods/{final_id}.hnmod");
         let mut on = horizon_client::mod_list::ModList::load(home);
-        on.disabled.remove(&transpiled.id);
-        on.enabled.insert(transpiled.id);
+        on.disabled.remove(&final_id);
+        on.disabled.remove(&slug);
+        on.enabled.insert(final_id.clone());
         on.save(home);
+    } else {
+        browser::java::set_enabled(home, &slug, true)?;
     }
     let (algo, hash) = file.checksum().unwrap_or(("SHA-1", ""));
     let mut installed = Installed::load(home);
@@ -2236,21 +2426,21 @@ fn install_modrinth_jar_fallback(
     installed.entries.push(browser::installed::Entry {
         source: project.source,
         project: project.id.clone(),
-        slug: slug.clone(),
+        slug: final_id.clone(),
         title: project.title.clone(),
         kind: Kind::Mod,
         version: version.id.clone(),
         number: version.number.clone(),
-        file: relative,
+        file: relative_final,
         checksum: format!("{algo}:{hash}"),
         page: project.page.clone(),
         dependency: false,
-        verdict: Some("Downloaded".into()),
+        verdict: Some("Auto-compiled (.hnmod)".into()),
         skipped: Vec::new(),
-        namespaces: vec![slug],
+        namespaces: vec![final_id],
     });
     installed.save(home)?;
-    progress(&format!("Installed {}", project.title), 1.0);
+    progress(&format!("Compiled & enabled {}", project.title), 1.0);
     Ok(1)
 }
 

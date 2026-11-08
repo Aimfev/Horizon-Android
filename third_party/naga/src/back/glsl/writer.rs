@@ -596,7 +596,12 @@ impl<'a, W: Write> Writer<'a, W> {
             Ic::Sampled { kind, multi: true } => ("sampler", S { kind, width: 4 }, "MS", ""),
             Ic::Sampled { kind, multi: false } => ("sampler", S { kind, width: 4 }, "", ""),
             Ic::Depth { multi: true } => ("sampler", float, "MS", ""),
-            Ic::Depth { multi: false } => ("sampler", float, "", "Shadow"),
+            Ic::Depth { multi: false } => {
+                let has_cmp = self.module.types.iter().any(|(_, ty)| {
+                    matches!(ty.inner, TypeInner::Sampler { comparison: true })
+                });
+                ("sampler", float, "", if has_cmp { "Shadow" } else { "" })
+            }
             Ic::Storage { format, .. } => ("image", format.into(), "", ""),
             Ic::External => unimplemented!(),
         };
@@ -1630,7 +1635,8 @@ impl<'a, W: Write> Writer<'a, W> {
                     } = ctx.expressions[handle]
                     {
                         if let TypeInner::Image {
-                            class: crate::ImageClass::Sampled { .. },
+                            class:
+                                crate::ImageClass::Sampled { .. } | crate::ImageClass::Depth { .. },
                             ..
                         } = *ctx.resolve_type(image, &self.module.types)
                         {
@@ -4105,12 +4111,7 @@ impl<'a, W: Write> Writer<'a, W> {
                 };
                 ("imageLoad", policy)
             }
-            // TODO: Is there even a function for this?
-            crate::ImageClass::Depth { multi: _ } => {
-                return Err(Error::Custom(
-                    "WGSL `textureLoad` from depth textures is not supported in GLSL".to_string(),
-                ))
-            }
+            crate::ImageClass::Depth { multi: _ } => ("texelFetch", self.policies.image_load),
             crate::ImageClass::External => unimplemented!(),
         };
 
@@ -4296,32 +4297,37 @@ impl<'a, W: Write> Writer<'a, W> {
 
         // Close the image load function.
         write!(self.out, ")")?;
+        if matches!(class, crate::ImageClass::Depth { .. }) {
+            write!(self.out, ".x")?;
+        }
 
         // If we were using the `ReadZeroSkipWrite` policy we need to end the first branch
         // (which is taken if the condition is `true`) with a colon (`:`) and write the
         // second branch which is just a 0 value.
         if let proc::BoundsCheckPolicy::ReadZeroSkipWrite = policy {
-            // Get the kind of the output value.
-            let kind = match class {
-                // Only sampled images can reach here since storage images
-                // don't need bounds checks and depth images aren't implemented
-                crate::ImageClass::Sampled { kind, .. } => kind,
-                _ => unreachable!(),
-            };
+            if matches!(class, crate::ImageClass::Depth { .. }) {
+                write!(self.out, " : 0.0)")?;
+            } else {
+                // Get the kind of the output value.
+                let kind = match class {
+                    crate::ImageClass::Sampled { kind, .. } => kind,
+                    _ => unreachable!(),
+                };
 
-            // End the first branch
-            write!(self.out, " : ")?;
-            // Write the 0 value
-            write!(
-                self.out,
-                "{}vec4(",
-                glsl_scalar(crate::Scalar { kind, width: 4 })?.prefix,
-            )?;
-            self.write_zero_init_scalar(kind)?;
-            // Close the zero value constructor
-            write!(self.out, ")")?;
-            // Close the parentheses surrounding our ternary
-            write!(self.out, ")")?;
+                // End the first branch
+                write!(self.out, " : ")?;
+                // Write the 0 value
+                write!(
+                    self.out,
+                    "{}vec4(",
+                    glsl_scalar(crate::Scalar { kind, width: 4 })?.prefix,
+                )?;
+                self.write_zero_init_scalar(kind)?;
+                // Close the zero value constructor
+                write!(self.out, ")")?;
+                // Close the parentheses surrounding our ternary
+                write!(self.out, ")")?;
+            }
         }
 
         Ok(())

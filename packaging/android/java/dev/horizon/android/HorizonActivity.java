@@ -94,8 +94,6 @@ public final class HorizonActivity extends android.app.NativeActivity {
         for (String key : wanted.keySet()) {
             if ("microphone".equalsIgnoreCase(key)) {
                 permList.add(android.Manifest.permission.RECORD_AUDIO);
-            } else if (key.startsWith("android.permission.")) {
-                permList.add(key);
             }
         }
         if (permList.isEmpty()) {
@@ -268,7 +266,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
             if (!destFolder.mkdirs() && !destFolder.exists()) {
                 return "ERROR: Failed to create destination folder " + destFolder.getName();
             }
-            copyFolderChildren(context.getContentResolver(), treeUri, treeDocId, destFolder);
+            copyFolderChildren(context.getContentResolver(), treeUri, treeDocId, destFolder, 0, new int[]{0});
             return destFolder.getName();
         } catch (Throwable err) {
             android.util.Log.e("HorizonActivity", "copyFolderTree failed", err);
@@ -279,7 +277,13 @@ public final class HorizonActivity extends android.app.NativeActivity {
 
     private static void copyFolderChildren(android.content.ContentResolver resolver,
             android.net.Uri treeUri, String parentDocId, java.io.File destDir) {
+        copyFolderChildren(resolver, treeUri, parentDocId, destDir, 0, new int[]{0});
+    }
+
+    private static void copyFolderChildren(android.content.ContentResolver resolver,
+            android.net.Uri treeUri, String parentDocId, java.io.File destDir, int depth, int[] fileCount) {
         if (resolver == null || treeUri == null || parentDocId == null || destDir == null) return;
+        if (depth > 20 || fileCount[0] > 20000) return;
         if (!destDir.exists()) {
             destDir.mkdirs();
         }
@@ -330,11 +334,12 @@ public final class HorizonActivity extends android.app.NativeActivity {
                 try {
                     java.io.File subDir = new java.io.File(destDir, childName);
                     if (!subDir.exists()) subDir.mkdirs();
-                    copyFolderChildren(resolver, treeUri, childDocId, subDir);
+                    copyFolderChildren(resolver, treeUri, childDocId, subDir, depth + 1, fileCount);
                 } catch (Throwable dirErr) {
                     android.util.Log.w("HorizonActivity", "Failed copying subfolder " + childName, dirErr);
                 }
             } else {
+                if (++fileCount[0] > 20000) break;
                 java.io.File targetFile = new java.io.File(destDir, childName);
                 try {
                     android.net.Uri childUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId);

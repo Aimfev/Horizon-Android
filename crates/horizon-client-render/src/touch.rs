@@ -597,7 +597,7 @@ impl TouchControls {
                 let rect = [nx * w, ny * h, nw * w, nh * h];
                 let held = Self::button(control).is_some_and(|bt| state.held(bt));
                 let toggled = (self.latched_controls & (1 << (control as u16))) != 0;
-                draw_goy_static_button(b, a, rect, &p, control.name(), held, toggled, opacity);
+                draw_goy_static_button(b, a, rect, &p, self.settings.control_label(control), held, toggled, opacity);
                 continue;
             }
             if control == Control::Move
@@ -1689,19 +1689,78 @@ pub fn draw_goy_static_button(
     } else {
         scale_alpha(p.stroke_color, opacity)
     };
-    // Flat 2D GoyControl button: no 3D drop shadow pass
-    b.fill(a, x, y, w, h, fill_c);
-    if p.stroke_size > 0.1 {
-        let sm = p.stroke_margin;
-        let sx = x - sm;
-        let sy = y - sm;
-        let sw = (w + sm * 2.0).max(2.0);
-        let sh = (h + sm * 2.0).max(2.0);
-        let t = (p.stroke_size * 0.75).clamp(1.0, 5.0);
-        b.fill(a, sx, sy, sw, t, stroke_c);
-        b.fill(a, sx, sy + sh - t, sw, t, stroke_c);
-        b.fill(a, sx, sy, t, sh, stroke_c);
-        b.fill(a, sx + sw - t, sy, t, sh, stroke_c);
+    // Shape-aware 2D GoyControl button in HudBatch
+    match p.shape {
+        2 => {
+            let center = [x + w * 0.5, y + h * 0.5];
+            let radius = w.min(h) * 0.5;
+            disc(b, a, center, radius, fill_c);
+            if p.stroke_size > 0.1 {
+                ring(b, a, center, radius + p.stroke_margin, stroke_c);
+            }
+        }
+        6 => {
+            let steps = 14;
+            for i in 0..steps {
+                let frac = (i as f32 + 0.7) / steps as f32;
+                let rw = (w * frac.clamp(0.08, 1.0)).max(2.0);
+                let ry = y + (i as f32 / steps as f32) * h;
+                let rh = (h / steps as f32) + 0.5;
+                b.fill(a, x + (w - rw) * 0.5, ry, rw, rh, fill_c);
+            }
+            if p.stroke_size > 0.1 {
+                let t = (p.stroke_size * 0.75).clamp(1.0, 4.0);
+                b.fill(a, x, y + h - t, w, t, stroke_c);
+                for i in 0..steps {
+                    let frac = (i as f32 + 0.5) / steps as f32;
+                    let rw = (w * frac.clamp(0.06, 1.0)).max(t * 2.0);
+                    let ry = y + (i as f32 / steps as f32) * h;
+                    let rh = (h / steps as f32) + 0.5;
+                    let lx = x + (w - rw) * 0.5;
+                    b.fill(a, lx, ry, t, rh, stroke_c);
+                    b.fill(a, lx + rw - t, ry, t, rh, stroke_c);
+                }
+            }
+        }
+        3 | 4 | 5 => {
+            let steps = 12;
+            for i in 0..steps {
+                let frac = (i as f32 + 0.5) / steps as f32;
+                let dist = (frac - 0.5).abs() * 2.0;
+                let factor = match p.shape {
+                    3 => {
+                        let ed = frac.min(1.0 - frac);
+                        if ed < 0.22 { (0.22 - ed) / 0.22 * 0.36 } else { 0.0 }
+                    }
+                    4 => dist * 0.86,
+                    _ => dist * 0.42,
+                };
+                let rw = (w * (1.0 - factor)).max(2.0);
+                let ry = y + (i as f32 / steps as f32) * h;
+                let rh = (h / steps as f32) + 0.5;
+                b.fill(a, x + (w - rw) * 0.5, ry, rw, rh, fill_c);
+            }
+            if p.stroke_size > 0.1 {
+                let t = (p.stroke_size * 0.75).clamp(1.0, 4.0);
+                b.fill(a, x + w * 0.28, y, w * 0.44, t, stroke_c);
+                b.fill(a, x + w * 0.28, y + h - t, w * 0.44, t, stroke_c);
+            }
+        }
+        _ => {
+            b.fill(a, x, y, w, h, fill_c);
+            if p.stroke_size > 0.1 {
+                let sm = p.stroke_margin;
+                let sx = x - sm;
+                let sy = y - sm;
+                let sw = (w + sm * 2.0).max(2.0);
+                let sh = (h + sm * 2.0).max(2.0);
+                let t = (p.stroke_size * 0.75).clamp(1.0, 5.0);
+                b.fill(a, sx, sy, sw, t, stroke_c);
+                b.fill(a, sx, sy + sh - t, sw, t, stroke_c);
+                b.fill(a, sx, sy, t, sh, stroke_c);
+                b.fill(a, sx + sw - t, sy, t, sh, stroke_c);
+            }
+        }
     }
     if !label.is_empty() && a.sprites.contains_key("font/ascii") {
         let width = HudBatch::text_width(a, label);

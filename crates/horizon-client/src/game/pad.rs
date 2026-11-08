@@ -339,7 +339,17 @@ impl Game<'_> {
                 self.pad.touch.latch_use();
             }
             if let Some(held_use) = self.pad.touch.take_tap() {
-                if self.entity_targeted() && self.using.is_none() && self.screen == Screen::Playing
+                if self.pad.touch_ui.virtual_mouse && self.screen == Screen::Playing {
+                    // When Authoritative Virtual Mouse is active in-game, a short tap/left-click
+                    // performs a primary attack (Left Click), while holding performs secondary use.
+                    if self.remote.is_some() {
+                        self.remote_start_attack();
+                    } else {
+                        self.attack();
+                    }
+                } else if self.entity_targeted()
+                    && self.using.is_none()
+                    && self.screen == Screen::Playing
                 {
                     // Resolve the entity attack now, never as held LMB. A mob
                     // disappearing before the next tick cannot expose a block.

@@ -248,3 +248,9 @@ mod tests {
             .any(|e| matches!(e, Event::Relative(..))));
     }
 }
+
+impl MouseState {
+    pub fn buttons(&self) -> u32 {
+        self.buttons
+    }
+}

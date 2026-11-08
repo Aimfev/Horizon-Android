@@ -193,12 +193,13 @@ jobs:
       - name: Build
         env:
           MODS: ${{ matrix.build.mods }}
+          BUILD_NAME: ${{ matrix.build.name }}
         run: |
           bundles=()
           for id in $MODS; do bundles+=("tools/native-mods/$id/mixins/$id"); done
           bash tools/packaging/android/native_build.sh source out "${bundles[@]}"
-          mv out/libhorizon_android.so "out/${{ matrix.build.name }}.so"
-          mv out/build.json "out/${{ matrix.build.name }}.json"
+          mv out/libhorizon_android.so "out/${BUILD_NAME}.so"
+          mv out/build.json "out/${BUILD_NAME}.json"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.name }}

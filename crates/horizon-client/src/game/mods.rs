@@ -216,8 +216,21 @@ pub(super) fn content_root(
 ) -> std::path::PathBuf {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::{Capability, Content, Package};
-    let here = std::env::current_dir().unwrap_or_default();
+    let here = Game::options_path()
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
+    for extra_dir in [
+        horizon_client::logging::private_home().join(mod_list::DIR),
+        std::env::current_dir().unwrap_or_default().join(mod_list::DIR),
+    ] {
+        for found in horizon_mods::find(&extra_dir) {
+            if !paths.contains(&found) {
+                paths.push(found);
+            }
+        }
+    }
     paths.retain(|p| !dev.contains(p));
     paths.extend(dev.iter().cloned());
     let mut known = None;
@@ -392,6 +405,12 @@ impl Game<'_> {
         let dir = Self::options_path().with_file_name(mod_list::DIR);
         let dev = &self.mods.dev;
         let mut paths = horizon_mods::find(&dir);
+        let home_dir = horizon_client::logging::private_home().join(mod_list::DIR);
+        for found in horizon_mods::find(&home_dir) {
+            if !paths.contains(&found) {
+                paths.push(found);
+            }
+        }
         paths.retain(|p| !dev.contains(p));
         paths.extend(dev.iter().cloned());
         // A dev mod is on whatever the list says.

@@ -150,6 +150,7 @@ pub enum Icon {
     FileText,
     Trash,
     Share,
+    Skins,
 }
 
 struct Fonts {
@@ -198,6 +199,7 @@ struct Cache {
     entries: HashMap<Key, Cached>,
     images: HashMap<String, Rect>,
     shelf: (u32, u32, u32),
+    image_shelf: (u32, u32, u32),
     pending: Vec<crate::font::Patch>,
     glyph_scratch: Vec<(f32, f32, Rect)>,
     /// The atlas the entries were uploaded to (a new atlas starts over).
@@ -219,6 +221,7 @@ fn with_cache<R>(atlas: &HudAtlas, f: impl FnOnce(&mut Cache) -> R) -> R {
             entries: HashMap::with_capacity(512),
             images: HashMap::with_capacity(64),
             shelf: (0, 0, 0),
+            image_shelf: (0, 320, 0),
             pending: Vec::with_capacity(64),
             glyph_scratch: Vec::with_capacity(128),
             atlas: id,
@@ -228,6 +231,7 @@ fn with_cache<R>(atlas: &HudAtlas, f: impl FnOnce(&mut Cache) -> R) -> R {
             cache.entries.clear();
             cache.images.clear();
             cache.shelf = (0, 0, 0);
+            cache.image_shelf = (0, 320, 0);
             cache.pending.clear();
         }
         f(cache)
@@ -536,6 +540,18 @@ fn icon_hit(icon: Icon, u: f32, v: f32) -> bool {
             let head_r = seg_dist(u, v, 0.66, 0.36, 0.50, 0.20) <= 0.048;
             tray_l || tray_r || tray_b || stem || head_l || head_r
         }
+        Icon::Skins => {
+            // Crisp player tunic / t-shirt icon for Skins tab & Wardrobe.
+            let body = (0.28..=0.72).contains(&u) && (0.22..=0.84).contains(&v);
+            let left_sleeve = (0.12..=0.30).contains(&u)
+                && (0.22..=0.52).contains(&v)
+                && (v - 0.22) >= (0.28 - u) * 0.55;
+            let right_sleeve = (0.70..=0.88).contains(&u)
+                && (0.22..=0.52).contains(&v)
+                && (v - 0.22) >= (u - 0.72) * 0.55;
+            let neck_cut = ((u - 0.50).powi(2) + (v - 0.20).powi(2)).sqrt() <= 0.12;
+            (body || left_sleeve || right_sleeve) && !neck_cut
+        }
     }
 }
 
@@ -543,23 +559,78 @@ impl Cache {
     fn region(atlas: &HudAtlas) -> Option<Rect> {
         atlas.sprites.get("horizon/ui-text").copied()
     }
-    /// Reserve `w x h` pixels; on overflow forget everything and start over.
+    /// Reserve `w x h` pixels in the top glyph/icon band (`y: 0..320`); never evicts `self.images`
+    /// and immediately allocates after wrapping so no icon or glyph is dropped mid-frame.
     fn place(&mut self, atlas: &HudAtlas, w: u32, h: u32) -> Option<(u32, u32, Rect)> {
         let region = Self::region(atlas)?;
+        let text_band_h = region.h.min(320);
+        if w > region.w || h > text_band_h {
+            return None;
+        }
         let (mut x, mut y, mut row) = self.shelf;
         if x + w + 1 > region.w {
             x = 0;
             y += row + 1;
             row = 0;
         }
-        if y + h > region.h || w > region.w {
+        if y + h > text_band_h {
             self.entries.clear();
-            self.images.clear();
-            self.shelf = (0, 0, 0);
-            return None;
+            x = 0;
+            y = 0;
+            row = 0;
         }
         self.shelf = (x + w + 1, y, row.max(h));
         Some((x, y, region))
+    }
+    /// Reserve `w x h` pixels in the dedicated bottom image band (`y: 320..region.h`) so project
+    /// thumbnails and gallery screenshots never overwrite or evict UI text, corners, or vector icons.
+    fn place_image(&mut self, atlas: &HudAtlas, w: u32, h: u32) -> Option<(u32, u32, Rect)> {
+        let region = Self::region(atlas)?;
+        let band_top = 320u32.min(region.h.saturating_sub(64));
+        let band_bottom = region.h;
+        if w > region.w || band_top + h > band_bottom {
+            return None;
+        }
+        let (mut x, mut y, mut row) = self.image_shelf;
+        if y < band_top {
+            y = band_top;
+        }
+        if x + w + 1 > region.w {
+            x = 0;
+            y += row + 1;
+            row = 0;
+        }
+        if y + h > band_bottom {
+            self.images.clear();
+            x = 0;
+            y = band_top;
+            row = 0;
+        }
+        self.image_shelf = (x + w + 1, y, row.max(h));
+        Some((x, y, region))
+    }
+    fn upload_image_rgba(&mut self, atlas: &HudAtlas, w: u32, h: u32, rgba: Vec<u8>) -> Option<Rect> {
+        let (x, y, region) = self.place_image(atlas, w, h)?;
+        let (ax, ay) = (
+            (region.u0 * atlas.width as f32).round() as u32 + x,
+            (region.v0 * atlas.height as f32).round() as u32 + y,
+        );
+        self.pending.push(crate::font::Patch {
+            x: ax,
+            y: ay,
+            width: w,
+            height: h,
+            rgba,
+        });
+        let (aw, ah) = (atlas.width as f32, atlas.height as f32);
+        Some(Rect {
+            u0: ax as f32 / aw,
+            v0: ay as f32 / ah,
+            u1: (ax + w) as f32 / aw,
+            v1: (ay + h) as f32 / ah,
+            w,
+            h,
+        })
     }
     fn upload(&mut self, atlas: &HudAtlas, w: u32, h: u32, alpha: &[f32]) -> Option<Rect> {
         let rgba: Vec<u8> = alpha
@@ -680,7 +751,7 @@ impl Cache {
         rect
     }
     fn vector_icon(&mut self, atlas: &HudAtlas, icon: Icon, px: u16) -> Option<Rect> {
-        let n = u32::from(px.clamp(8, 128));
+        let n = u32::from(px.clamp(8, 48));
         let key = Key::Vector(icon, n as u16);
         if let Some(c) = self.entries.get(&key) {
             return c.rect;
@@ -722,12 +793,32 @@ impl Cache {
         if w == 0 || h == 0 || rgba.len() != (w * h * 4) as usize {
             return None;
         }
+        // Fit project icons (<= 48x48) and wide gallery screenshots (<= 96x54) into the dedicated
+        // bottom image band (`y: 320..512`) so they never overflow the atlas shelf.
+        let (max_w, max_h) = if w > h * 4 / 3 { (96u32, 54u32) } else { (48u32, 48u32) };
+        let (tw, th, mut masked) = if w > max_w || h > max_h {
+            let scale = (max_w as f32 / w as f32).min(max_h as f32 / h as f32);
+            let nw = ((w as f32 * scale).round() as u32).clamp(1, max_w);
+            let nh = ((h as f32 * scale).round() as u32).clamp(1, max_h);
+            let mut out = vec![0u8; (nw * nh * 4) as usize];
+            for ny in 0..nh {
+                let sy = ((ny as u64 * h as u64) / nh as u64).min((h - 1) as u64) as u32;
+                for nx in 0..nw {
+                    let sx = ((nx as u64 * w as u64) / nw as u64).min((w - 1) as u64) as u32;
+                    let src_i = ((sy * w + sx) * 4) as usize;
+                    let dst_i = ((ny * nw + nx) * 4) as usize;
+                    out[dst_i..dst_i + 4].copy_from_slice(&rgba[src_i..src_i + 4]);
+                }
+            }
+            (nw, nh, out)
+        } else {
+            (w, h, rgba.to_vec())
+        };
         // Apply a soft rounded-corner mask to project icons so they sit cleanly in cards.
-        let mut masked = rgba.to_vec();
-        let r = (w.min(h) as f32 * 0.22).max(2.0);
-        let (wf, hf) = (w as f32, h as f32);
-        for y in 0..h {
-            for x in 0..w {
+        let r = (tw.min(th) as f32 * 0.22).max(2.0);
+        let (wf, hf) = (tw as f32, th as f32);
+        for y in 0..th {
+            for x in 0..tw {
                 let px = x as f32 + 0.5;
                 let py = y as f32 + 0.5;
                 let dx = if px < r {
@@ -747,12 +838,12 @@ impl Cache {
                 if dx > 0.0 && dy > 0.0 {
                     let d = (dx * dx + dy * dy).sqrt();
                     let cov = (r + 0.5 - d).clamp(0.0, 1.0);
-                    let idx = ((y * w + x) * 4 + 3) as usize;
+                    let idx = ((y * tw + x) * 4 + 3) as usize;
                     masked[idx] = (masked[idx] as f32 * cov).round() as u8;
                 }
             }
         }
-        let rect = self.upload_rgba(atlas, w, h, masked)?;
+        let rect = self.upload_image_rgba(atlas, tw, th, masked)?;
         self.images.insert(key.to_owned(), rect);
         Some(rect)
     }
@@ -1650,45 +1741,68 @@ impl<'a> Ui<'a> {
         let _ = (shadow_size, shadow_color);
         // 2. Main Fill Shape
         match shape {
+            1 => {
+                // Sharp 0px Square / Rectangle (no corner curves at all)
+                self.fill(x, y, w, h, fill_color);
+            }
             3 => {
                 // Cut-Corner Octagon / Beveled Tactical Plate
-                let cut = (w.min(h) * 0.20).clamp(3.0, 14.0);
-                self.fill(x + cut, y, (w - cut * 2.0).max(1.0), h, fill_color);
-                self.fill(x, y + cut, w, (h - cut * 2.0).max(1.0), fill_color);
-                let half_c = cut * 0.5;
-                self.fill(
-                    x + half_c,
-                    y + half_c,
-                    (w - cut).max(1.0),
-                    (h - cut).max(1.0),
-                    fill_color,
-                );
+                let steps = 14;
+                for i in 0..steps {
+                    let frac = (i as f32 + 0.5) / steps as f32;
+                    let edge_dist = frac.min(1.0 - frac);
+                    let taper = if edge_dist < 0.22 {
+                        (0.22 - edge_dist) / 0.22 * 0.36
+                    } else {
+                        0.0
+                    };
+                    let sw = (w * (1.0 - taper)).max(2.0);
+                    let sy = y + (i as f32 / steps as f32) * h;
+                    let sh = (h / steps as f32) + 0.6;
+                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
+                }
             }
             4 => {
-                // Stepped Diamond / Rhombus Plate
-                let steps = 7;
+                // Crisp Diamond / Rhombus Plate
+                let steps = 16;
                 for i in 0..steps {
                     let frac = (i as f32 + 0.5) / steps as f32;
                     let dist = (frac - 0.5).abs() * 2.0;
-                    let sw = (w * (1.0 - dist * 0.72)).max(4.0);
+                    let sw = (w * (1.0 - dist * 0.86)).max(2.0);
                     let sy = y + (i as f32 / steps as f32) * h;
-                    let sh = (h / steps as f32) + 0.8;
-                    self.rounded(x + (w - sw) * 0.5, sy, sw, sh, 2.0, fill_color);
+                    let sh = (h / steps as f32) + 0.6;
+                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
                 }
             }
             5 => {
                 // Hexagon Tactical Badge
-                let steps = 5;
+                let steps = 14;
                 for i in 0..steps {
-                    let dist = ((i as f32 - 2.0).abs() / 2.0).powf(1.2);
-                    let sw = (w * (1.0 - dist * 0.34)).max(4.0);
+                    let frac = (i as f32 + 0.5) / steps as f32;
+                    let dist = (frac - 0.5).abs() * 2.0;
+                    let sw = (w * (1.0 - dist * 0.42)).max(2.0);
                     let sy = y + (i as f32 / steps as f32) * h;
-                    let sh = (h / steps as f32) + 0.8;
-                    self.rounded(x + (w - sw) * 0.5, sy, sw, sh, 3.0, fill_color);
+                    let sh = (h / steps as f32) + 0.6;
+                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
+                }
+            }
+            6 => {
+                // Triangular Button Plate (Apex at top center, flat base at bottom)
+                let steps = 16;
+                for i in 0..steps {
+                    let frac = (i as f32 + 0.7) / steps as f32;
+                    let sw = (w * frac.clamp(0.08, 1.0)).max(2.0);
+                    let sy = y + (i as f32 / steps as f32) * h;
+                    let sh = (h / steps as f32) + 0.6;
+                    self.fill(x + (w - sw) * 0.5, sy, sw, sh, fill_color);
                 }
             }
             _ => {
-                self.rounded(x, y, w, h, eff_radius, fill_color);
+                if eff_radius <= 0.25 {
+                    self.fill(x, y, w, h, fill_color);
+                } else {
+                    self.rounded(x, y, w, h, eff_radius, fill_color);
+                }
             }
         }
         // 3. Stroke Border (with stroke_margin offset and stroke_roundness)
@@ -1697,10 +1811,65 @@ impl<'a> Ui<'a> {
             let sy = y - stroke_margin;
             let sw = (w + stroke_margin * 2.0).max(2.0);
             let sh = (h + stroke_margin * 2.0).max(2.0);
-            if stroke_size <= 2.2 {
-                self.border(sx, sy, sw, sh, eff_stroke_r, stroke_color);
-            } else {
-                self.stroke_rounded(sx, sy, sw, sh, eff_stroke_r, stroke_size, stroke_color);
+            let t = stroke_size.clamp(1.0, 6.0);
+            match shape {
+                1 => {
+                    self.fill(sx, sy, sw, t, stroke_color);
+                    self.fill(sx, sy + sh - t, sw, t, stroke_color);
+                    self.fill(sx, sy, t, sh, stroke_color);
+                    self.fill(sx + sw - t, sy, t, sh, stroke_color);
+                }
+                6 => {
+                    // Triangle outline: base + left & right sloped edges
+                    self.fill(sx, sy + sh - t, sw, t, stroke_color);
+                    let steps = 16;
+                    for i in 0..steps {
+                        let frac = (i as f32 + 0.5) / steps as f32;
+                        let row_w = (sw * frac.clamp(0.06, 1.0)).max(t * 2.0);
+                        let row_y = sy + (i as f32 / steps as f32) * sh;
+                        let row_h = (sh / steps as f32) + 0.6;
+                        let lx = sx + (sw - row_w) * 0.5;
+                        let rx_edge = lx + row_w - t;
+                        self.fill(lx, row_y, t, row_h, stroke_color);
+                        self.fill(rx_edge, row_y, t, row_h, stroke_color);
+                    }
+                }
+                3 | 4 | 5 => {
+                    let steps = 14;
+                    self.fill(sx + sw * 0.28, sy, sw * 0.44, t, stroke_color);
+                    self.fill(sx + sw * 0.28, sy + sh - t, sw * 0.44, t, stroke_color);
+                    for i in 0..steps {
+                        let frac = (i as f32 + 0.5) / steps as f32;
+                        let dist = (frac - 0.5).abs() * 2.0;
+                        let factor = match shape {
+                            3 => {
+                                let ed = frac.min(1.0 - frac);
+                                if ed < 0.22 { (0.22 - ed) / 0.22 * 0.36 } else { 0.0 }
+                            }
+                            4 => dist * 0.86,
+                            _ => dist * 0.42,
+                        };
+                        let row_w = (sw * (1.0 - factor)).max(t * 2.0);
+                        let row_y = sy + (i as f32 / steps as f32) * sh;
+                        let row_h = (sh / steps as f32) + 0.6;
+                        let lx = sx + (sw - row_w) * 0.5;
+                        let rx_edge = lx + row_w - t;
+                        self.fill(lx, row_y, t, row_h, stroke_color);
+                        self.fill(rx_edge, row_y, t, row_h, stroke_color);
+                    }
+                }
+                _ => {
+                    if eff_stroke_r <= 0.25 {
+                        self.fill(sx, sy, sw, t, stroke_color);
+                        self.fill(sx, sy + sh - t, sw, t, stroke_color);
+                        self.fill(sx, sy, t, sh, stroke_color);
+                        self.fill(sx + sw - t, sy, t, sh, stroke_color);
+                    } else if stroke_size <= 2.2 {
+                        self.border(sx, sy, sw, sh, eff_stroke_r, stroke_color);
+                    } else {
+                        self.stroke_rounded(sx, sy, sw, sh, eff_stroke_r, stroke_size, stroke_color);
+                    }
+                }
             }
         }
     }
@@ -2304,8 +2473,8 @@ impl GradientDirection {
         match self {
             Self::Vertical => "Top → Bottom",
             Self::Horizontal => "Left → Right",
-            Self::DiagonalDown => "Diagonal ↘",
-            Self::DiagonalUp => "Diagonal ↗",
+            Self::DiagonalDown => "Diagonal Top → Bottom",
+            Self::DiagonalUp => "Diagonal Bottom → Top",
         }
     }
 

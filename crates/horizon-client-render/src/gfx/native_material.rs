@@ -93,7 +93,7 @@ fn horizon_block_sprite(uv: vec2<f32>, layer: u32, lod: f32) -> vec4<f32> {
     return horizon_terrain_sprite(uv, layer & 0x7fffu);
 }
 fn horizon_block_sprite_size() -> vec2<f32> {
-    return vec2<f32>(textureDimensions(horizon_terrain_sprites_0).xy);
+    return vec2<f32>(textureDimensions(horizon_terrain_sprites).xy);
 }
 fn horizon_block_pbr_present() -> bool {
     return textureDimensions(horizon_pbr_normals).x > 1u;

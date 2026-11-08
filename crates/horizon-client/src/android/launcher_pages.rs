@@ -444,16 +444,16 @@ pub(super) fn button(
     if !accent {
         ui.border(x, y, w, h, radius, my3_border());
     }
-    let padding = (w * 0.07).clamp(5.0, 11.0);
+    let padding = (w * 0.055).clamp(4.0, 9.0);
     let avail_w = (w - 2.0 * padding).max(16.0);
     let mut font = if w < 90.0 {
-        13.0
+        12.5
     } else if h <= 36.0 {
-        14.0
+        13.5
     } else {
-        15.0
+        14.5
     };
-    while font > 11.0 && ui.measure(Face::Medium, font, label) > avail_w {
+    while font > 9.5 && ui.measure(Face::Medium, font, label) > avail_w {
         font -= 0.5;
     }
     let fitted = ui.fit_text(Face::Medium, font, label, avail_w);
@@ -773,7 +773,7 @@ fn page_icon(page: Page) -> Icon {
         Page::Shaders => Icon::Shaders,
         Page::Installed => Icon::Installed,
         Page::Settings => Icon::Settings,
-        Page::Skins => Icon::Installed,
+        Page::Skins => Icon::Skins,
     }
 }
 
@@ -948,7 +948,7 @@ fn draw_my3_progress_view(
             };
             ui.rounded(px, step_y, pill_w, 26.0, 8.0, bg);
             ui.border(px, step_y, pill_w, 26.0, 8.0, border_col);
-            let prefix = if done { "✓ " } else { "" };
+            let prefix = if done { "• " } else { "" };
             let step_txt = format!("{prefix}{name}");
             let fitted = ui.fit_text(Face::Medium, 11.5, &step_txt, pill_w - 10.0);
             let tw = ui.measure(Face::Medium, 11.5, &fitted);
@@ -2616,46 +2616,73 @@ impl Launcher {
                     },
                 );
 
-                // Left file-type icon + badge pill (MOD / PACK / SHADER)
+                // Left project/mod icon or centered vector icon inside 44x44dp box
                 let kind_icon = match item.kind {
                     Kind::Mods => Icon::Mods,
                     Kind::Packs => Icon::Packs,
                     Kind::Shaders => Icon::Shaders,
                 };
-                ui.rounded(
-                    content_x + 10.0,
-                    y + 9.0,
-                    44.0,
-                    44.0,
-                    12.0,
-                    if item.enabled {
-                        my3_accent_soft()
-                    } else {
-                        my3_surface_high()
-                    },
-                );
-                ui.icon(
-                    kind_icon,
-                    content_x + 22.0,
-                    y + 15.0,
-                    20.0,
-                    if item.enabled {
-                        my3_accent()
-                    } else {
-                        my3_muted()
-                    },
-                );
-                ui.centered_fit(
-                    Face::SemiBold,
-                    8.0,
-                    [content_x + 11.0, y + 36.0, 42.0, 14.0],
-                    if item.enabled {
-                        my3_accent()
-                    } else {
-                        my3_muted()
-                    },
-                    item.badge,
-                );
+                let raw_stem = item
+                    .file
+                    .strip_prefix("horizon-native-mods/")
+                    .or_else(|| item.file.strip_prefix("horizon-mods/"))
+                    .or_else(|| item.file.strip_prefix("builtin:"))
+                    .unwrap_or(&item.file);
+                let raw_stem = raw_stem
+                    .strip_suffix(".hnmod")
+                    .or_else(|| raw_stem.strip_suffix(".hmod"))
+                    .or_else(|| raw_stem.strip_suffix(".jar"))
+                    .or_else(|| raw_stem.strip_suffix(".hshader"))
+                    .or_else(|| raw_stem.strip_suffix(".zip"))
+                    .unwrap_or(raw_stem);
+                let canon_icon_id = horizon_client::jar_transpiler::sanitize_mod_id(raw_stem);
+                let icon_entry = self
+                    .catalog
+                    .icons
+                    .get(&item.file)
+                    .map(|v| (item.file.as_str(), v))
+                    .or_else(|| {
+                        self.catalog
+                            .icons
+                            .get(raw_stem)
+                            .map(|v| (raw_stem, v))
+                    })
+                    .or_else(|| {
+                        self.catalog
+                            .icons
+                            .get(&canon_icon_id)
+                            .map(|v| (canon_icon_id.as_str(), v))
+                    });
+                let drawn_img = if let Some((ik, (iw, ih, rgba))) = icon_entry {
+                    ui.image(ik, *iw, *ih, rgba, content_x + 10.0, y + 9.0, 44.0, 44.0)
+                } else {
+                    false
+                };
+                if !drawn_img {
+                    ui.rounded(
+                        content_x + 10.0,
+                        y + 9.0,
+                        44.0,
+                        44.0,
+                        12.0,
+                        if item.enabled {
+                            my3_accent_soft()
+                        } else {
+                            my3_surface_high()
+                        },
+                    );
+                    ui.icon(
+                        kind_icon,
+                        content_x + 21.0,
+                        y + 20.0,
+                        22.0,
+                        if item.enabled {
+                            my3_accent()
+                        } else {
+                            my3_muted()
+                        },
+                    );
+                }
 
                 // Status badge pill ("ACTIVE" vs "OFF")
                 let status_str = if item.enabled { "ACTIVE" } else { "OFF" };
@@ -2985,14 +3012,14 @@ impl Launcher {
             let card_h = 46.0;
             let selected = self.catalog.fm_selected.contains(&entry.rel_path);
             let check_r = [content_x + 6.0, y + 7.0, 32.0, 32.0];
-            let actions_w = if compact { 248.0 } else { 296.0 };
+            let actions_w = if compact { 256.0 } else { 304.0 };
             let open_r = [
                 content_x + 40.0,
                 y,
                 (content_w - 44.0 - actions_w).max(60.0),
                 card_h,
             ];
-            let btn_w = (actions_w - 18.0) / 4.0;
+            let btn_w = (actions_w - 12.0) / 4.0;
             let exp_r = [content_x + content_w - actions_w, y + 8.0, btn_w, 30.0];
             let info_r = [exp_r[0] + btn_w + 4.0, y + 8.0, btn_w, 30.0];
             let ren_r = [info_r[0] + btn_w + 4.0, y + 8.0, btn_w, 30.0];
@@ -3546,7 +3573,7 @@ impl Launcher {
             my3_text(),
             "Horizon Android Update",
         );
-        let badge_text = format!("v1.0.0  ➔  v{}", info.version);
+        let badge_text = format!("v1.0.0  →  v{}", info.version);
         let badge_w = ui.measure(Face::SemiBold, 11.0, &badge_text) + 16.0;
         let badge_r = [title_x, head_y + 24.0, badge_w, 20.0];
         ui.rounded(

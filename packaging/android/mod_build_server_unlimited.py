@@ -28,6 +28,7 @@ import zipfile
 
 ROOT = pathlib.Path(os.environ.get("MOD_BUILD_ROOT", pathlib.Path.home() / "modbuild"))
 SANDBOX = pathlib.Path(__file__).with_name("mod_build_sandbox.sh")
+BIND = os.environ.get("MOD_BUILD_BIND", "127.0.0.1")
 PORT = int(os.environ.get("MOD_BUILD_PORT", "8787"))
 MAX_BODY = 128 << 20
 MAX_MODS = 128
@@ -120,7 +121,10 @@ def split_body(body):
 
 def commit_of(version):
     try:
-        return json.loads((ROOT / "versions.json").read_text())[version]
+        commit = json.loads((ROOT / "versions.json").read_text())[version]
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError("invalid commit sha")
+        return commit
     except (OSError, ValueError, KeyError):
         raise Refused(f"The build server has no game for Horizon {version[:32]}. Update the game.")
 
@@ -322,7 +326,7 @@ def main():
     (ROOT / "jobs").mkdir(parents=True, exist_ok=True)
     (ROOT / "results").mkdir(parents=True, exist_ok=True)
     threading.Thread(target=worker, daemon=True).start()
-    http.server.ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    http.server.ThreadingHTTPServer((BIND, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

@@ -1145,7 +1145,9 @@ impl Game<'_> {
     /// Once a tick, in every `Game`: the window's (in single player, on LAN
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
-    pub(super) fn native_tick(&mut self) {}
+    pub(super) fn native_tick(&mut self) {
+        super::android_bundled::native_tick(self);
+    }
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
     pub(super) fn native_block_highlight(
@@ -1164,6 +1166,7 @@ impl Game<'_> {
         rims: &mut Vec<NativeBlockRim>,
         lights: &mut Vec<NativeColoredLight>,
     ) {
+        super::android_bundled::native_visuals(self, rims, lights);
         let _ = (rims, lights);
     }
     /// At most 32 pairs of already-loaded base and transparent overlay sprites.
@@ -1230,6 +1233,7 @@ impl Game<'_> {
     /// `native_fill` and `native_text`. Skip a corner `native_corner_shown`
     /// says is taken.
     pub(super) fn native_hud(&mut self, batch: &mut HudBatch, corners: &mut Corners) {
+        super::android_bundled::native_hud(self, batch, corners);
         let _ = (batch, corners);
     }
     /// A player right-clicks the entity `entity` (`Entity.getId`) of type
@@ -1326,6 +1330,7 @@ impl Game<'_> {
     /// Horizon scales the sum by Distortion Effects and bounds it
     /// (`native_shake_matrix`). API @API:native_camera_shake@.
     pub(super) fn native_camera_shake(&self, partial: f32, shake: &mut NativeShake) {
+        super::android_bundled::native_camera_shake(self, partial, shake);
         let _ = (partial, shake);
     }
     /// Before one first-person hand and its displayed stack are drawn (RenderHandEvent).
@@ -1985,6 +1990,7 @@ impl Game<'_> {
     /// codes. Asked each frame the tooltip shows, never for one the stack
     /// hides. API 12.
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
+        super::android_bundled::native_tooltip(self, stack, lines);
         let _ = (stack, lines);
     }
     /// Client-side image component for this stack's tooltip. Answer its width/height
@@ -2042,6 +2048,7 @@ impl Game<'_> {
         face: [i32; 3],
         claimed: &mut bool,
     ) {
+        super::android_bundled::native_use_item_on(self, stack, pos, face, claimed);
         let _ = (stack, pos, face, claimed);
     }
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
@@ -2069,6 +2076,7 @@ impl Game<'_> {
     /// hand swings and the item's own use doesn't run. Server-side, for every
     /// player of the world; an item on cooldown is never used. API 13.
     pub(super) fn native_use_item(&mut self, stack: &ItemStack, claimed: &mut bool) {
+        super::android_bundled::native_use_item(self, stack, claimed);
         let _ = (stack, claimed);
     }
     /// `Item.getUseDuration` of `stack`, in ticks: `duration` arrives with
@@ -2156,6 +2164,7 @@ impl Game<'_> {
         state: BlockStateId,
         canceled: &mut bool,
     ) {
+        super::android_bundled::native_destroy_block(self, pos, state, canceled);
         let _ = (pos, state, canceled);
     }
     /// A player placed `stack` as the block `state` at `pos`: where
@@ -4290,62 +4299,10 @@ impl Game<'_> {
                 native: Some(page),
             });
         }
-        #[cfg(target_os = "android")]
-        let built = super::native_builds::running_build_info().unwrap_or_default();
-        #[cfg(not(target_os = "android"))]
-        let built = std::fs::read_to_string(Self::options_path().with_file_name("native-mods.json"))
-            .unwrap_or_default();
-        let info: serde_json::Value = serde_json::from_str(&built).unwrap_or_default();
-        let in_build = |id: &str| {
-            info["mods"]
-                .as_array()
-                .is_some_and(|arr| arr.iter().any(|m| m["id"] == id))
-        };
-        let base_dir = Self::options_path();
-        let mut paths = Vec::new();
-        for folder in [
-            base_dir.with_file_name(horizon_client::mod_list::NATIVE_DIR),
-            base_dir.with_file_name(horizon_client::mod_list::DIR),
-            horizon_client::logging::private_home().join(horizon_client::mod_list::NATIVE_DIR),
-            horizon_client::logging::private_home().join(horizon_client::mod_list::DIR),
-        ] {
-            if let Ok(rd) = std::fs::read_dir(&folder) {
-                paths.extend(rd.flatten().map(|e| e.path()));
-            }
-        }
-        paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
-        paths.sort();
-        for path in paths {
-            let Ok(bundle) = horizon_mods::index::native::Bundle::read(&path) else {
-                continue;
-            };
-            let m = bundle.manifest;
-            let listed = self.settings.mods.installed.iter().any(|row| row.id == m.id);
-            if !listed && !in_build(&m.id) {
-                self.settings.mods.installed.push(Installed {
-                    title: format!("{} {}", m.id, m.version),
-                    id: m.id,
-                    description: String::new(),
-                    problem: Some(horizon_client::mod_list::NOT_BUILT.to_owned()),
-                    dev: false,
-                    has_settings: false,
-                    native: None,
-                });
-            }
-        }
-        #[cfg(target_os = "android")]
-        {
-            self.offer_compile();
-            self.list_native_builds_row();
-        }
     }
     /// A click on button `button` of native mod `i`'s page (its index in
     /// Options > Mods), and the page's labels after it.
     pub(super) fn native_settings_event(&mut self, i: usize, button: usize) {
-        #[cfg(target_os = "android")]
-        if self.native_builds_button(i) {
-            return;
-        }
         let Some(id) = self.settings.mods.installed.get(i).map(|m| m.id.clone()) else {
             return;
         };
@@ -4355,13 +4312,6 @@ impl Game<'_> {
     /// Native mod `i`'s page opened: its labels asked again, so that they
     /// follow the language (and the mod's state) since the list was made.
     pub(super) fn native_settings_refresh(&mut self, i: usize) {
-        #[cfg(target_os = "android")]
-        if self.settings.mods.installed.get(i).is_some_and(|m| {
-            m.id == "horizon-native-builds"
-                || m.problem.as_deref() == Some(horizon_client::mod_list::NOT_BUILT)
-        }) {
-            return;
-        }
         let Some(id) = self.settings.mods.installed.get(i).map(|m| m.id.clone()) else {
             return;
         };

@@ -100,6 +100,10 @@ pub struct Editor {
     pub duplicate_name_confirm_open: bool,
     /// Pending `(target_id, name, description)` when replacing an existing preset with the same name.
     pub duplicate_conflict_target: Option<(String, String, String)>,
+    /// True when the user is typing a custom button name in the Property Inspector.
+    pub editing_button_label: bool,
+    /// Buffer for the custom button name being typed.
+    pub button_label_input: String,
 }
 
 enum Drag {
@@ -153,6 +157,8 @@ impl TouchControls {
             back_confirm_open: false,
             duplicate_name_confirm_open: false,
             duplicate_conflict_target: None,
+            editing_button_label: false,
+            button_label_input: String::new(),
         });
     }
     pub fn cancel_editor(&mut self) {

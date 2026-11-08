@@ -736,8 +736,26 @@ pub fn sync_mods_folder(profile_root: &Path) {
         return;
     }
 
-    // 1. Mirror any .hnmod / .hmod / .jar files from horizon-native-mods/ into horizon-mods/
+    // 1. Auto-compile any raw .jar or standalone .hnmod files in horizon-mods/ and horizon-native-mods/
     let native_dir = profile_root.join("horizon-native-mods");
+    let _ = fs::create_dir_all(&native_dir);
+    if let Ok(rd) = fs::read_dir(&mods_dir) {
+        for entry in rd.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_symlink() || !ft.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let Some(name_str) = path.file_name().and_then(|s| s.to_str()) else { continue };
+            let lower = name_str.to_ascii_lowercase();
+            #[cfg(target_os = "android")]
+            if lower.ends_with(".jar") {
+                let _ = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&path, profile_root);
+            } else if lower.ends_with(".hnmod") {
+                let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&path, profile_root);
+            }
+        }
+    }
     if fs::symlink_metadata(&native_dir).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) {
         if let Ok(rd) = fs::read_dir(&native_dir) {
             for entry in rd.flatten() {
@@ -745,16 +763,13 @@ pub fn sync_mods_folder(profile_root: &Path) {
                 if ft.is_symlink() || !ft.is_file() {
                     continue;
                 }
-                let fname = entry.file_name();
-                let Some(name_str) = fname.to_str() else { continue };
-                if validate_entry_name(name_str).is_err() {
-                    continue;
-                }
+                let path = entry.path();
+                let Some(name_str) = path.file_name().and_then(|s| s.to_str()) else { continue };
                 let lower = name_str.to_ascii_lowercase();
-                if lower.ends_with(".hnmod") || lower.ends_with(".hmod") || lower.ends_with(".jar") {
-                    let dst = mods_dir.join(name_str);
-                    if !dst.exists() {
-                        let _ = fs::copy(entry.path(), &dst);
+                #[cfg(target_os = "android")]
+                if lower.ends_with(".jar") {
+                    if horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&path, profile_root).is_ok() {
+                        let _ = fs::remove_file(&path);
                     }
                 }
             }
@@ -762,8 +777,8 @@ pub fn sync_mods_folder(profile_root: &Path) {
     }
 
     // 2. Sync enabled built-in Horizon mods (ANDROID_BUNDLED) and any enabled mod IDs in horizon-mods.txt
-    let on = horizon_client::mod_list::ModList::load(profile_root);
-    for &(b_id, b_title, b_desc) in &horizon_client::mod_list::ANDROID_BUNDLED {
+    let on = crate::mod_list::ModList::load(profile_root);
+    for &(b_id, b_title, b_desc) in &crate::mod_list::ANDROID_BUNDLED {
         let descriptor = mods_dir.join(format!("{b_id}.mod.json"));
         if on.enabled.contains(b_id) && !on.disabled.contains(b_id) {
             if !descriptor.exists() {
@@ -1104,7 +1119,7 @@ pub fn fm_delete(
                 .or_else(|| mod_file.strip_suffix(".hmod"))
                 .or_else(|| mod_file.strip_suffix(".jar"))
                 .unwrap_or(mod_file);
-            let mut on = horizon_client::mod_list::ModList::load(profile_root);
+            let mut on = crate::mod_list::ModList::load(profile_root);
             if on.enabled.remove(mod_id) || mod_file.ends_with(".mod.json") {
                 on.disabled.insert(mod_id.to_owned());
                 on.save(profile_root);

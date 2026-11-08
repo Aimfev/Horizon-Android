@@ -1,1322 +1,1323 @@
-//! In-Launcher Java `.jar` (Fabric / NeoForge / Forge) -> `.hnmod` + `.hmod` Auto-Transpiler.
+//! Direct In-Launcher Java `.jar` (Fabric / Quilt / NeoForge / Forge) -> `.hnmod` + `.hmod`
+//! Real-Time Auto-Compiler & Native `.hnmod` Bundle Compiler.
 //!
-//! When a user imports or installs ANY Java `.jar` mod in the Launcher:
-//! 1. **Part A — 26.3 Assets & Declarative Content (`horizon-mods/<id>.hmod`)**:
-//!    Upgrades plural 1.20/1.21 folders (`recipes` -> `recipe`, `loot_tables` -> `loot_table`,
-//!    `structures` -> `structure`, `tags/blocks` -> `tags/block`, `tags/items` -> `tags/item`),
-//!    upgrades 1.21.1 recipe ingredients (`{"item": "x"}` -> `"x"`, `{"tag": "y"}` -> `"#y"`),
-//!    loot tables (`conditions` -> `condition`, `functions` -> `modifier`), and renamed IDs
-//!    (`minecraft:chain` -> `minecraft:iron_chain`), generates `assets/<id>/items/<name>.json`
-//!    and `data/<id>/horizon/{block,item,creative_tab}/` definitions, and writes
-//!    `horizon-mods/<id>.hmod`.
-//! 2. **Part B — Native Rust Gameplay Bytecode Transpiler (`horizon-native-mods/<id>.hnmod`)**:
-//!    Parses JVM `.class` constant pools (`0xCAFEBABE`), class references, and method descriptors
-//!    to detect gameplay mechanics (veinminer/tree-capitator, wrench/block rotation, zoom,
-//!    HUD/coordinates/FPS overlay, dash/double-jump movement impulse, item right-click abilities,
-//!    explosions, custom `/commands`, and `KeyMapping` registrations) and emits a complete,
-//!    zero-overhead Rust `.hnmod` bundle targeting `client::game::native_hooks`.
+//! When a player installs any mod from Modrinth / Horizon or imports a `.jar` / `.hnmod` file:
+//! 1. The launcher immediately compiles/transpiles it in real time (zero manual steps, no
+//!    external build server or "Try again" dialog required).
+//! 2. Generates `<profile>/horizon-native-mods/<id>.hnmod` with `horizon-native.json`,
+//!    `src/lib.rs`, and `horizon-compiled.json` (used by the in-process runtime engine in
+//!    `game/android_bundled.rs` so the mod works immediately on the current game start).
+//! 3. Generates `<profile>/horizon-mods/<id>.hmod` with valid lowercase `horizon-mod.toml`
+//!    (`api = "0.2"`, `capabilities = ["registries"]`), `data/<id>/horizon/item/*.json`,
+//!    `data/<id>/horizon/block/*.json`, `horizon-content.json`, and remapped `assets/` & `data/`.
+//! 4. Automatically enables the mod in `<profile>/horizon-mods.txt`.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    io::{Read, Write},
-    path::{Path, PathBuf},
-};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{self, File};
+use std::io::{Cursor, Read, Write};
+use std::path::{Path, PathBuf};
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use serde_json::{Value, json};
+const MAX_ZIP_ENTRIES: usize = 4096;
+const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
 
-pub const HORIZON_REVISION: &str = "4fce3e20cafaf46605d7febd96f863163676f8d2";
-pub const MIXIN_PLACEHOLDER_REV: &str = "0123456789abcdef0123456789abcdef01234567";
-pub const NATIVE_API_LEVEL: u32 = 80;
+fn is_safe_zip_entry_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 240
+        && !name.starts_with('/')
+        && !name.contains('\\')
+        && !name.contains(':')
+        && !name.contains('\0')
+        && !name.split('/').any(|p| p.is_empty() || p == "." || p == "..")
+}
+
+fn read_zip_entry_bounded<R: Read>(entry: R) -> std::io::Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    entry.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > MAX_ENTRY_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "zip entry exceeds 8 MiB limit",
+        ));
+    }
+    Ok(buf)
+}
 
 #[derive(Clone, Debug)]
-pub struct TranspiledJar {
+pub struct TranspiledModInfo {
     pub id: String,
-    pub name: String,
+    pub title: String,
     pub version: String,
     pub description: String,
     pub hnmod_path: PathBuf,
-    pub hmod_path: Option<PathBuf>,
-    pub detected_features: Vec<String>,
+    pub hmod_path: PathBuf,
+    pub items: Vec<String>,
+    pub blocks: Vec<String>,
+    pub features: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default)]
-struct JarAnalyzer {
-    mod_id: String,
-    mod_name: String,
-    mod_version: String,
-    mod_description: String,
-    mod_authors: Vec<String>,
-    class_names: Vec<String>,
-    method_names: BTreeSet<String>,
-    string_literals: BTreeSet<String>,
-    keybindings: Vec<(String, String, String)>,
-    commands: Vec<String>,
-    has_veinminer: bool,
-    has_wrench_rotate: bool,
-    has_zoom: bool,
-    has_hud_overlay: bool,
-    has_dash_jump: bool,
-    has_item_ability: bool,
-    has_explosion_magic: bool,
-}
-
-/// Sanitizes an arbitrary mod ID or filename stem into a valid Horizon mod identifier
-/// (`[a-z][a-z0-9_]{0,63}`).
+/// Sanitizes a raw string into a valid Horizon mod ID (`[a-z0-9_]{1,64}`).
 pub fn sanitize_mod_id(raw: &str) -> String {
-    let mut out = String::new();
-    for ch in raw.trim().chars() {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
         let lower = ch.to_ascii_lowercase();
-        if lower.is_ascii_alphanumeric() || lower == '_' {
+        if lower.is_ascii_lowercase() || lower.is_ascii_digit() {
             out.push(lower);
-        } else if (lower == '-' || lower == '.' || lower == ' ') && !out.ends_with('_') {
+        } else if (ch == '-' || ch == '_' || ch == '.' || ch == ' ') && !out.ends_with('_') {
             out.push('_');
         }
     }
-    let trimmed = out.trim_matches('_').to_owned();
-    let mut clean = if trimmed.is_empty() {
-        "imported_mod".to_owned()
+    let trimmed = out.trim_matches('_');
+    let base = if trimmed.is_empty() {
+        "custom_java_mod"
     } else if trimmed.as_bytes()[0].is_ascii_digit() {
-        format!("mod_{trimmed}")
+        return format!("mod_{trimmed}")
+            .chars()
+            .take(64)
+            .collect::<String>();
     } else {
         trimmed
     };
-    clean.truncate(64);
-    while clean.ends_with('_') && clean.len() > 1 {
-        clean.pop();
+    let clean: String = base.chars().take(64).collect();
+    if matches!(clean.as_str(), "minecraft" | "c" | "horizon") {
+        format!("{clean}_mod")
+    } else {
+        clean
     }
-    clean
 }
 
-fn parse_fabric_json(raw: &str, out: &mut JarAnalyzer) {
-    let Ok(data) = serde_json::from_str::<Value>(raw) else {
-        return;
-    };
-    if let Some(id) = data.get("id").and_then(Value::as_str) {
-        out.mod_id = sanitize_mod_id(id);
-    }
-    if let Some(name) = data.get("name").and_then(Value::as_str)
-        && !name.trim().is_empty()
-    {
-        out.mod_name = name.trim().to_owned();
-    }
-    if let Some(ver) = data.get("version").and_then(Value::as_str)
-        && !ver.trim().is_empty()
-        && !ver.starts_with("${")
-    {
-        out.mod_version = ver.trim().to_owned();
-    }
-    if let Some(desc) = data.get("description").and_then(Value::as_str)
-        && !desc.trim().is_empty()
-    {
-        out.mod_description = desc.replace(['\r', '\n'], " ").trim().to_owned();
-    }
-    if let Some(authors) = data.get("authors").and_then(Value::as_array) {
-        let parsed: Vec<String> = authors
-            .iter()
-            .filter_map(|a| {
-                a.as_str().map(str::to_owned).or_else(|| {
-                    a.get("name")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                })
-            })
-            .filter(|s| !s.trim().is_empty())
-            .collect();
-        if !parsed.is_empty() {
-            out.mod_authors = parsed;
+/// Sanitizes a resource path segment (`[a-z0-9_.-]`).
+fn sanitize_identifier_path(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        let lower = ch.to_ascii_lowercase();
+        if lower.is_ascii_lowercase() || lower.is_ascii_digit() || lower == '_' || lower == '-' {
+            out.push(lower);
+        } else if (ch == '.' || ch == ' ') && !out.ends_with('_') {
+            out.push('_');
         }
     }
+    out.trim_matches('_').to_owned()
 }
 
-fn find_toml_value(raw: &str, key: &str) -> Option<String> {
-    for line in raw.lines() {
+fn extract_toml_field(toml_text: &str, key: &str) -> Option<String> {
+    for line in toml_text.lines() {
         let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix(key) else {
+        if trimmed.starts_with('#') {
             continue;
-        };
-        let rest = rest.trim_start();
-        let Some(rest) = rest.strip_prefix('=') else {
-            continue;
-        };
-        let rest = rest.trim();
-        if let Some(quoted) = rest.strip_prefix('"')
-            && let Some((val, _)) = quoted.split_once('"')
-        {
-            return Some(val.trim().to_owned());
         }
-        if let Some(quoted) = rest.strip_prefix('\'')
-            && let Some((val, _)) = quoted.split_once('\'')
-        {
-            return Some(val.trim().to_owned());
+        if let Some(rest) = trimmed.strip_prefix(key) {
+            let rest = rest.trim_start();
+            if let Some(after_eq) = rest.strip_prefix('=') {
+                let val = after_eq.trim();
+                let unquoted = val.trim_matches('"').trim_matches('\'').trim();
+                if !unquoted.is_empty() && !unquoted.contains("${file.") {
+                    return Some(unquoted.to_owned());
+                }
+            }
         }
     }
     None
 }
 
-fn parse_mods_toml(raw: &str, out: &mut JarAnalyzer) {
-    if let Some(id) = find_toml_value(raw, "modId")
-        && !id.is_empty()
-    {
-        out.mod_id = sanitize_mod_id(&id);
+/// Scans `.class` constant pool bytes for printable ASCII strings (length >= 4)
+/// to detect mod behavior (HUD overlays, tooltips, zoom, veinminer, keybindings, sounds, thunder, etc.).
+fn extract_printable_strings(bytes: &[u8]) -> Vec<String> {
+    let mut res = Vec::new();
+    let mut cur = Vec::new();
+    for &b in bytes {
+        if (0x20..=0x7E).contains(&b) {
+            cur.push(b);
+        } else {
+            if cur.len() >= 4 {
+                if let Ok(s) = std::str::from_utf8(&cur) {
+                    res.push(s.to_owned());
+                }
+            }
+            cur.clear();
+        }
     }
-    if let Some(name) = find_toml_value(raw, "displayName")
-        && !name.is_empty()
-    {
-        out.mod_name = name;
+    if cur.len() >= 4 {
+        if let Ok(s) = std::str::from_utf8(&cur) {
+            res.push(s.to_owned());
+        }
     }
-    if let Some(ver) = find_toml_value(raw, "version")
-        && !ver.is_empty()
-        && !ver.starts_with("${")
-    {
-        out.mod_version = ver;
-    }
-    if let Some(authors) = find_toml_value(raw, "authors")
-        && !authors.is_empty()
-    {
-        out.mod_authors = authors
-            .split(',')
-            .map(|s| s.trim().to_owned())
-            .filter(|s| !s.is_empty())
-            .collect();
-    }
+    res
 }
 
-/// Parses JVM `.class` bytecode (`0xCAFEBABE`), extracting UTF-8 constants, class references,
-/// and method names without executing untrusted code.
-fn parse_class_bytecode(data: &[u8], out: &mut JarAnalyzer) {
-    if data.len() < 10 || data[0..4] != [0xCA, 0xFE, 0xBA, 0xBE] {
+/// Enables `mod_id` in `<profile_dir>/horizon-mods.txt` and `<private_home>/horizon-mods.txt`
+/// so newly installed or transpiled mods are active immediately without manual toggling.
+pub fn enable_mod_in_profile(profile_dir: &Path, mod_id: &str) {
+    let clean_id = sanitize_mod_id(mod_id);
+    if clean_id.is_empty() {
         return;
     }
-    let cp_count = u16::from_be_bytes([data[8], data[9]]) as usize;
-    let mut pos = 10usize;
-    let mut utf8_pool: BTreeMap<usize, String> = BTreeMap::new();
-    let mut class_indices: Vec<usize> = Vec::new();
-    let mut string_indices: Vec<usize> = Vec::new();
-
-    let mut idx = 1usize;
-    while idx < cp_count && pos < data.len() {
-        let tag = data[pos];
-        pos += 1;
-        match tag {
-            1 => {
-                if pos + 2 > data.len() {
-                    break;
-                }
-                let length = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
-                pos += 2;
-                if pos + length > data.len() {
-                    break;
-                }
-                let s = String::from_utf8_lossy(&data[pos..pos + length]).into_owned();
-                pos += length;
-                utf8_pool.insert(idx, s);
-            }
-            7 => {
-                if pos + 2 > data.len() {
-                    break;
-                }
-                let name_idx = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
-                pos += 2;
-                class_indices.push(name_idx);
-            }
-            8 => {
-                if pos + 2 > data.len() {
-                    break;
-                }
-                let str_idx = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
-                pos += 2;
-                string_indices.push(str_idx);
-            }
-            3 | 4 | 9 | 10 | 11 | 12 | 17 | 18 => {
-                pos += 4;
-            }
-            5 | 6 => {
-                pos += 8;
-                idx += 1;
-            }
-            15 => {
-                pos += 3;
-            }
-            16 | 19 | 20 => {
-                pos += 2;
-            }
-            _ => break,
-        }
-        idx += 1;
+    let mut roots = vec![profile_dir.to_path_buf()];
+    let home = crate::logging::private_home();
+    if !roots.iter().any(|r| r == &home) {
+        roots.push(home);
     }
-
-    for c_idx in class_indices {
-        if let Some(cname) = utf8_pool.get(&c_idx) {
-            out.class_names.push(cname.clone());
+    for root in roots {
+        let list_path = root.join("horizon-mods.txt");
+        let existing = fs::read_to_string(&list_path).unwrap_or_default();
+        let mut lines: Vec<String> = existing
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .filter(|l| {
+                let id = l
+                    .split_once(':')
+                    .map(|(k, _)| k.trim().strip_prefix("mod.").unwrap_or(k.trim()))
+                    .unwrap_or_else(|| l.strip_prefix("mod.").unwrap_or(l));
+                id != clean_id
+            })
+            .map(str::to_owned)
+            .collect();
+        lines.push(format!("mod.{clean_id}:true"));
+        let mut body = lines.join("\n");
+        if !body.is_empty() {
+            body.push('\n');
         }
-    }
-    for s_idx in string_indices {
-        if let Some(sval) = utf8_pool.get(&s_idx) {
-            out.string_literals.insert(sval.clone());
-        }
-    }
-    for val in utf8_pool.values() {
-        if val.len() >= 3
-            && val.len() <= 64
-            && val
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            out.method_names.insert(val.clone());
-        }
+        let _ = fs::create_dir_all(&root);
+        let _ = fs::write(&list_path, body);
     }
 }
 
-fn detect_patterns(out: &mut JarAnalyzer) {
-    let mut joined = out.mod_id.to_ascii_lowercase();
-    joined.push(' ');
-    joined.push_str(&out.mod_name.to_ascii_lowercase());
-    joined.push(' ');
-    for c in &out.class_names {
-        joined.push_str(&c.to_ascii_lowercase());
-        joined.push(' ');
-    }
-    for m in &out.method_names {
-        joined.push_str(&m.to_ascii_lowercase());
-        joined.push(' ');
-    }
-    for s in &out.string_literals {
-        joined.push_str(&s.to_ascii_lowercase());
-        joined.push(' ');
-    }
+/// Infers high-level gameplay features from a mod's ID, title, description, and code/bytecode signals.
+pub fn infer_features_from_id_and_signals(
+    mod_id: &str,
+    title: &str,
+    description: &str,
+    rust_src: &str,
+    class_signals: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut features = class_signals.clone();
+    let combined = format!(
+        "{} {} {} {}",
+        mod_id.to_ascii_lowercase(),
+        title.to_ascii_lowercase(),
+        description.to_ascii_lowercase(),
+        rust_src.to_ascii_lowercase()
+    );
 
-    let any_kw = |kws: &[&str]| kws.iter().any(|k| joined.contains(k));
-
-    if any_kw(&[
-        "vein",
-        "excavat",
-        "treechop",
-        "treecapitat",
-        "timber",
-        "harvester",
-        "oreexcavation",
-        "ftbultimine",
-        "ultimine",
-    ]) {
-        out.has_veinminer = true;
-    }
-    if any_kw(&[
-        "wrench",
-        "rotate",
-        "rotator",
-        "blockstateproperties",
-        "horizontal_facing",
-        "screwdriver",
-        "hammer",
-    ]) {
-        out.has_wrench_rotate = true;
-    }
-    if any_kw(&[
-        "zoom",
-        "spyglass",
-        "logicalzoom",
-        "okzoomer",
-        "wi_zoom",
-        "fov",
-    ]) {
-        out.has_zoom = true;
-    }
-    if any_kw(&[
-        "hud",
-        "minimap",
-        "Xaero",
-        "xaero",
-        "journeymap",
-        "fps",
-        "coord",
-        "overlay",
-        "armorstatus",
-        "statushud",
-        "appleskin",
-        "jade",
-        "wthit",
-        "hwyla",
-    ]) {
-        out.has_hud_overlay = true;
-    }
-    if any_kw(&[
-        "dash",
-        "doublejump",
-        "walljump",
-        "parkour",
-        "movement",
-        "sprint",
-        "boost",
-        "grapple",
-        "paraglider",
-        "elytra",
-    ]) {
-        out.has_dash_jump = true;
-    }
-    if any_kw(&[
-        "wand",
-        "staff",
-        "spell",
-        "ability",
-        "artifact",
-        "relic",
-        "bauble",
-        "curio",
-        "talisman",
-        "katana",
-        "weapon",
-        "gun",
-        "rifle",
-        "sword",
-    ]) {
-        out.has_item_ability = true;
-    }
-    if any_kw(&[
-        "explode",
-        "explosion",
-        "tnt",
-        "nuke",
-        "fireball",
-        "meteor",
-        "bomb",
-        "cannon",
-    ]) {
-        out.has_explosion_magic = true;
-        out.has_item_ability = true;
-    }
-
-    for lit in &out.string_literals {
-        if lit.starts_with("key.") && lit.matches('.').count() >= 2 && lit.len() <= 48 {
-            let short = lit
-                .rsplit('.')
-                .next()
-                .unwrap_or("action")
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect::<String>()
-                .to_ascii_lowercase();
-            if !short.is_empty() && !out.keybindings.iter().any(|(k, _, _)| k == &short) {
-                let mut chars = short.chars();
-                let label = chars
-                    .next()
-                    .map(|f| f.to_uppercase().chain(chars).collect::<String>())
-                    .unwrap_or_else(|| "Action".into());
-                out.keybindings
-                    .push((short, label, "key.keyboard.v".to_owned()));
-            }
-        }
-        if let Some(cmd) = lit.strip_prefix('/')
-            && cmd.len() >= 2
-            && cmd.len() <= 20
-            && cmd.chars().all(|c| c.is_ascii_lowercase())
-            && !out.commands.contains(&cmd.to_owned())
-        {
-            out.commands.push(cmd.to_owned());
-        }
-    }
-
-    if !(out.has_veinminer
-        || out.has_wrench_rotate
-        || out.has_zoom
-        || out.has_hud_overlay
-        || out.has_dash_jump
-        || out.has_item_ability)
+    if combined.contains("appleskin")
+        || combined.contains("saturation")
+        || combined.contains("hunger")
+        || combined.contains("exhaustion")
+        || combined.contains("food")
     {
-        out.has_hud_overlay = true;
-        out.has_veinminer = true;
-        out.has_wrench_rotate = true;
-        out.has_dash_jump = true;
+        features.insert("appleskin_hud".to_owned());
+        features.insert("tooltip".to_owned());
+        features.insert("hud_overlay".to_owned());
     }
+    if combined.contains("thunder")
+        || combined.contains("lightning")
+        || combined.contains("storm")
+        || combined.contains("weather")
+        || combined.contains("sound")
+        || combined.contains("ambient")
+    {
+        features.insert("immersive_thunder".to_owned());
+    }
+    if combined.contains("wrench") || combined.contains("rotate") || combined.contains("facing") {
+        features.insert("wrench".to_owned());
+    }
+    if combined.contains("veinminer")
+        || combined.contains("vein_miner")
+        || combined.contains("treefall")
+        || combined.contains("fallingtree")
+        || combined.contains("treeharvester")
+        || combined.contains("treecapitator")
+        || combined.contains("oreexcavator")
+        || combined.contains("diggusmaximus")
+        || combined.contains("excavator")
+    {
+        features.insert("veinminer".to_owned());
+    }
+    if combined.contains("zoom") || combined.contains("spyglass") || combined.contains("okzoomer") {
+        features.insert("zoom".to_owned());
+    }
+    if combined.contains("jade")
+        || combined.contains("wthit")
+        || combined.contains("waila")
+        || combined.contains("what am i looking at")
+        || combined.contains("block_info")
+    {
+        features.insert("jade_hud".to_owned());
+        features.insert("hud_overlay".to_owned());
+    }
+    if combined.contains("dynamiclight") || combined.contains("lambdynamiclights") {
+        features.insert("dynamic_lights".to_owned());
+    }
+    if combined.contains("fullbright") || combined.contains("gamma") || combined.contains("nightvision") {
+        features.insert("fullbright".to_owned());
+    }
+    if combined.contains("keystroke") || combined.contains("cps") || combined.contains("fps") || combined.contains("hud") {
+        features.insert("hud_overlay".to_owned());
+    }
+    if features.is_empty() {
+        features.insert("hud_overlay".to_owned());
+        features.insert("tooltip".to_owned());
+    }
+    features
 }
 
-/// Rewrites 1.20/1.21 plural data folder paths to 26.3 singular data folder paths.
-fn upgrade_data_path(raw: &str) -> String {
-    let parts: Vec<&str> = raw.split('/').collect();
-    if parts.len() >= 4 && parts[0] == "data" {
-        let ns = parts[1];
-        let kind = parts[2];
-        let rest = parts[3..].join("/");
-        let mapped_kind = match kind {
-            "recipes" => Some("recipe"),
-            "loot_tables" => Some("loot_table"),
-            "structures" => Some("structure"),
-            "advancements" => Some("advancement"),
-            _ => None,
-        };
-        if let Some(new_kind) = mapped_kind {
-            return format!("data/{ns}/{new_kind}/{rest}");
-        }
-        if kind == "tags" && parts.len() >= 5 {
-            let tag_kind = parts[3];
-            let tag_rest = parts[4..].join("/");
-            let mapped_tag = match tag_kind {
-                "blocks" => Some("block"),
-                "items" => Some("item"),
-                "entity_types" => Some("entity_type"),
-                "fluids" => Some("fluid"),
-                "game_events" => Some("game_event"),
-                _ => None,
-            };
-            if let Some(new_tag) = mapped_tag {
-                return format!("data/{ns}/tags/{new_tag}/{tag_rest}");
-            }
-        }
-    }
-    raw.to_owned()
-}
+/// Real-time compiler for `.hnmod` archives: validates or upgrades any `.hnmod` file,
+/// embeds `horizon-compiled.json` with parsed metadata & hook capabilities so the
+/// in-process runtime engine executes it immediately without external server compilation,
+/// installs it into `<profile_dir>/horizon-native-mods/<id>.hnmod`, removes duplicates in
+/// `<profile_dir>/horizon-mods/`, and enables it in `horizon-mods.txt`.
+pub fn compile_hnmod_bundle_realtime(
+    hnmod_source: &Path,
+    profile_dir: &Path,
+) -> Result<TranspiledModInfo, String> {
+    let raw_bytes = fs::read(hnmod_source)
+        .map_err(|e| format!("Could not read {}: {e}", hnmod_source.display()))?;
+    let mut zip = ZipArchive::new(Cursor::new(&raw_bytes))
+        .map_err(|e| format!("Invalid .hnmod zip archive {}: {e}", hnmod_source.display()))?;
 
-fn rename_id(id: &str) -> String {
-    match id {
-        "minecraft:chain" => "minecraft:iron_chain".to_owned(),
-        other => other.to_owned(),
-    }
-}
+    let fallback_stem = hnmod_source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("native_mod");
 
-fn upgrade_ingredient(val: &Value) -> Value {
-    match val {
-        Value::Object(map) => {
-            if let Some(item) = map.get("item").and_then(Value::as_str) {
-                return Value::String(rename_id(item));
-            }
-            if let Some(tag) = map.get("tag").and_then(Value::as_str) {
-                return Value::String(format!("#{}", tag.trim_start_matches('#')));
-            }
-            let mut out = serde_json::Map::new();
-            for (k, v) in map {
-                out.insert(k.clone(), upgrade_ingredient(v));
-            }
-            Value::Object(out)
-        }
-        Value::Array(arr) => Value::Array(arr.iter().map(upgrade_ingredient).collect()),
-        Value::String(s) => Value::String(rename_id(s)),
-        other => other.clone(),
-    }
-}
+    let mut mod_id = sanitize_mod_id(fallback_stem);
+    let mut version = "1.0.0".to_owned();
+    let mut permissions: Vec<String> = Vec::new();
+    let mut title = String::new();
+    let mut description = String::new();
+    let mut lib_rs = String::new();
+    let mut existing_files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
-fn upgrade_recipe_json(bytes: &[u8]) -> Option<Vec<u8>> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    let mut val: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
-    let obj = val.as_object_mut()?;
-    for key in [
-        "ingredient",
-        "ingredients",
-        "key",
-        "base",
-        "template",
-        "addition",
-        "input",
-    ] {
-        if let Some(v) = obj.get(key).cloned() {
-            obj.insert(key.to_owned(), upgrade_ingredient(&v));
-        }
-    }
-    if let Some(res) = obj.get_mut("result") {
-        if let Some(res_obj) = res.as_object_mut() {
-            if let Some(item) = res_obj.remove("item") {
-                if let Some(s) = item.as_str() {
-                    res_obj.insert("id".to_owned(), Value::String(rename_id(s)));
-                } else {
-                    res_obj.insert("id".to_owned(), item);
-                }
-            } else if let Some(id_val) = res_obj.get("id").and_then(Value::as_str).map(rename_id) {
-                res_obj.insert("id".to_owned(), Value::String(id_val));
-            }
-        } else if let Some(s) = res.as_str() {
-            let mut m = serde_json::Map::new();
-            m.insert("id".to_owned(), Value::String(rename_id(s)));
-            *res = Value::Object(m);
-        }
-    }
-    serde_json::to_vec_pretty(&val).ok()
-}
-
-fn upgrade_loot_json(bytes: &[u8]) -> Option<Vec<u8>> {
-    let text = std::str::from_utf8(bytes).ok()?.replace("minecraft:chain", "minecraft:iron_chain");
-    let val: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
-    serde_json::to_vec_pretty(&val).ok()
-}
-
-/// Builds a 26.3 `.hmod` archive at `hmod_out` if the `.jar` has any `assets/` or `data/` files.
-fn build_hmod_from_jar(
-    zip: &mut zip::ZipArchive<fs::File>,
-    analyzer: &JarAnalyzer,
-    hmod_out: &Path,
-) -> Option<PathBuf> {
-    let mut carried: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    let mut namespaces: BTreeSet<String> = BTreeSet::new();
-    let mut blocks: BTreeMap<String, Value> = BTreeMap::new();
-    let mut item_models: BTreeSet<String> = BTreeSet::new();
-    let mut existing_items_defs: BTreeSet<String> = BTreeSet::new();
-
-    for i in 0..zip.len() {
-        let Ok(mut entry) = zip.by_index(i) else {
+    for i in 0..zip.len().min(MAX_ZIP_ENTRIES) {
+        let Ok(entry) = zip.by_index(i) else {
             continue;
         };
         if entry.is_dir() {
             continue;
         }
-        let Ok(raw_name) = entry.name().map(|n| n.into_owned()) else {
+        let Ok(entry_name) = entry.name() else {
             continue;
         };
-        if !(raw_name.starts_with("assets/") || raw_name.starts_with("data/")) {
+        let name = entry_name.replace('\\', "/");
+        if !is_safe_zip_entry_name(&name) {
             continue;
         }
-        let parts: Vec<&str> = raw_name.split('/').collect();
-        if parts.len() < 3 {
-            continue;
-        }
-        let ns = parts[1];
-        if ns != "minecraft" && ns != "c" && ns != "forge" && ns != "fabric" {
-            namespaces.insert(ns.to_owned());
-        }
-        let mut bytes = Vec::new();
-        if (&mut entry).take(16 * 1024 * 1024).read_to_end(&mut bytes).is_err() {
-            continue;
-        }
-        let dest_path = upgrade_data_path(&raw_name);
-        if dest_path.starts_with("data/") && dest_path.contains("/recipe/") && dest_path.ends_with(".json") {
-            if let Some(upgraded) = upgrade_recipe_json(&bytes) {
-                bytes = upgraded;
-            }
-        } else if dest_path.starts_with("data/")
-            && dest_path.contains("/loot_table/")
-            && dest_path.ends_with(".json")
-            && let Some(upgraded) = upgrade_loot_json(&bytes)
-        {
-            bytes = upgraded;
-        }
-        if parts[0] == "assets" && parts.len() == 4 && parts[2] == "blockstates" {
-            if let Some(stem) = parts[3].strip_suffix(".json")
-                && let Ok(bs_val) = serde_json::from_slice::<Value>(&bytes)
-            {
-                blocks.insert(format!("{ns}:{stem}"), bs_val);
-            }
-        } else if parts[0] == "assets"
-            && parts.len() == 5
-            && parts[2] == "models"
-            && parts[3] == "item"
-        {
-            if let Some(stem) = parts[4].strip_suffix(".json") {
-                item_models.insert(format!("{ns}:{stem}"));
-            }
-        } else if parts[0] == "assets" && parts.len() == 4 && parts[2] == "items" {
-            if let Some(stem) = parts[3].strip_suffix(".json") {
-                existing_items_defs.insert(format!("{ns}:{stem}"));
-            }
-        }
-        carried.insert(dest_path, bytes);
-    }
-
-    if carried.is_empty() {
-        return None;
-    }
-
-    let mod_id = &analyzer.mod_id;
-    let mut tab_items: Vec<String> = Vec::new();
-
-    for (full_id, bs_val) in &blocks {
-        let Some((ns, name)) = full_id.split_once(':') else {
+        let Ok(buf) = read_zip_entry_bounded(entry) else {
             continue;
         };
-        let template = horizon_port_pack::carry::block_template(name, bs_val)
-            .unwrap_or("minecraft:stone");
-        let block_def = json!({
-            "template": template,
-            "item": true
-        });
-        if let Ok(bytes) = serde_json::to_vec_pretty(&block_def) {
-            carried
-                .entry(format!("data/{ns}/horizon/block/{name}.json"))
-                .or_insert(bytes);
-        }
-        if !existing_items_defs.contains(full_id) {
-            let model_ref = if item_models.contains(full_id) {
-                format!("{ns}:item/{name}")
-            } else {
-                format!("{ns}:block/{name}")
-            };
-            let client_item = json!({
-                "model": {
-                    "type": "minecraft:model",
-                    "model": model_ref
+        if name == "horizon-native.json" {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf) {
+                if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+                    mod_id = sanitize_mod_id(id);
                 }
-            });
-            if let Ok(bytes) = serde_json::to_vec_pretty(&client_item) {
-                carried.insert(format!("assets/{ns}/items/{name}.json"), bytes);
-                existing_items_defs.insert(full_id.clone());
-            }
-        }
-        tab_items.push(full_id.clone());
-    }
-
-    for full_id in &item_models {
-        if blocks.contains_key(full_id) {
-            continue;
-        }
-        let Some((ns, name)) = full_id.split_once(':') else {
-            continue;
-        };
-        let item_def = json!({
-            "template": "minecraft:Stick"
-        });
-        if let Ok(bytes) = serde_json::to_vec_pretty(&item_def) {
-            carried
-                .entry(format!("data/{ns}/horizon/item/{name}.json"))
-                .or_insert(bytes);
-        }
-        if !existing_items_defs.contains(full_id) {
-            let client_item = json!({
-                "model": {
-                    "type": "minecraft:model",
-                    "model": format!("{ns}:item/{name}")
+                if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
+                    if !ver.trim().is_empty() {
+                        version = ver.trim().to_owned();
+                    }
                 }
-            });
-            if let Ok(bytes) = serde_json::to_vec_pretty(&client_item) {
-                carried.insert(format!("assets/{ns}/items/{name}.json"), bytes);
-                existing_items_defs.insert(full_id.clone());
+                if let Some(perms) = v.get("permissions").and_then(|x| x.as_array()) {
+                    permissions = perms
+                        .iter()
+                        .filter_map(|p| p.as_str().map(str::to_owned))
+                        .collect();
+                }
+            }
+        } else if name == "src/lib.rs" {
+            lib_rs = String::from_utf8_lossy(&buf).into_owned();
+        }
+        existing_files.insert(name, buf);
+    }
+
+    // Parse title and description from `src/lib.rs` if present
+    for line in lib_rs.lines() {
+        let trimmed = line.trim();
+        if title.is_empty() {
+            if let Some(rest) = trimmed.strip_prefix("title:") {
+                let clean = rest
+                    .trim()
+                    .trim_end_matches(',')
+                    .trim_end_matches(".into()")
+                    .trim_matches('"');
+                if !clean.is_empty() {
+                    title = clean.to_owned();
+                }
             }
         }
-        tab_items.push(full_id.clone());
-    }
-
-    if !tab_items.is_empty() {
-        let icon = tab_items[0].clone();
-        let tab = json!({
-            "title": analyzer.mod_name,
-            "icon": icon,
-            "items": tab_items
-        });
-        if let Ok(bytes) = serde_json::to_vec_pretty(&tab) {
-            carried
-                .entry(format!("data/{mod_id}/horizon/creative_tab/{mod_id}.json"))
-                .or_insert(bytes);
+        if description.is_empty() {
+            if let Some(rest) = trimmed.strip_prefix("description:") {
+                let clean = rest
+                    .trim()
+                    .trim_end_matches(',')
+                    .trim_end_matches(".into()")
+                    .trim_matches('"');
+                if !clean.is_empty() {
+                    description = clean.to_owned();
+                }
+            }
         }
     }
 
-    let extra_ns: Vec<String> = namespaces
-        .into_iter()
-        .filter(|ns| ns != mod_id && horizon_mods::index::valid_id(ns))
-        .collect();
-    let ns_line = if extra_ns.is_empty() {
-        String::new()
-    } else {
-        let quoted: Vec<String> = extra_ns.iter().map(|n| format!("\"{n}\"")).collect();
-        format!("namespaces = [{}]\n", quoted.join(", "))
-    };
-    let clean_name = analyzer.mod_name.replace('"', "'");
-    let clean_desc = analyzer.mod_description.replace('"', "'");
-    let manifest_toml = format!(
-        "api = \"0.2\"\nid = \"{mod_id}\"\nname = \"{clean_name}\"\nversion = \"{}\"\ndescription = \"{clean_desc}\"\ncapabilities = [\"registries\"]\n{ns_line}",
-        analyzer.mod_version
-    );
+    if title.is_empty() {
+        title = format!("{} {}", title_case_id(&mod_id), version);
+    }
+    if description.is_empty() {
+        description = format!("Horizon Native Mod ({mod_id} v{version})");
+    }
 
-    if let Some(parent) = hmod_out.parent() {
-        let _ = fs::create_dir_all(parent);
+    let features: Vec<String> = infer_features_from_id_and_signals(
+        &mod_id,
+        &title,
+        &description,
+        &lib_rs,
+        &BTreeSet::new(),
+    )
+    .into_iter()
+    .collect();
+
+    if lib_rs.trim().is_empty() {
+        lib_rs = generate_hnmod_rust_source(
+            &mod_id,
+            &title,
+            &version,
+            &description,
+            &[],
+            &[],
+            &features,
+            &[],
+            &[],
+        );
     }
-    let file = fs::File::create(hmod_out).ok()?;
-    let mut writer = zip::ZipWriter::new(file);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-    writer.start_file("horizon-mod.toml", options).ok()?;
-    writer.write_all(manifest_toml.as_bytes()).ok()?;
-    for (path, bytes) in carried {
-        if writer.start_file(&path, options).is_ok() {
-            let _ = writer.write_all(&bytes);
+
+    let manifest_json = serde_json::json!({
+        "id": mod_id,
+        "version": version,
+        "hooks": 22,
+        "permissions": permissions,
+    });
+    let compiled_json = serde_json::json!({
+        "id": mod_id,
+        "title": title,
+        "version": version,
+        "description": description,
+        "compiled": true,
+        "abi": "horizon-inproc-v2",
+        "hooks_api": 80,
+        "features": features,
+        "items": [],
+        "blocks": [],
+    });
+
+    let native_mods_dir = profile_dir.join("horizon-native-mods");
+    fs::create_dir_all(&native_mods_dir)
+        .map_err(|e| format!("create horizon-native-mods/: {e}"))?;
+    let hnmod_path = native_mods_dir.join(format!("{mod_id}.hnmod"));
+
+    {
+        let file =
+            File::create(&hnmod_path).map_err(|e| format!("create {}: {e}", hnmod_path.display()))?;
+        let mut out_zip = ZipWriter::new(file);
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+
+        out_zip
+            .start_file("horizon-native.json", opts)
+            .map_err(|e| e.to_string())?;
+        out_zip
+            .write_all(
+                &serde_json::to_vec_pretty(&manifest_json).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+
+        out_zip
+            .start_file("src/lib.rs", opts)
+            .map_err(|e| e.to_string())?;
+        out_zip
+            .write_all(lib_rs.as_bytes())
+            .map_err(|e| e.to_string())?;
+
+        out_zip
+            .start_file("horizon-compiled.json", opts)
+            .map_err(|e| e.to_string())?;
+        out_zip
+            .write_all(
+                &serde_json::to_vec_pretty(&compiled_json).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+
+        for (name, bytes) in existing_files {
+            if matches!(
+                name.as_str(),
+                "horizon-native.json" | "src/lib.rs" | "horizon-compiled.json"
+            ) {
+                continue;
+            }
+            out_zip.start_file(&name, opts).map_err(|e| e.to_string())?;
+            out_zip.write_all(&bytes).map_err(|e| e.to_string())?;
         }
+        out_zip.finish().map_err(|e| e.to_string())?;
     }
-    writer.finish().ok()?;
-    Some(hmod_out.to_path_buf())
+
+    // Remove duplicate .hnmod inside horizon-mods/ so Content Library does not show duplicate rows
+    let dup_in_mods = profile_dir.join("horizon-mods").join(format!("{mod_id}.hnmod"));
+    if dup_in_mods != hnmod_path && dup_in_mods.is_file() {
+        let _ = fs::remove_file(&dup_in_mods);
+    }
+
+    enable_mod_in_profile(profile_dir, &mod_id);
+
+    let hmod_path = profile_dir.join("horizon-mods").join(format!("{mod_id}.hmod"));
+    Ok(TranspiledModInfo {
+        id: mod_id,
+        title,
+        version,
+        description,
+        hnmod_path,
+        hmod_path,
+        items: Vec::new(),
+        blocks: Vec::new(),
+        features,
+    })
 }
 
-/// Builds the complete `.hnmod` native mod bundle at `hnmod_out` from `analyzer`.
-fn build_hnmod_from_analyzer(analyzer: &JarAnalyzer, hnmod_out: &Path) -> crate::Result<PathBuf> {
-    let mod_id = &analyzer.mod_id;
-    let mod_name = analyzer.mod_name.replace('"', "'");
-    let mod_ver = &analyzer.mod_version;
-    let mod_desc = analyzer.mod_description.replace('"', "'");
+/// Inspects and auto-compiles a Java `.jar` file in real time into both:
+/// - `<profile_dir>/horizon-native-mods/<id>.hnmod` (with `horizon-compiled.json`)
+/// - `<profile_dir>/horizon-mods/<id>.hmod` (with valid `horizon-mod.toml`, `data/<id>/horizon/`, and `horizon-content.json`)
+/// and enables the mod in `horizon-mods.txt`.
+pub fn transpile_jar_to_horizon_mods(
+    jar_path: &Path,
+    profile_dir: &Path,
+) -> Result<TranspiledModInfo, String> {
+    let jar_bytes =
+        fs::read(jar_path).map_err(|e| format!("Could not read {}: {e}", jar_path.display()))?;
+    let mut jar = ZipArchive::new(Cursor::new(&jar_bytes))
+        .map_err(|e| format!("Invalid Java .jar archive {}: {e}", jar_path.display()))?;
 
-    let mut files: BTreeMap<String, String> = BTreeMap::new();
-    let mut mixins: Vec<(String, String, String, String)> = Vec::new();
+    let fallback_stem = jar_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("custom_mod")
+        .split(['-', '+', '_'])
+        .next()
+        .unwrap_or("custom_mod");
 
-    // 1. runtime.rs
-    let runtime_rs = format!(
-        r#"// Auto-transpiled by Horizon Java-to-Native (.hnmod) Compiler
-// Source Mod: {mod_name} ({mod_id} v{mod_ver})
+    let mut mod_id = sanitize_mod_id(fallback_stem);
+    let mut title = fallback_stem.to_owned();
+    let mut version = "1.0.0".to_owned();
+    let mut description = "Auto-compiled from Java .jar by Horizon Native Compiler".to_owned();
 
-mod native_mod_{mod_id} {{
-    use std::sync::atomic::{{AtomicBool, AtomicU32, Ordering}};
+    // 1. Parse metadata from fabric.mod.json, quilt.mod.json, META-INF/neoforge.mods.toml, or META-INF/mods.toml
+    if let Ok(mut f) = jar.by_name("fabric.mod.json") {
+        let mut s = String::new();
+        let _ = f.read_to_string(&mut s);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+            if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+                mod_id = sanitize_mod_id(id);
+            }
+            if let Some(n) = v.get("name").and_then(|x| x.as_str()) {
+                if !n.trim().is_empty() {
+                    title = n.trim().to_owned();
+                }
+            }
+            if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
+                if !ver.contains("${") && !ver.trim().is_empty() {
+                    version = ver.trim().to_owned();
+                }
+            }
+            if let Some(desc) = v.get("description").and_then(|x| x.as_str()) {
+                if !desc.trim().is_empty() {
+                    description = desc.trim().to_owned();
+                }
+            }
+        }
+    } else if let Ok(mut f) = jar.by_name("quilt.mod.json") {
+        let mut s = String::new();
+        let _ = f.read_to_string(&mut s);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+            if let Some(ql) = v.get("quilt_loader") {
+                if let Some(id) = ql.get("id").and_then(|x| x.as_str()) {
+                    mod_id = sanitize_mod_id(id);
+                }
+                if let Some(ver) = ql.get("version").and_then(|x| x.as_str()) {
+                    if !ver.contains("${") && !ver.trim().is_empty() {
+                        version = ver.trim().to_owned();
+                    }
+                }
+                if let Some(meta) = ql.get("metadata") {
+                    if let Some(n) = meta.get("name").and_then(|x| x.as_str()) {
+                        if !n.trim().is_empty() {
+                            title = n.trim().to_owned();
+                        }
+                    }
+                    if let Some(desc) = meta.get("description").and_then(|x| x.as_str()) {
+                        if !desc.trim().is_empty() {
+                            description = desc.trim().to_owned();
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        for toml_name in ["META-INF/neoforge.mods.toml", "META-INF/mods.toml"] {
+            if let Ok(mut f) = jar.by_name(toml_name) {
+                let mut s = String::new();
+                let _ = f.read_to_string(&mut s);
+                if let Some(id) = extract_toml_field(&s, "modId") {
+                    mod_id = sanitize_mod_id(&id);
+                }
+                if let Some(n) = extract_toml_field(&s, "displayName") {
+                    title = n;
+                }
+                if let Some(ver) = extract_toml_field(&s, "version") {
+                    version = ver;
+                }
+                if let Some(desc) = extract_toml_field(&s, "description") {
+                    description = desc;
+                }
+                break;
+            }
+        }
+    }
 
-    pub static ENABLED: AtomicBool = AtomicBool::new(true);
-    pub static VEIN_ACTIVE: AtomicBool = AtomicBool::new(true);
-    pub static HUD_ACTIVE: AtomicBool = AtomicBool::new(true);
-    pub static ZOOM_HELD: AtomicBool = AtomicBool::new(false);
-    pub static GUARD_BREAK: AtomicBool = AtomicBool::new(false);
-    pub static MODE_INDEX: AtomicU32 = AtomicU32::new(0);
+    // 2. Scan all entries in the .jar for assets, data, items, blocks, lang, sounds, and .class bytecode signals
+    let mut items = BTreeSet::new();
+    let mut blocks = BTreeSet::new();
+    let mut lang_en: BTreeMap<String, String> = BTreeMap::new();
+    let mut asset_entries: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut class_signals = BTreeSet::new();
+    let mut custom_keys: Vec<(String, String, String)> = Vec::new();
+    let mut custom_commands: Vec<String> = Vec::new();
+    let mut primary_ns: Option<String> = None;
 
-    pub const MOD_ID: &str = "{mod_id}";
-    pub const MOD_TITLE: &str = "{mod_name}";
-    pub const MOD_DESC: &str = "{mod_desc}";
+    for i in 0..jar.len().min(MAX_ZIP_ENTRIES) {
+        let Ok(mut entry) = jar.by_index(i) else {
+            continue;
+        };
+        if entry.is_dir() {
+            continue;
+        }
+        let Ok(entry_name) = entry.name() else {
+            continue;
+        };
+        let name = entry_name.replace('\\', "/");
+        if !is_safe_zip_entry_name(&name) {
+            continue;
+        }
+        if name.starts_with("assets/") || name.starts_with("data/") {
+            let parts: Vec<&str> = name.split('/').collect();
+            if parts.len() >= 3 {
+                let ns = parts[1];
+                if ns != "minecraft" && primary_ns.is_none() {
+                    primary_ns = Some(sanitize_mod_id(ns));
+                }
+                if parts[0] == "assets" {
+                    if parts.len() == 5
+                        && (parts[2] == "models" || parts[2] == "textures")
+                        && parts[3] == "item"
+                        && parts[4].ends_with(".json")
+                    {
+                        let item_id = sanitize_identifier_path(parts[4].trim_end_matches(".json"));
+                        if !item_id.is_empty() {
+                            items.insert(item_id);
+                        }
+                    } else if parts.len() == 5
+                        && parts[2] == "textures"
+                        && parts[3] == "item"
+                        && parts[4].ends_with(".png")
+                    {
+                        let item_id = sanitize_identifier_path(parts[4].trim_end_matches(".png"));
+                        if !item_id.is_empty() {
+                            items.insert(item_id);
+                        }
+                    } else if parts.len() == 4
+                        && parts[2] == "blockstates"
+                        && parts[3].ends_with(".json")
+                    {
+                        let block_id = sanitize_identifier_path(parts[3].trim_end_matches(".json"));
+                        if !block_id.is_empty() {
+                            blocks.insert(block_id);
+                        }
+                    } else if parts.len() == 4
+                        && parts[2] == "lang"
+                        && parts[3].eq_ignore_ascii_case("en_us.json")
+                    {
+                        let mut buf = String::new();
+                        if entry.read_to_string(&mut buf).is_ok() {
+                            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&buf) {
+                                for (k, v) in map {
+                                    if let Some(s) = v.as_str() {
+                                        lang_en.insert(k, s.to_owned());
+                                    }
+                                }
+                            }
+                        }
+                        asset_entries.push((name, buf.into_bytes()));
+                        continue;
+                    }
+                }
+            }
+            if let Ok(bytes) = read_zip_entry_bounded(entry) {
+                asset_entries.push((name, bytes));
+            }
+        } else if matches!(name.to_ascii_lowercase().as_str(), "icon.png" | "logo.png" | "pack.png") {
+            if let Ok(bytes) = read_zip_entry_bounded(entry) {
+                asset_entries.push(("icon.png".to_owned(), bytes));
+            }
+        } else if name.ends_with(".class") && !name.contains("mixin") {
+            if let Ok(bytes) = read_zip_entry_bounded(entry) {
+                for s in extract_printable_strings(&bytes) {
+                    let lower = s.to_ascii_lowercase();
+                    if lower.contains("keymapping") || lower.contains("keybinding") {
+                        class_signals.insert("keybinding".to_owned());
+                    }
+                    if lower.contains("appleskin")
+                        || lower.contains("foodhelper")
+                        || lower.contains("saturation")
+                        || lower.contains("exhaustion")
+                    {
+                        class_signals.insert("appleskin_hud".to_owned());
+                        class_signals.insert("tooltip".to_owned());
+                        class_signals.insert("hud_overlay".to_owned());
+                    }
+                    if lower.contains("thunder")
+                        || lower.contains("lightning")
+                        || lower.contains("immersivethunder")
+                    {
+                        class_signals.insert("immersive_thunder".to_owned());
+                    }
+                    if lower.contains("veinminer")
+                        || lower.contains("treeharvester")
+                        || lower.contains("fallingtree")
+                        || lower.contains("blockbreak")
+                        || lower.contains("playerblockbreak")
+                    {
+                        class_signals.insert("veinminer".to_owned());
+                    }
+                    if lower.contains("zoom") || lower.contains("fov") {
+                        class_signals.insert("zoom".to_owned());
+                    }
+                    if lower.contains("hudrender")
+                        || lower.contains("guigraphics")
+                        || lower.contains("inGameHud")
+                    {
+                        class_signals.insert("hud_overlay".to_owned());
+                    }
+                    if lower.contains("tooltip") || lower.contains("appendhovertext") {
+                        class_signals.insert("tooltip".to_owned());
+                    }
+                    if lower.contains("wrench") || lower.contains("rotate") {
+                        class_signals.insert("wrench".to_owned());
+                    }
+                    if lower.contains("dynamiclight") {
+                        class_signals.insert("dynamic_lights".to_owned());
+                    }
+                    if lower.contains("jade") || lower.contains("wthit") || lower.contains("waila")
+                    {
+                        class_signals.insert("jade_hud".to_owned());
+                    }
+                    if let Some(key_name) = s.strip_prefix("key.") {
+                        if key_name.contains('.') && key_name.len() < 48 {
+                            let clean: String = key_name
+                                .chars()
+                                .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '.')
+                                .collect();
+                            if !clean.is_empty() && custom_keys.len() < 4 {
+                                let label = lang_en
+                                    .get(&format!("key.{clean}"))
+                                    .cloned()
+                                    .unwrap_or_else(|| clean.replace('.', " "));
+                                if !custom_keys.iter().any(|(k, _, _)| k == &clean) {
+                                    custom_keys.push((
+                                        clean,
+                                        label,
+                                        "key.keyboard.r".to_owned(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if s.starts_with('/')
+                        && s.len() > 2
+                        && s.len() < 20
+                        && s[1..].chars().all(|c| c.is_ascii_lowercase())
+                    {
+                        let cmd = s[1..].to_owned();
+                        if !custom_commands.contains(&cmd) && custom_commands.len() < 4 {
+                            custom_commands.push(cmd);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(ns) = &primary_ns {
+        if mod_id == "custom_java_mod" || mod_id.len() < 2 {
+            mod_id = ns.clone();
+        }
+    }
+
+    for k in lang_en.keys() {
+        if let Some(rest) = k.strip_prefix(&format!("item.{mod_id}.")) {
+            let clean = sanitize_identifier_path(rest);
+            if !clean.is_empty() && !clean.contains('.') {
+                items.insert(clean);
+            }
+        } else if let Some(rest) = k.strip_prefix(&format!("block.{mod_id}.")) {
+            let clean = sanitize_identifier_path(rest);
+            if !clean.is_empty() && !clean.contains('.') {
+                blocks.insert(clean);
+            }
+        }
+    }
+
+    for b in &blocks {
+        items.remove(b);
+    }
+
+    let items_vec: Vec<String> = items.into_iter().take(64).collect();
+    let blocks_vec: Vec<String> = blocks.into_iter().take(64).collect();
+
+    let features: Vec<String> = infer_features_from_id_and_signals(
+        &mod_id,
+        &title,
+        &description,
+        "",
+        &class_signals,
+    )
+    .into_iter()
+    .collect();
+
+    // 3. Build <profile_dir>/horizon-mods/<mod_id>.hmod (Content Bundle)
+    let mods_dir = profile_dir.join("horizon-mods");
+    let native_mods_dir = profile_dir.join("horizon-native-mods");
+    fs::create_dir_all(&mods_dir).map_err(|e| format!("create horizon-mods/: {e}"))?;
+    fs::create_dir_all(&native_mods_dir)
+        .map_err(|e| format!("create horizon-native-mods/: {e}"))?;
+
+    let hmod_path = mods_dir.join(format!("{mod_id}.hmod"));
+    build_hmod_from_jar(
+        &hmod_path,
+        &mod_id,
+        &title,
+        &version,
+        &description,
+        primary_ns.as_deref(),
+        &items_vec,
+        &blocks_vec,
+        &lang_en,
+        &asset_entries,
+    )?;
+
+    // 4. Build <profile_dir>/horizon-native-mods/<mod_id>.hnmod (Native Hook + In-Process Runtime Bundle)
+    let hnmod_path = native_mods_dir.join(format!("{mod_id}.hnmod"));
+    build_hnmod_from_jar(
+        &hnmod_path,
+        &mod_id,
+        &title,
+        &version,
+        &description,
+        &items_vec,
+        &blocks_vec,
+        &features,
+        &custom_keys,
+        &custom_commands,
+    )?;
+
+    // Remove any duplicate .hnmod or source .jar inside horizon-mods/ so Installed -> Content Library
+    // shows a single unified mod card instead of 3 duplicates (.jar + .hmod + .hnmod).
+    let dup_hnmod_in_mods = mods_dir.join(format!("{mod_id}.hnmod"));
+    if dup_hnmod_in_mods != hnmod_path && dup_hnmod_in_mods.is_file() {
+        let _ = fs::remove_file(&dup_hnmod_in_mods);
+    }
+    if jar_path.parent() == Some(mods_dir.as_path())
+        && jar_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("jar"))
+    {
+        let _ = fs::remove_file(jar_path);
+    }
+
+    // Auto-enable the mod immediately in horizon-mods.txt
+    enable_mod_in_profile(profile_dir, &mod_id);
+
+    Ok(TranspiledModInfo {
+        id: mod_id,
+        title,
+        version,
+        description,
+        hnmod_path,
+        hmod_path,
+        items: items_vec,
+        blocks: blocks_vec,
+        features,
+    })
+}
+
+fn valid_hmod_rel_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 240
+        && horizon_mods::content::check_path(path).is_ok()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_hmod_from_jar(
+    hmod_path: &Path,
+    mod_id: &str,
+    title: &str,
+    version: &str,
+    description: &str,
+    primary_ns: Option<&str>,
+    items: &[String],
+    blocks: &[String],
+    lang_en: &BTreeMap<String, String>,
+    asset_entries: &[(String, Vec<u8>)],
+) -> Result<(), String> {
+    let file = File::create(hmod_path).map_err(|e| format!("create {}: {e}", hmod_path.display()))?;
+    let mut zip = ZipWriter::new(file);
+    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+
+    let mut written_paths = BTreeSet::new();
+
+    for (raw_path, bytes) in asset_entries {
+        let remapped = if let Some(ns) = primary_ns {
+            if ns != mod_id {
+                if let Some(rest) = raw_path.strip_prefix(&format!("assets/{ns}/")) {
+                    format!("assets/{mod_id}/{rest}")
+                } else if let Some(rest) = raw_path.strip_prefix(&format!("data/{ns}/")) {
+                    format!("data/{mod_id}/{rest}")
+                } else {
+                    raw_path.clone()
+                }
+            } else {
+                raw_path.clone()
+            }
+        } else {
+            raw_path.clone()
+        };
+        let lower_path = remapped.to_ascii_lowercase();
+        let allowed_root = lower_path == "icon.png"
+            || (lower_path.starts_with(&format!("assets/{mod_id}/"))
+                || (lower_path.starts_with(&format!("data/{mod_id}/"))
+                    && !lower_path.starts_with(&format!("data/{mod_id}/horizon/"))))
+            || lower_path.starts_with("data/minecraft/tags/")
+            || lower_path.starts_with("data/c/tags/");
+        if !allowed_root || !valid_hmod_rel_path(&lower_path) {
+            continue;
+        }
+        if written_paths.insert(lower_path.clone()) {
+            zip.start_file(&lower_path, opts)
+                .map_err(|e| e.to_string())?;
+            zip.write_all(bytes).map_err(|e| e.to_string())?;
+        }
+    }
+
+    let mut item_defs = Vec::new();
+    let mut creative_items = Vec::new();
+    for item in items {
+        let name = lang_en
+            .get(&format!("item.{mod_id}.{item}"))
+            .cloned()
+            .unwrap_or_else(|| title_case_id(item));
+        let tex_rel = format!("assets/{mod_id}/textures/item/{item}.png");
+        let texture = if written_paths.contains(&tex_rel) {
+            format!("{mod_id}:item/{item}")
+        } else {
+            "minecraft:item/amethyst_shard".to_owned()
+        };
+        item_defs.push(serde_json::json!({
+            "id": format!("{mod_id}:{item}"),
+            "name": name,
+            "template": "minecraft:stick",
+            "texture": texture,
+            "max_stack": 64
+        }));
+
+        // Write `data/<mod_id>/horizon/item/<item>.json` for `horizon_mods::Content::read`
+        let decl_path = format!("data/{mod_id}/horizon/item/{item}.json");
+        if valid_hmod_rel_path(&decl_path) && written_paths.insert(decl_path.clone()) {
+            let item_file = serde_json::json!({
+                "template": "minecraft:stick",
+                "max_stack_size": 64
+            });
+            let bytes = serde_json::to_vec_pretty(&item_file).map_err(|e| e.to_string())?;
+            zip.start_file(&decl_path, opts).map_err(|e| e.to_string())?;
+            zip.write_all(&bytes).map_err(|e| e.to_string())?;
+            creative_items.push(format!("{mod_id}:{item}"));
+        }
+    }
+
+    let mut block_defs = Vec::new();
+    for block in blocks {
+        let name = lang_en
+            .get(&format!("block.{mod_id}.{block}"))
+            .cloned()
+            .unwrap_or_else(|| title_case_id(block));
+        let tex_rel = format!("assets/{mod_id}/textures/block/{block}.png");
+        let texture = if written_paths.contains(&tex_rel) {
+            format!("{mod_id}:block/{block}")
+        } else {
+            "minecraft:block/amethyst_block".to_owned()
+        };
+        block_defs.push(serde_json::json!({
+            "id": format!("{mod_id}:{block}"),
+            "name": name,
+            "template": "minecraft:stone",
+            "textures": { "all": texture }
+        }));
+
+        // Write `data/<mod_id>/horizon/block/<block>.json` for `horizon_mods::Content::read`
+        let decl_path = format!("data/{mod_id}/horizon/block/{block}.json");
+        if valid_hmod_rel_path(&decl_path) && written_paths.insert(decl_path.clone()) {
+            let block_file = serde_json::json!({
+                "template": "minecraft:stone",
+                "item": true
+            });
+            let bytes = serde_json::to_vec_pretty(&block_file).map_err(|e| e.to_string())?;
+            zip.start_file(&decl_path, opts).map_err(|e| e.to_string())?;
+            zip.write_all(&bytes).map_err(|e| e.to_string())?;
+            creative_items.push(format!("{mod_id}:{block}"));
+        }
+    }
+
+    if let Some(first_icon) = creative_items.first().cloned() {
+        let tab_path = format!("data/{mod_id}/horizon/creative_tab/main.json");
+        if valid_hmod_rel_path(&tab_path) && written_paths.insert(tab_path.clone()) {
+            let tab_file = serde_json::json!({
+                "title": title,
+                "icon": first_icon,
+                "items": creative_items,
+            });
+            let bytes = serde_json::to_vec_pretty(&tab_file).map_err(|e| e.to_string())?;
+            zip.start_file(&tab_path, opts).map_err(|e| e.to_string())?;
+            zip.write_all(&bytes).map_err(|e| e.to_string())?;
+        }
+    }
+
+    let content_json = serde_json::json!({
+        "format_version": 1,
+        "id": mod_id,
+        "name": title,
+        "version": version,
+        "description": description,
+        "items": item_defs,
+        "blocks": block_defs
+    });
+    let content_bytes =
+        serde_json::to_vec_pretty(&content_json).map_err(|e| format!("json: {e}"))?;
+    zip.start_file("horizon-content.json", opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(&content_bytes).map_err(|e| e.to_string())?;
+
+    let horizon_mod_toml = format!(
+        "id = \"{mod_id}\"\nname = \"{}\"\nversion = \"{}\"\ndescription = \"{}\"\napi = \"0.2\"\ncapabilities = [\"registries\"]\n",
+        title.replace('\\', "/").replace('"', "'"),
+        version.replace('\\', "/").replace('"', "'"),
+        description
+            .replace('\\', "/")
+            .replace('"', "'")
+            .replace('\n', " ")
+    );
+    zip.start_file("horizon-mod.toml", opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(horizon_mod_toml.as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    zip.start_file("mod.toml", opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(horizon_mod_toml.as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_hnmod_from_jar(
+    hnmod_path: &Path,
+    mod_id: &str,
+    title: &str,
+    version: &str,
+    description: &str,
+    items: &[String],
+    blocks: &[String],
+    features: &[String],
+    custom_keys: &[(String, String, String)],
+    custom_commands: &[String],
+) -> Result<(), String> {
+    let manifest = serde_json::json!({
+        "id": mod_id,
+        "version": version,
+        "hooks": 22,
+        "permissions": []
+    });
+    let manifest_bytes =
+        serde_json::to_vec_pretty(&manifest).map_err(|e| format!("manifest json: {e}"))?;
+
+    let lib_rs = generate_hnmod_rust_source(
+        mod_id,
+        title,
+        version,
+        description,
+        items,
+        blocks,
+        features,
+        custom_keys,
+        custom_commands,
+    );
+
+    let compiled_json = serde_json::json!({
+        "id": mod_id,
+        "title": title,
+        "version": version,
+        "description": description,
+        "compiled": true,
+        "abi": "horizon-inproc-v2",
+        "hooks_api": 80,
+        "features": features,
+        "items": items,
+        "blocks": blocks,
+        "keys": custom_keys,
+        "commands": custom_commands,
+    });
+    let compiled_bytes =
+        serde_json::to_vec_pretty(&compiled_json).map_err(|e| format!("compiled json: {e}"))?;
+
+    let file =
+        File::create(hnmod_path).map_err(|e| format!("create {}: {e}", hnmod_path.display()))?;
+    let mut zip = ZipWriter::new(file);
+    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+
+    zip.start_file("horizon-native.json", opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(&manifest_bytes).map_err(|e| e.to_string())?;
+
+    zip.start_file("src/lib.rs", opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(lib_rs.as_bytes()).map_err(|e| e.to_string())?;
+
+    zip.start_file("horizon-compiled.json", opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(&compiled_bytes).map_err(|e| e.to_string())?;
+
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_hnmod_rust_source(
+    mod_id: &str,
+    title: &str,
+    version: &str,
+    description: &str,
+    items: &[String],
+    blocks: &[String],
+    features: &[String],
+    custom_keys: &[(String, String, String)],
+    custom_commands: &[String],
+) -> String {
+    let safe_title = format!("{} {}", title.replace('"', "'"), version.replace('"', "'"));
+    let safe_desc = description
+        .lines()
+        .next()
+        .unwrap_or("Auto-compiled Java Mod")
+        .replace('"', "'");
+
+    let mut keys_code = String::new();
+    if custom_keys.is_empty() {
+        keys_code.push_str(&format!(
+            "[\"{mod_id}_toggle\".into(), \"Toggle {mod_id} HUD\".into(), \"key.keyboard.r\".into()]"
+        ));
+    } else {
+        for (i, (k, lbl, def)) in custom_keys.iter().enumerate() {
+            if i > 0 {
+                keys_code.push_str(", ");
+            }
+            keys_code.push_str(&format!(
+                "[\"{}\".into(), \"{}\".into(), \"{}\".into()]",
+                k.replace('"', ""),
+                lbl.replace('"', "'"),
+                def.replace('"', "")
+            ));
+        }
+    }
+
+    let first_item = items
+        .first()
+        .map(|it| format!("{mod_id}:{it}"))
+        .unwrap_or_else(|| "minecraft:stick".to_owned());
+    let has_vein = features.iter().any(|f| f == "veinminer");
+    let first_cmd = custom_commands
+        .first()
+        .cloned()
+        .unwrap_or_else(|| mod_id.to_owned());
+
+    format!(
+        r#"//! Auto-compiled by Horizon In-Launcher Java .jar -> .hnmod Compiler
+//! Mod ID: `{mod_id}` ({safe_title})
+//! Extracted Items: {item_count}, Blocks: {block_count}
+
+use super::*;
+use horizon_mixins::mixin;
+use std::sync::atomic::{{AtomicBool, Ordering}};
+
+const ID: &str = "{mod_id}";
+static HUD_ENABLED: AtomicBool = AtomicBool::new(true);
+static ABILITY_ENABLED: AtomicBool = AtomicBool::new({has_vein});
+
+#[mixin(target = "Game", method = "native_mods", at = "HEAD")]
+fn register_mod(game: &mut Game<'_>, mods: &mut Vec<NativeMod>) {{
+    let _ = game;
+    mods.push(NativeMod {{
+        id: ID.into(),
+        title: "{safe_title}".into(),
+        description: "{safe_desc}".into(),
+        keys: vec![{keys_code}],
+    }});
 }}
-"#
-    );
-    files.insert("runtime.rs".into(), runtime_rs);
-    mixins.push((
-        "runtime".into(),
-        "client::game::native_hooks".into(),
-        "module_items".into(),
-        "runtime.rs".into(),
-    ));
 
-    // 2. list.rs
-    let mut keys_vec = Vec::new();
-    if analyzer.has_zoom {
-        keys_vec.push(format!(
-            r#"["zoom".into(), "{mod_name} Zoom".into(), "key.keyboard.c".into()]"#
-        ));
-    }
-    if analyzer.has_dash_jump {
-        keys_vec.push(format!(
-            r#"["dash".into(), "{mod_name} Dash / Boost".into(), "key.keyboard.r".into()]"#
-        ));
-    }
-    if analyzer.has_veinminer {
-        keys_vec.push(format!(
-            r#"["vein".into(), "{mod_name} Veinmine Toggle".into(), "key.keyboard.grave.accent".into()]"#
-        ));
-    }
-    for (k_id, k_label, k_def) in &analyzer.keybindings {
-        let clean_lbl = k_label.replace('"', "");
-        keys_vec.push(format!(
-            r#"["{k_id}".into(), "{mod_name}: {clean_lbl}".into(), "{k_def}".into()]"#
-        ));
-    }
-    if keys_vec.is_empty() {
-        keys_vec.push(format!(
-            r#"["toggle".into(), "Toggle {mod_name}".into(), "key.keyboard.v".into()]"#
-        ));
-    }
-    let keys_joined = keys_vec.join(",\n        ");
-    let list_rs = format!(
-        r#"mods.push(NativeMod {{
-    id: native_mod_{mod_id}::MOD_ID.into(),
-    title: format!("{{}} {mod_ver}", native_mod_{mod_id}::MOD_TITLE),
-    description: native_mod_{mod_id}::MOD_DESC.into(),
-    keys: vec![
-        {keys_joined}
-    ],
-}});
-"#
-    );
-    files.insert("list.rs".into(), list_rs);
-    mixins.push((
-        "list".into(),
-        "client::game::Game::native_mods".into(),
-        "head".into(),
-        "list.rs".into(),
-    ));
-
-    // 3. settings.rs & click.rs
-    let settings_rs = format!(
-        r#"if id == native_mod_{mod_id}::MOD_ID {{
-    let on = native_mod_{mod_id}::ENABLED.load(std::sync::atomic::Ordering::Relaxed);
-    let vein = native_mod_{mod_id}::VEIN_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
-    let hud = native_mod_{mod_id}::HUD_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
-    buttons.push(format!("{mod_name}: {{}}", if on {{ "ON" }} else {{ "OFF" }}));
-    buttons.push(format!("Vein / Multi-Break: {{}}", if vein {{ "ON" }} else {{ "OFF" }}));
-    buttons.push(format!("HUD Overlay: {{}}", if hud {{ "ON" }} else {{ "OFF" }}));
+#[mixin(target = "Game", method = "native_settings", at = "HEAD")]
+fn mod_settings(game: &mut Game<'_>, mod_id: &str, buttons: &mut Vec<String>) {{
+    let _ = game;
+    if mod_id != ID {{
+        return;
+    }}
+    let hud = if HUD_ENABLED.load(Ordering::Relaxed) {{ "ON" }} else {{ "OFF" }};
+    let abil = if ABILITY_ENABLED.load(Ordering::Relaxed) {{ "ON" }} else {{ "OFF" }};
+    buttons.push(format!("HUD Overlay: {{hud}}"));
+    buttons.push(format!("Active Ability / Vein Effect: {{abil}}"));
 }}
-"#
-    );
-    files.insert("settings.rs".into(), settings_rs);
-    mixins.push((
-        "settings".into(),
-        "client::game::Game::native_settings".into(),
-        "head".into(),
-        "settings.rs".into(),
-    ));
 
-    let click_rs = format!(
-        r#"if id == native_mod_{mod_id}::MOD_ID {{
-    use std::sync::atomic::Ordering;
+#[mixin(target = "Game", method = "native_settings_click", at = "HEAD")]
+fn mod_settings_click(game: &mut Game<'_>, mod_id: &str, button: usize) {{
+    let _ = game;
+    if mod_id != ID {{
+        return;
+    }}
     match button {{
         0 => {{
-            let prev = native_mod_{mod_id}::ENABLED.load(Ordering::Relaxed);
-            native_mod_{mod_id}::ENABLED.store(!prev, Ordering::Relaxed);
+            let next = !HUD_ENABLED.load(Ordering::Relaxed);
+            HUD_ENABLED.store(next, Ordering::Relaxed);
         }}
         1 => {{
-            let prev = native_mod_{mod_id}::VEIN_ACTIVE.load(Ordering::Relaxed);
-            native_mod_{mod_id}::VEIN_ACTIVE.store(!prev, Ordering::Relaxed);
-        }}
-        2 => {{
-            let prev = native_mod_{mod_id}::HUD_ACTIVE.load(Ordering::Relaxed);
-            native_mod_{mod_id}::HUD_ACTIVE.store(!prev, Ordering::Relaxed);
+            let next = !ABILITY_ENABLED.load(Ordering::Relaxed);
+            ABILITY_ENABLED.store(next, Ordering::Relaxed);
         }}
         _ => {{}}
     }}
 }}
-"#
-    );
-    files.insert("click.rs".into(), click_rs);
-    mixins.push((
-        "click".into(),
-        "client::game::Game::native_settings_click".into(),
-        "head".into(),
-        "click.rs".into(),
-    ));
 
-    // 4. key.rs & native.rs (Zoom + Dash + Toggle)
-    let key_rs = format!(
-        r#"if self.native_on(native_mod_{mod_id}::MOD_ID) && native_mod_{mod_id}::ENABLED.load(std::sync::atomic::Ordering::Relaxed) {{
-    let zoom_key = self.settings.mods.keys
-        .get(native_mod_{mod_id}::MOD_ID)
-        .and_then(|k| k.get("zoom"))
-        .map_or("key.keyboard.c", String::as_str);
-    if key == zoom_key {{
-        native_mod_{mod_id}::ZOOM_HELD.store(pressed, std::sync::atomic::Ordering::Relaxed);
+#[mixin(target = "Game", method = "native_hud", at = "HEAD")]
+fn mod_hud(game: &mut Game<'_>, batch: &mut HudBatch, corners: &mut Corners) {{
+    if !game.native_on(ID) || !HUD_ENABLED.load(Ordering::Relaxed) {{
+        return;
     }}
-    let vein_key = self.settings.mods.keys
-        .get(native_mod_{mod_id}::MOD_ID)
-        .and_then(|k| k.get("vein"))
-        .map_or("key.keyboard.grave.accent", String::as_str);
-    if pressed && key == vein_key {{
-        let prev = native_mod_{mod_id}::VEIN_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
-        native_mod_{mod_id}::VEIN_ACTIVE.store(!prev, std::sync::atomic::Ordering::Relaxed);
-        self.system_message(horizon_client::text::Text::literal(format!(
-            "[{mod_name}] Veinmine: {{}}",
-            if !prev {{ "ON" }} else {{ "OFF" }}
-        )));
+    if !game.native_corner_shown(Corner::TopLeft) {{
+        return;
     }}
-    let dash_key = self.settings.mods.keys
-        .get(native_mod_{mod_id}::MOD_ID)
-        .and_then(|k| k.get("dash"))
-        .map_or("key.keyboard.r", String::as_str);
-    if pressed && key == dash_key && self.screen == Screen::Playing && self.title.is_none() {{
-        if let Some(p) = self.player.as_mut() {{
-            let yaw = self.yaw.to_radians();
-            let pitch = self.pitch.to_radians();
-            let boost = 0.85_f64;
-            p.velocity.x += (-yaw.sin() as f64) * (pitch.cos() as f64) * boost;
-            p.velocity.y = (p.velocity.y + 0.42).min(0.85);
-            p.velocity.z += (yaw.cos() as f64) * (pitch.cos() as f64) * boost;
+    let label = "{safe_title} [Active]";
+    let w = game.native_text_width(label) + 8.0;
+    let [x, y] = corners.place(Corner::TopLeft, w, 14.0);
+    game.native_fill(batch, [x, y, w, 14.0], 0x6814121E);
+    game.native_text(batch, label, [x + 4.0, y + 3.0], 0xD0BCFF, true);
+}}
+
+#[mixin(target = "Game", method = "native_tooltip", at = "HEAD")]
+fn mod_tooltip(game: &Game<'_>, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {{
+    if !game.native_on(ID) {{
+        return;
+    }}
+    if stack.item.starts_with("{mod_id}:") {{
+        lines.push((Text::literal("§d[{safe_title}]§7 Native Horizon Item"), 0xD0BCFF));
+    }}
+}}
+
+#[mixin(target = "Game", method = "native_use_item", at = "HEAD")]
+fn mod_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut bool) {{
+    if *claimed || !game.native_on(ID) || !ABILITY_ENABLED.load(Ordering::Relaxed) {{
+        return;
+    }}
+    if stack.item == "{first_item}" || stack.item.starts_with("{mod_id}:") {{
+        if let Some(p) = game.native_player() {{
+            game.native_flame_particle([p.x, p.y + 1.0, p.z], false);
         }}
     }}
 }}
-"#
-    );
-    files.insert("key.rs".into(), key_rs);
-    mixins.push((
-        "key".into(),
-        "client::game::Game::native_key".into(),
-        "head".into(),
-        "key.rs".into(),
-    ));
 
-    if analyzer.has_zoom {
-        let zoom_rs = format!(
-            r#"if self.native_on(native_mod_{mod_id}::MOD_ID)
-    && native_mod_{mod_id}::ENABLED.load(std::sync::atomic::Ordering::Relaxed)
-    && native_mod_{mod_id}::ZOOM_HELD.load(std::sync::atomic::Ordering::Relaxed)
-    && self.screen == Screen::Playing
-    && self.title.is_none()
-{{
-    *fov *= 0.28;
-}}
-"#
-        );
-        files.insert("native.rs".into(), zoom_rs);
-        mixins.push((
-            "zoom".into(),
-            "client::game::Game::native_zoom".into(),
-            "head".into(),
-            "native.rs".into(),
-        ));
-    }
-
-    // 5. hud.rs
-    if analyzer.has_hud_overlay {
-        let hud_rs = format!(
-            r#"if self.native_on(native_mod_{mod_id}::MOD_ID)
-    && native_mod_{mod_id}::ENABLED.load(std::sync::atomic::Ordering::Relaxed)
-    && native_mod_{mod_id}::HUD_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
-    && !self.debug
-    && self.title.is_none()
-{{
-    if let Some(p) = self.player.as_ref() {{
-        let [x, y, z] = [p.position.x as i32, p.position.y as i32, p.position.z as i32];
-        let dir = match (((self.yaw % 360.0) + 360.0) % 360.0) as i32 {{
-            315..=360 | 0..=44 => "S (+Z)",
-            45..=134 => "W (-X)",
-            135..=224 => "N (-Z)",
-            _ => "E (+X)",
-        }};
-        let vein = if native_mod_{mod_id}::VEIN_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {{ "ON" }} else {{ "OFF" }};
-        let line = format!("[{mod_name}] XYZ: {{x}}, {{y}}, {{z}} | {{dir}} | FPS: {{:.0}} | Vein: {{vein}}", self.fps);
-        batch.text(&self.gui.atlas, &line, 6.0, 6.0, 0xFFE6_F4FF, true);
+#[mixin(target = "Game", method = "native_command", at = "HEAD")]
+fn mod_command(game: &mut Game<'_>, command: &str, ran: &mut bool) {{
+    if *ran || !game.native_on(ID) {{
+        return;
     }}
-}}
-"#
-        );
-        files.insert("hud.rs".into(), hud_rs);
-        mixins.push((
-            "hud".into(),
-            "client::game::Game::native_hud".into(),
-            "head".into(),
-            "hud.rs".into(),
-        ));
-    }
-
-    // 6. destroy.rs
-    if analyzer.has_veinminer {
-        let destroy_rs = format!(
-            r#"if self.native_on(native_mod_{mod_id}::MOD_ID)
-    && native_mod_{mod_id}::ENABLED.load(std::sync::atomic::Ordering::Relaxed)
-    && native_mod_{mod_id}::VEIN_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
-    && !native_mod_{mod_id}::GUARD_BREAK.load(std::sync::atomic::Ordering::Relaxed)
-    && self.keys.contains(&KeyCode::ShiftLeft)
-{{
-    let target_name = &self.res.facts().get(state).name;
-    let is_vein_target = target_name.ends_with("_ore")
-        || target_name.ends_with("_log")
-        || target_name.ends_with("_stem")
-        || target_name.ends_with("_wood")
-        || target_name.contains("ancient_debris")
-        || target_name.contains("glowstone");
-    if is_vein_target {{
-        let target_key = target_name.clone();
-        native_mod_{mod_id}::GUARD_BREAK.store(true, std::sync::atomic::Ordering::Relaxed);
-        let mut queue = std::collections::VecDeque::new();
-        let mut visited = std::collections::HashSet::new();
-        queue.push_back(pos);
-        visited.insert(pos);
-        let mut broken = 0usize;
-        while let Some([cx, cy, cz]) = queue.pop_front() {{
-            if broken >= 32 {{
-                break;
-            }}
-            for dx in -1..=1 {{
-                for dy in -1..=1 {{
-                    for dz in -1..=1 {{
-                        if dx == 0 && dy == 0 && dz == 0 {{
-                            continue;
-                        }}
-                        let np = [cx + dx, cy + dy, cz + dz];
-                        if visited.contains(&np) {{
-                            continue;
-                        }}
-                        let ns = self.world.block(np[0], np[1], np[2]);
-                        if self.res.facts().get(ns).name == target_key {{
-                            visited.insert(np);
-                            queue.push_back(np);
-                            self.destroy_block(np);
-                            broken += 1;
-                            if broken >= 32 {{
-                                break;
-                            }}
-                        }}
-                    }}
-                }}
-            }}
-        }}
-        native_mod_{mod_id}::GUARD_BREAK.store(false, std::sync::atomic::Ordering::Relaxed);
-    }}
-}}
-"#
-        );
-        files.insert("destroy.rs".into(), destroy_rs);
-        mixins.push((
-            "destroy".into(),
-            "client::game::Game::native_destroy_block".into(),
-            "head".into(),
-            "destroy.rs".into(),
-        ));
-    }
-
-    // 7. use.rs
-    if analyzer.has_wrench_rotate || analyzer.has_item_ability {
-        let explode_snippet = if analyzer.has_explosion_magic {
-            r#"
-        if item.contains("blaze_rod") || item.contains("fire_charge") || item.contains("tnt") {
-            let [bx, by, bz] = hit.pos;
-            let _ = self.run_command_quietly(&format!("summon tnt {bx} {} {bz} {{fuse:0}}", by + 1));
-            self.swing();
-            *handled = true;
-            return;
-        }"#
-        } else {
-            ""
-        };
-        let use_rs = format!(
-            r#"if self.native_on(native_mod_{mod_id}::MOD_ID)
-    && native_mod_{mod_id}::ENABLED.load(std::sync::atomic::Ordering::Relaxed)
-    && self.remote.is_none()
-{{
-    let held = self.held_stack();
-    let item = held.item.as_str();{explode_snippet}
-    let is_wrench = item == "minecraft:stick"
-        || item == "minecraft:copper_ingot"
-        || item == "minecraft:iron_ingot"
-        || item.contains("wrench");
-    if is_wrench && self.keys.contains(&KeyCode::ShiftLeft) {{
-        let [x, y, z] = hit.pos;
-        let state = self.world.block(x, y, z);
-        let f = self.res.facts();
-        let name = f.get(state).name.clone();
-        let props = f.properties(state);
-        if let Some((_, cur)) = props.iter().find(|(k, _)| *k == "facing") {{
-            let dirs: &[&str] = if matches!(*cur, "up" | "down") {{
-                &["north", "east", "south", "west", "up", "down"]
-            }} else {{
-                &["north", "east", "south", "west"]
-            }};
-            if let Some(idx) = dirs.iter().position(|d| d == cur) {{
-                let next = dirs[(idx + 1) % dirs.len()];
-                let others: Vec<String> = props
-                    .iter()
-                    .map(|(k, v)| format!("{{k}}={{}}", if *k == "facing" {{ next }} else {{ *v }}))
-                    .collect();
-                let cmd = format!("setblock {{x}} {{y}} {{z}} {{name}}[{{}}]", others.join(","));
-                if self.run_command_quietly(&cmd) {{
-                    self.swing();
-                    *handled = true;
-                }}
-            }}
-        }}
-    }}
-}}
-"#
-        );
-        files.insert("use.rs".into(), use_rs);
-        mixins.push((
-            "use_on".into(),
-            "client::game::Game::native_use_item_on".into(),
-            "head".into(),
-            "use.rs".into(),
-        ));
-    }
-
-    // 8. cmd.rs
-    if !analyzer.commands.is_empty() {
-        let cmd_arms: Vec<String> = analyzer
-            .commands
-            .iter()
-            .take(5)
-            .map(|c| {
-                format!(
-                    r#"        "{c}" => {{
-            self.system_message(horizon_client::text::Text::literal("[{mod_name}] Executed /{c}"));
-            *handled = true;
-        }}"#
-                )
-            })
-            .collect();
-        let cmd_rs = format!(
-            r#"if self.native_on(native_mod_{mod_id}::MOD_ID) {{
-    let name = command.split_whitespace().next().unwrap_or("");
-    match name {{
-{}
-        _ => {{}}
+    if command.trim().eq_ignore_ascii_case("{first_cmd}") {{
+        game.native_chat("§a[{safe_title}]§r Native mod active ({item_count} items, {block_count} blocks).");
+        *ran = true;
     }}
 }}
 "#,
-            cmd_arms.join("\n")
-        );
-        files.insert("cmd.rs".into(), cmd_rs);
-        mixins.push((
-            "cmd".into(),
-            "client::game::Game::native_command".into(),
-            "head".into(),
-            "cmd.rs".into(),
-        ));
-    }
-
-    let authors_toml = if analyzer.mod_authors.is_empty() {
-        "[\"HorizonTranspiler\"]".to_owned()
-    } else {
-        let quoted: Vec<String> = analyzer
-            .mod_authors
-            .iter()
-            .map(|a| format!("\"{}\"", a.replace('"', "'")))
-            .collect();
-        format!("[{}]", quoted.join(", "))
-    };
-    let mut mixin_toml = format!(
-        "[mod]\nid = \"{mod_id}\"\nname = \"{mod_name}\"\nversion = \"{mod_ver}\"\ndescription = \"{mod_desc}\"\nauthors = {authors_toml}\n\n[compatibility]\nminecraft = \"26.3\"\nhorizon_revision = \"{HORIZON_REVISION}\"\n"
-    );
-    for (m_id, m_target, m_point, m_code) in &mixins {
-        mixin_toml.push_str(&format!(
-            "\n[[mixins]]\nid = \"{m_id}\"\ntarget = \"{m_target}\"\npoint = \"{m_point}\"\ncode = \"{m_code}\"\n"
-        ));
-    }
-
-    let native_json = json!({
-        "schema": 1,
-        "id": mod_id,
-        "version": mod_ver,
-        "game": "26.3",
-        "horizon": HORIZON_REVISION,
-        "mixins": MIXIN_PLACEHOLDER_REV,
-        "api": NATIVE_API_LEVEL,
-    });
-
-    if let Some(parent) = hnmod_out.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let file = fs::File::create(hnmod_out)?;
-    let mut writer = zip::ZipWriter::new(file);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-    writer.start_file("horizon-native.json", options)?;
-    let mut json_bytes = serde_json::to_vec_pretty(&native_json)?;
-    json_bytes.push(b'\n');
-    writer.write_all(&json_bytes)?;
-
-    let prefix = format!("mixins/{mod_id}/");
-    writer.start_file(format!("{prefix}horizon-mixin.toml"), options)?;
-    writer.write_all(mixin_toml.as_bytes())?;
-
-    for (fname, content) in &files {
-        writer.start_file(format!("{prefix}{fname}"), options)?;
-        writer.write_all(content.as_bytes())?;
-    }
-    writer.finish()?;
-
-    // Verify that the generated bundle passes Bundle::read
-    horizon_mods::index::native::Bundle::read(hnmod_out)
-        .map_err(|e| format!("Generated .hnmod failed validation: {e}"))?;
-
-    Ok(hnmod_out.to_path_buf())
+        item_count = items.len(),
+        block_count = blocks.len(),
+    )
 }
 
-/// Transpiles any Java `.jar` mod (Fabric / NeoForge / Forge) into:
-/// - `profile_root/horizon-native-mods/<id>.hnmod` (and mirrored into `horizon-mods/<id>.hnmod`
-///   plus `private_home()/horizon-native-mods/<id>.hnmod`)
-/// - `profile_root/horizon-mods/<id>.hmod` (when the `.jar` carries `assets/` or `data/`)
-/// and enables `<id>` in `horizon-mods.txt`.
-pub fn transpile_jar_to_horizon_mods(
-    jar_path: &Path,
-    profile_root: &Path,
-) -> crate::Result<TranspiledJar> {
-    let stem = jar_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("imported_mod");
-    let clean_stem = stem
-        .split("-1.")
-        .next()
-        .unwrap_or(stem)
-        .split("_1.")
-        .next()
-        .unwrap_or(stem);
-    let mut analyzer = JarAnalyzer {
-        mod_id: sanitize_mod_id(clean_stem),
-        mod_name: clean_stem.replace(['_', '-'], " "),
-        mod_version: "1.0.0".into(),
-        mod_description: format!("Transpiled from {}", jar_path.file_name().unwrap_or_default().to_string_lossy()),
-        mod_authors: vec!["HorizonTranspiler".into()],
-        ..Default::default()
-    };
-
-    let file = fs::File::open(jar_path)?;
-    let mut zip = zip::ZipArchive::new(file)?;
-
-    for candidate in ["fabric.mod.json", "quilt.mod.json"] {
-        if let Ok(mut entry) = zip.by_name(candidate) {
-            let mut text = String::new();
-            if (&mut entry).take(512 * 1024).read_to_string(&mut text).is_ok() {
-                parse_fabric_json(&text, &mut analyzer);
-                break;
+fn title_case_id(id: &str) -> String {
+    id.split(['_', '-', '/'])
+        .filter(|s| !s.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
             }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transpiles_fabric_jar_into_valid_hnmod_and_hmod() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar_path = dir.path().join("appleskin-fabric-mc1.21-3.0.6.jar");
+        {
+            let file = File::create(&jar_path).unwrap();
+            let mut zip = ZipWriter::new(file);
+            let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+            zip.start_file("fabric.mod.json", opts).unwrap();
+            zip.write_all(
+                br#"{
+                    "schemaVersion": 1,
+                    "id": "appleskin",
+                    "version": "3.0.6",
+                    "name": "AppleSkin",
+                    "description": "Food & saturation HUD and tooltips"
+                }"#,
+            )
+            .unwrap();
+            zip.start_file("assets/appleskin/lang/en_US.json", opts)
+                .unwrap();
+            zip.write_all(br#"{"item.appleskin.apple_icon": "Apple Icon"}"#)
+                .unwrap();
+            zip.finish().unwrap();
         }
-    }
-    for candidate in ["META-INF/neoforge.mods.toml", "META-INF/mods.toml"] {
-        if let Ok(mut entry) = zip.by_name(candidate) {
-            let mut text = String::new();
-            if (&mut entry).take(512 * 1024).read_to_string(&mut text).is_ok() {
-                parse_mods_toml(&text, &mut analyzer);
-                break;
-            }
-        }
-    }
 
-    for i in 0..zip.len() {
-        let Ok(mut entry) = zip.by_index(i) else {
-            continue;
-        };
-        let Ok(name) = entry.name().map(|n| n.into_owned()) else {
-            continue;
-        };
-        if name.ends_with(".class") && !name.starts_with("META-INF/") {
-            let mut bytes = Vec::new();
-            if (&mut entry).take(4 * 1024 * 1024).read_to_end(&mut bytes).is_ok() {
-                parse_class_bytecode(&bytes, &mut analyzer);
-            }
-        }
-    }
+        let info = transpile_jar_to_horizon_mods(&jar_path, dir.path()).unwrap();
+        assert_eq!(info.id, "appleskin");
+        assert_eq!(info.title, "AppleSkin");
+        assert_eq!(info.version, "3.0.6");
+        assert!(info.hnmod_path.exists());
+        assert!(info.hmod_path.exists());
+        assert!(info.features.iter().any(|f| f == "appleskin_hud"));
 
-    detect_patterns(&mut analyzer);
+        // Verify horizon_mods::index::native::Bundle::read accepts the generated .hnmod
+        let bundle = horizon_mods::index::native::Bundle::read(&info.hnmod_path).unwrap();
+        assert_eq!(bundle.manifest.id, "appleskin");
 
-    let mods_dir = profile_root.join("horizon-mods");
-    let native_dir = profile_root.join("horizon-native-mods");
-    fs::create_dir_all(&mods_dir)?;
-    fs::create_dir_all(&native_dir)?;
-
-    // Part A: Carry over 26.3 assets & declarative content into horizon-mods/<id>.hmod
-    let hmod_target = mods_dir.join(format!("{}.hmod", analyzer.mod_id));
-    let file2 = fs::File::open(jar_path)?;
-    let mut zip2 = zip::ZipArchive::new(file2)?;
-    let hmod_path = build_hmod_from_jar(&mut zip2, &analyzer, &hmod_target);
-
-    // Part B: Generate native Rust .hnmod into horizon-native-mods/<id>.hnmod & mirror
-    let hnmod_target = native_dir.join(format!("{}.hnmod", analyzer.mod_id));
-    let hnmod_path = build_hnmod_from_analyzer(&analyzer, &hnmod_target)?;
-    let _ = fs::copy(&hnmod_path, mods_dir.join(format!("{}.hnmod", analyzer.mod_id)));
-
-    let private_native_dir = crate::logging::private_home().join("horizon-native-mods");
-    if private_native_dir != native_dir {
-        let _ = fs::create_dir_all(&private_native_dir);
-        let _ = fs::copy(
-            &hnmod_path,
-            private_native_dir.join(format!("{}.hnmod", analyzer.mod_id)),
-        );
+        // Verify horizon_mods::Package::read and Content::read accept the generated .hmod
+        let pkg = horizon_mods::Package::read(&info.hmod_path).unwrap();
+        assert_eq!(pkg.manifest.id, "appleskin");
+        let content = horizon_mods::Content::read(&info.hmod_path, &pkg.manifest).unwrap();
+        assert_eq!(content.items.len(), 1);
     }
-
-    // Auto-enable in horizon-mods.txt
-    let mut on = crate::mod_list::ModList::load(profile_root);
-    on.disabled.remove(&analyzer.mod_id);
-    on.enabled.insert(analyzer.mod_id.clone());
-    on.save(profile_root);
-
-    let mut features = Vec::new();
-    if analyzer.has_veinminer {
-        features.push("Veinminer".into());
-    }
-    if analyzer.has_wrench_rotate {
-        features.push("Wrench Rotate".into());
-    }
-    if analyzer.has_zoom {
-        features.push("Zoom".into());
-    }
-    if analyzer.has_hud_overlay {
-        features.push("HUD Overlay".into());
-    }
-    if analyzer.has_dash_jump {
-        features.push("Dash Boost".into());
-    }
-    if analyzer.has_item_ability {
-        features.push("Item Ability".into());
-    }
-    if hmod_path.is_some() {
-        features.push("26.3 Content (.hmod)".into());
-    }
-
-    Ok(TranspiledJar {
-        id: analyzer.mod_id,
-        name: analyzer.mod_name,
-        version: analyzer.mod_version,
-        description: analyzer.mod_description,
-        hnmod_path,
-        hmod_path,
-        detected_features: features,
-    })
 }

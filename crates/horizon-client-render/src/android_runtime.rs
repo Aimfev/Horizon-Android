@@ -156,12 +156,22 @@ pub fn keypad_state() -> crate::gamepad::PadState {
         .poll()
 }
 static OPEN_GL: AtomicBool = AtomicBool::new(cfg!(target_pointer_width = "32"));
+static PREFER_VULKAN: AtomicBool = AtomicBool::new(false);
 pub fn configure_graphics(open_gl: bool) {
     OPEN_GL.store(open_gl, Ordering::Relaxed);
+    PREFER_VULKAN.store(!open_gl, Ordering::Relaxed);
+}
+pub fn set_prefer_vulkan(prefer: bool) {
+    PREFER_VULKAN.store(prefer, Ordering::Relaxed);
+    if prefer {
+        OPEN_GL.store(false, Ordering::Relaxed);
+    }
 }
 pub fn graphics_api() -> crate::graphics::GraphicsApi {
     if OPEN_GL.load(Ordering::Relaxed) {
         crate::graphics::GraphicsApi::OpenGl
+    } else if PREFER_VULKAN.load(Ordering::Relaxed) {
+        crate::graphics::GraphicsApi::Vulkan
     } else {
         // Prefer Vulkan, but preserve the same GLES fallback as the launcher
         // when the device has no Vulkan adapter (notably older ARMv7 GPUs).

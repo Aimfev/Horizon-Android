@@ -27,8 +27,11 @@ static FIRST_FRAME_NOTIFIED: AtomicBool = AtomicBool::new(false);
 /// we hand `ANativeActivity_onCreate` to its entry so `NativeActivity` and JNI share one
 /// library; otherwise `android-activity`'s `ANativeActivity_onCreate` in this library runs.
 pub unsafe fn on_create(activity: *mut c_void, saved: *mut c_void, saved_size: usize) {
-    if let Some(path) = std::env::var_os("HORIZON_GAME_LIBRARY")
-        && let Ok(path) = CString::new(path.into_vec())
+    if let Some(raw_path) = std::env::var_os("HORIZON_GAME_LIBRARY")
+        && let path_ref = std::path::Path::new(&raw_path)
+        && std::fs::symlink_metadata(path_ref).is_ok_and(|m| m.is_file() && !m.file_type().is_symlink())
+        && path_ref.to_str().is_some_and(|s| s.contains("/files/native/") && s.ends_with("/libhorizon_android.so") && !s.contains(".."))
+        && let Ok(path) = CString::new(raw_path.into_vec())
     {
         let build = unsafe { dlopen(path.as_ptr(), RTLD_NOW) };
         if !build.is_null() {

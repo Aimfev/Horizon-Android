@@ -38,12 +38,22 @@ final class NativeMods {
     static File chosen(Context context, String version) {
         File dir = dir(context);
         String key = read(new File(dir, "current"));
-        if (key == null || key.isEmpty() || key.contains("/") || key.startsWith(".")) {
+        if (key == null || !key.matches("[A-Za-z0-9_-]{1,128}")) {
             return null;
         }
         File build = new File(dir, key);
         File library = new File(build, LIBRARY);
-        if (!library.isFile() || version == null || !version.equals(read(new File(build, "for")))) {
+        try {
+            if (Files.isSymbolicLink(build.toPath())
+                    || Files.isSymbolicLink(library.toPath())
+                    || !library.isFile()
+                    || !library.getCanonicalPath().startsWith(dir.getCanonicalPath() + File.separator)) {
+                return null;
+            }
+        } catch (IOException e) {
+            return null;
+        }
+        if (version == null || !version.equals(read(new File(build, "for")))) {
             return null;
         }
         File starts = new File(dir, "starts");

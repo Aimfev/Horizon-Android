@@ -93,15 +93,24 @@ impl ModList {
         Self::parse(&fs::read_to_string(dir.join(FILE)).unwrap_or_default())
     }
     pub fn parse(text: &str) -> Self {
-        let ids = |value: &str| -> BTreeSet<String> {
-            text.lines()
-                .filter_map(|l| l.split_once(':'))
-                .filter(|(_, v)| v.trim() == value)
-                .filter_map(|(k, _)| k.trim().strip_prefix("mod."))
-                .map(str::to_owned)
-                .collect()
-        };
-        let (enabled, disabled) = (ids("true"), ids("false"));
+        let mut enabled = BTreeSet::new();
+        let mut disabled = BTreeSet::new();
+        for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            if let Some((k, v)) = line.split_once(':') {
+                let k = k.trim();
+                let v = v.trim();
+                if let Some(id) = k.strip_prefix("mod.") {
+                    if v == "true" {
+                        enabled.insert(id.to_owned());
+                    } else if v == "false" {
+                        disabled.insert(id.to_owned());
+                    }
+                }
+            } else {
+                let id = line.strip_prefix("mod.").unwrap_or(line);
+                enabled.insert(id.to_owned());
+            }
+        }
         #[cfg(target_os = "android")]
         let disabled = {
             let mut disabled = disabled;

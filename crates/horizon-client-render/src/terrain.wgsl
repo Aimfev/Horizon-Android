@@ -107,7 +107,9 @@ fn sample_nearest(uv: vec2<f32>, layer: u32, pixel: vec2<f32>, du: vec2<f32>, dv
         offset = (offset - 0.5) * pixel / max(texel_screen, vec2(1e-12)) + 0.5;
     }
     offset = clamp(offset, vec2(0.0), vec2(1.0));
-    return sprite_grad((center + offset) * pixel, layer, du, dv);
+    let du_safe = clamp(du, vec2(-0.5), vec2(0.5));
+    let dv_safe = clamp(dv, vec2(-0.5), vec2(0.5));
+    return sprite_grad((center + offset) * pixel, layer, du_safe, dv_safe);
 }
 // sampleRGSS: four rotated-grid samples of the two nearest mip levels, faded in as the texels
 // shrink below two screen pixels, over sample_nearest.
