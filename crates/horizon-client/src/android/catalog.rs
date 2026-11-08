@@ -1070,7 +1070,8 @@ impl Catalog {
                     let mut icon_bytes = None;
                     for i in 0..zip.len().min(512) {
                         let Ok(mut entry) = zip.by_index(i) else { continue };
-                        let ename = entry.name().to_ascii_lowercase();
+                        let Ok(entry_name) = entry.name() else { continue };
+                        let ename = entry_name.to_ascii_lowercase();
                         if matches!(ename.as_str(), "icon.png" | "logo.png" | "pack.png")
                             || (ename.starts_with("assets/") && ename.ends_with("/icon.png"))
                             || (ename.starts_with("assets/") && ename.ends_with("/logo.png"))

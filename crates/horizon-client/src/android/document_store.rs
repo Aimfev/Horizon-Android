@@ -747,11 +747,11 @@ pub fn sync_mods_folder(profile_root: &Path) {
             }
             let path = entry.path();
             let Some(name_str) = path.file_name().and_then(|s| s.to_str()) else { continue };
-            let lower = name_str.to_ascii_lowercase();
+            let _lower = name_str.to_ascii_lowercase();
             #[cfg(target_os = "android")]
-            if lower.ends_with(".jar") {
+            if _lower.ends_with(".jar") {
                 let _ = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&path, profile_root);
-            } else if lower.ends_with(".hnmod") {
+            } else if _lower.ends_with(".hnmod") {
                 let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&path, profile_root);
             }
         }
@@ -765,9 +765,9 @@ pub fn sync_mods_folder(profile_root: &Path) {
                 }
                 let path = entry.path();
                 let Some(name_str) = path.file_name().and_then(|s| s.to_str()) else { continue };
-                let lower = name_str.to_ascii_lowercase();
+                let _lower = name_str.to_ascii_lowercase();
                 #[cfg(target_os = "android")]
-                if lower.ends_with(".jar") {
+                if _lower.ends_with(".jar") {
                     if horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&path, profile_root).is_ok() {
                         let _ = fs::remove_file(&path);
                     }
@@ -1421,7 +1421,7 @@ pub fn extract_world_zip_if_valid(
     let mut level_dat_prefix: Option<String> = None;
     for i in 0..archive.len() {
         let Ok(entry) = archive.by_index(i) else { continue };
-        let entry_name = entry.name();
+        let Ok(entry_name) = entry.name() else { continue };
         let name = entry_name.replace('\\', "/");
         if name == "level.dat" {
             level_dat_prefix = Some(String::new());
@@ -1470,7 +1470,7 @@ pub fn extract_world_zip_if_valid(
 
     for i in 0..archive.len() {
         let Ok(mut entry) = archive.by_index(i) else { continue };
-        let entry_name = entry.name();
+        let Ok(entry_name) = entry.name() else { continue };
         let full_name = entry_name.replace('\\', "/");
         let rel = if prefix.is_empty() {
             full_name.as_str()
