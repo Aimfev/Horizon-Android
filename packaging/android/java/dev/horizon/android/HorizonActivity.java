@@ -83,10 +83,25 @@ public final class HorizonActivity extends android.app.NativeActivity {
     }
 
     private void askModPermissions() {
-        final String[] permissions = NativeMods.permissions(nativeLibrary);
-        if (permissions.length == 0) {
+        if (nativeLibrary == null) {
             return;
         }
+        final java.util.Map<String, java.util.List<String>> wanted = NativeMods.permissions(nativeLibrary);
+        if (wanted == null || wanted.isEmpty() || NativeMods.permissionsDeclined(nativeLibrary)) {
+            return;
+        }
+        java.util.ArrayList<String> permList = new java.util.ArrayList<>();
+        for (String key : wanted.keySet()) {
+            if ("microphone".equalsIgnoreCase(key)) {
+                permList.add(android.Manifest.permission.RECORD_AUDIO);
+            } else if (key.startsWith("android.permission.")) {
+                permList.add(key);
+            }
+        }
+        if (permList.isEmpty()) {
+            return;
+        }
+        final String[] permissions = permList.toArray(new String[0]);
         runOnUiThread(
                 new Runnable() {
                     @Override

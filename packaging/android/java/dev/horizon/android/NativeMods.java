@@ -74,7 +74,14 @@ final class NativeMods {
      */
     static Map<String, List<String>> permissions(File library) {
         Map<String, List<String>> wanted = new LinkedHashMap<>();
-        String text = read(new File(library.getParentFile(), "build.json"));
+        if (library == null) {
+            return wanted;
+        }
+        File parent = library.getParentFile();
+        if (parent == null) {
+            return wanted;
+        }
+        String text = read(new File(parent, "build.json"));
         if (text == null) {
             return wanted;
         }
@@ -99,10 +106,16 @@ final class NativeMods {
 
     /** Whether the player said Not now to the build's mods' permissions: not asked again for it. */
     static boolean permissionsDeclined(File library) {
+        if (library == null || library.getParentFile() == null) {
+            return false;
+        }
         return new File(library.getParentFile(), "permissions-declined").exists();
     }
 
     static void declinePermissions(File library) {
+        if (library == null || library.getParentFile() == null) {
+            return;
+        }
         write(new File(library.getParentFile(), "permissions-declined"), "");
     }
 
@@ -110,6 +123,10 @@ final class NativeMods {
     static void failed(Context context, String why) {
         setAside(dir(context), "The build with native mods could not be loaded (" + why
                 + "), so Horizon started without it.");
+    }
+
+    static void setAside(Context context, String notice) {
+        setAside(dir(context), notice);
     }
 
     private static void setAside(File dir, String notice) {
