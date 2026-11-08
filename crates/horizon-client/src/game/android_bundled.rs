@@ -208,7 +208,10 @@ fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
         if entry.is_dir() {
             continue;
         }
-        let name = entry.name().replace('\\', "/");
+        let Ok(entry_name) = entry.name() else {
+            continue;
+        };
+        let name = entry_name.replace('\\', "/");
         if name == "horizon-native.json" {
             let mut s = String::new();
             let _ = entry.read_to_string(&mut s);

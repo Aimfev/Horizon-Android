@@ -574,7 +574,10 @@ pub fn compile_hnmod_bundle_realtime(
         if entry.is_dir() {
             continue;
         }
-        let name = entry.name().replace('\\', "/");
+        let Ok(entry_name) = entry.name() else {
+            continue;
+        };
+        let name = entry_name.replace('\\', "/");
         if !is_safe_zip_entry_name(&name) {
             continue;
         }
@@ -859,7 +862,10 @@ pub fn transpile_jar_to_horizon_mods(
         if entry.is_dir() {
             continue;
         }
-        let name = entry.name().replace('\\', "/");
+        let Ok(entry_name) = entry.name() else {
+            continue;
+        };
+        let name = entry_name.replace('\\', "/");
         if !is_safe_zip_entry_name(&name) {
             continue;
         }
