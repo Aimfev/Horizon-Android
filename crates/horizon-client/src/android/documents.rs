@@ -748,7 +748,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         use std::io::Read;
         set_progress(
             format!("Importing '{name}'..."),
-            "Detecting control layout (MCPE / GoyControl)...".into(),
+            "Detecting control layout (MCPE / GoyControl)...",
             Some(0.5),
         );
         let mut bytes = Vec::new();
@@ -819,7 +819,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             if in_saves && (lower_name.ends_with(".zip") || lower_name.ends_with(".mcworld")) {
                 set_progress(
                     format!("Extracting world '{name}'..."),
-                    "Unpacking world archive into saves/...".into(),
+                    "Unpacking world archive into saves/...",
                     Some(0.92),
                 );
                 if let Ok(Some(world_folder)) =
@@ -844,7 +844,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             {
                 set_progress(
                     format!("Compiling mod '{name}'..."),
-                    "Running real-time Horizon Native Compiler...".into(),
+                    "Running real-time Horizon Native Compiler...",
                     Some(0.92),
                 );
                 let (mod_id, ext) = content_files::read_mod_archive_id(&staged, &name)?;
@@ -985,7 +985,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         drop(output);
         set_progress(
             format!("Verifying {}...", request.kind.label()),
-            "Validating package manifest and assets...".into(),
+            "Validating package manifest and assets...",
             Some(0.9),
         );
         let native_shader = content_files::validate(&staged, request.kind, &name, || {

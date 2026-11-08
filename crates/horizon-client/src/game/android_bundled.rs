@@ -1628,13 +1628,17 @@ pub(super) fn native_camera_shake(game: &Game<'_>, partial: f32, shake: &mut Nat
     shake.roll += (phase * 2.1).sin() * 0.45 * decay;
 }
 
-pub(super) fn native_hud(game: &mut Game<'_>, batch: &mut HudBatch, corners: &mut Corners) {
+pub(super) fn native_hud(
+    game: &mut Game<'_>,
+    batch: &mut horizon_client::hud::HudBatch,
+    corners: &mut horizon_client::extras_hud::Corners,
+) {
     ensure_dynamic_mods_loaded(game, false);
     use horizon_client::extras::Corner;
 
-    let [screen_w, screen_h] = game.native_screen_size(batch);
-    let held_stack = game.slot_view(usize::from(game.selected) + 36).cloned();
-    let held_item = held_stack.as_ref().map(|s| s.item.clone());
+    let [screen_w, screen_h] = [batch.width, batch.height];
+    let held_stack = game.slot_view(usize::from(game.selected) + 36);
+    let held_item = held_stack.as_ref().map(|s| s.item.to_string());
     let (fps, min_fps, low_1_pct) = game.native_frame_rate();
     let (lmb_cps, rmb_cps) = game.native_clicks();
     let w_key = game.native_mapping("key.forward").map(|(d, _)| d).unwrap_or(false);
@@ -1952,8 +1956,8 @@ pub(super) fn native_tooltip(
             && m.features.contains("enchantmenthints")
             && setting_bool(game, &m.id, "show_ench_hints", true)
     });
-    if has_ench_hints && !stack.enchantments.is_empty() {
-        for (ench_id, _) in &stack.enchantments {
+    if has_ench_hints && !stack.enchantments().is_empty() {
+        for (ench_id, _) in stack.enchantments() {
             if let Some(desc) = enchantment_description(ench_id) {
                 lines.push((
                     horizon_client::text::Text::literal(format!("§7  ↳ {desc}")),
@@ -1969,10 +1973,11 @@ pub(super) fn native_tooltip(
             && m.features.contains("shulkerpeek")
             && setting_bool(game, &m.id, "show_container_items", true)
     });
-    if has_shulker && !stack.container.is_empty() {
+    let container_items = stack.extra.as_ref().map(|d| d.container.as_slice());
+    if has_shulker && let Some(container) = container_items && !container.is_empty() {
         let mut counts: BTreeMap<String, u32> = BTreeMap::new();
-        for st in stack.container.iter().flatten() {
-            if st.count > 0 && st.item != "minecraft:air" {
+        for (_, st) in container {
+            if st.count > 0 && &*st.item != "minecraft:air" {
                 let pretty = horizon_client::jar_transpiler::title_case_id(wr_short(&st.item));
                 *counts.entry(pretty).or_default() += st.count;
             }
@@ -2619,7 +2624,7 @@ pub(super) fn native_visuals(
 impl Game<'_> {
     fn mod_held_item_id(&self) -> Option<String> {
         let slot = usize::from(self.selected) + 36;
-        self.slot_view(slot).map(|s| s.item.clone())
+        self.inventory.get(slot).and_then(|s| s.as_ref()).map(|s| s.item.to_string())
     }
 }
 

@@ -1,6 +1,7 @@
 //! Mobile launcher state. Browser operations reuse the desktop backend unchanged.
 use crate::browser::{self, Kind, Project, Query, Source, installed::Installed};
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -340,11 +341,11 @@ impl Config {
         match self.renderer {
             RendererMode::OpenGl => {
                 settings.horizon.api = horizon_client::graphics::GraphicsApi::OpenGl;
-                settings.file.set("preferredGraphicsBackend", crate::options_file::V::String("opengl".into()));
+                settings.file.set("preferredGraphicsBackend", horizon_client::options_file::V::Str("opengl".into()));
             }
             RendererMode::Vulkan | RendererMode::VulkanCompatibility => {
                 settings.horizon.api = horizon_client::graphics::GraphicsApi::Vulkan;
-                settings.file.set("preferredGraphicsBackend", crate::options_file::V::String("vulkan".into()));
+                settings.file.set("preferredGraphicsBackend", horizon_client::options_file::V::Str("vulkan".into()));
             }
         }
         settings.save(&options_path);
