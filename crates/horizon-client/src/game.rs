@@ -8732,8 +8732,11 @@ impl Game<'_> {
         }
         if (100..109).contains(&i) {
             &mut self.craft_grid[i - 100]
+        } else if (36..45).contains(&i) {
+            &mut self.inventory[i - 36]
         } else {
-            &mut self.inventory[i]
+            let idx = i.min(self.inventory.len().saturating_sub(1));
+            &mut self.inventory[idx]
         }
     }
     /// What a slot shows: the crafting result slots are computed.

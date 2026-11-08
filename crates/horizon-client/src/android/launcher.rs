@@ -996,6 +996,7 @@ impl ApplicationHandler for Launcher {
             || self.launching
             || self.session_worker.is_some()
             || self.catalog.busy()
+            || self.catalog.compiler_running.load(std::sync::atomic::Ordering::Relaxed)
             || self.drag.is_some()
             || self.login.pending()
             || self.control_editor.is_some()

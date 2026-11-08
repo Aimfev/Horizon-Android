@@ -522,7 +522,8 @@ pub fn parse_rust_mod_metadata(rust_src: &str, mod_id: &str) -> (Option<String>,
                     if !label_prefix.is_empty()
                         && label_prefix.len() <= 36
                         && !label_prefix.contains('{')
-                        && !label_prefix.contains("HUD Overlay & Visuals")
+                        && !label_prefix.contains("HUD Overlay")
+                        && !label_prefix.contains("Active Ability")
                         && !label_prefix.contains("Active Gameplay Effect")
                         && !label_prefix.contains("Effect Intensity")
                         && !custom_buttons.iter().any(|b| b == label_prefix)

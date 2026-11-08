@@ -1780,7 +1780,6 @@ pub fn draw_goy_static_button(
     };
     // Shape-aware crisp vector GoyControl button in HudBatch (zero staircase artifacts)
     let center = [x + w * 0.5, y + h * 0.5];
-    let spec_c = rgba(255, 255, 255, (opacity.clamp(0.0, 1.0) * 58.0) as u8);
     let draw_convex_poly = |b: &mut HudBatch, pts: &[[f32; 2]]| {
         let Some(white) = a.sprites.get("horizon/white") else {
             return;
@@ -1809,11 +1808,7 @@ pub fn draw_goy_static_button(
                 let b0 = scale_pt(pts[i], sm + t);
                 let b1 = scale_pt(pts[(i + 1) % n], sm + t);
                 b.quad([a0, b0, b1, a1], uv, stroke_c);
-                if a0[1] <= center[1] && a1[1] <= center[1] && (spec_c >> 24) > 0 {
-                    let s0 = scale_pt(pts[i], -1.0);
-                    let s1 = scale_pt(pts[(i + 1) % n], -1.0);
-                    b.quad([s0, a0, a1, s1], uv, spec_c);
-                }
+
             }
         }
     };
@@ -1881,9 +1876,7 @@ pub fn draw_goy_static_button(
         }
         _ => {
             b.fill(a, x, y, w, h, fill_c);
-            if (spec_c >> 24) > 0 && w > 4.0 && h > 4.0 {
-                b.fill(a, x + 1.0, y + 1.0, w - 2.0, 1.2, spec_c);
-            }
+
             if p.stroke_size > 0.1 {
                 let sm = p.stroke_margin;
                 let sx = x - sm;

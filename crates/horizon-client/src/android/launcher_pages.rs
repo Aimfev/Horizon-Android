@@ -417,6 +417,11 @@ pub(super) enum Action {
     CloseUpdateScreen,
     TriggerUpdateInstall,
     CheckForUpdates,
+    CompileAllMods,
+    CompileModOnVps,
+    CompileSingleMod(usize),
+    ToggleVpsCompilerMode,
+    ClearCompilerLogs,
 }
 
 pub(super) fn button(
@@ -784,6 +789,7 @@ fn page_icon(page: Page) -> Icon {
         Page::Packs => Icon::Packs,
         Page::Shaders => Icon::Shaders,
         Page::Installed => Icon::Installed,
+        Page::Compiler => Icon::Terminal,
         Page::Settings => Icon::Settings,
         Page::Skins => Icon::Skins,
     }
@@ -1215,9 +1221,9 @@ impl Launcher {
         let rail_h = (h - 64.0).max(40.0);
         ui.rounded(6.0, 54.0, sidebar_w - 8.0, rail_h, 20.0, active_th.sidebar_bg);
         ui.border(6.0, 54.0, sidebar_w - 8.0, rail_h, 20.0, my3_border());
-        let nav_start_y = 62.0;
-        let nav_step = ((h - nav_start_y - 14.0) / 6.0).clamp(36.0, 48.0);
-        let nav_h = (nav_step - 5.0).clamp(32.0, 41.0);
+        let nav_start_y = 60.0;
+        let nav_step = ((h - nav_start_y - 12.0) / Page::ALL.len() as f32).clamp(31.0, 43.0);
+        let nav_h = (nav_step - 4.0).clamp(27.0, 38.0);
         let selected_idx = Page::ALL
             .iter()
             .position(|p| *p == self.catalog.page)
@@ -1289,8 +1295,8 @@ impl Launcher {
         }
 
         // ---- Main Content Area (with spatial staggered entrance & glassmorphism) ----
-        let content_x = sidebar_w + 22.0;
-        let content_w = (w - content_x - 22.0).max(160.0);
+        let content_x = sidebar_w + 24.0;
+        let content_w = (w - content_x - 24.0).max(160.0);
         let compact = content_w < 430.0;
         let page = self.catalog.page;
         let slide_y = self.anim.page_slide * 0.35;
@@ -2094,6 +2100,8 @@ impl Launcher {
             );
         } else if page == Page::Installed {
             self.draw_installed(&mut ui, content_x, content_w, h, compact, slide_y);
+        } else if page == Page::Compiler {
+            self.draw_compiler_page(&mut ui, content_x, content_w, h, compact, slide_y);
         } else {
             self.draw_settings_page(
                 &mut ui, content_x, content_w, h, compact, slide_y, ime_top_dp,
@@ -2397,6 +2405,392 @@ impl Launcher {
     /// View 1: `InstalledSubTab::Library` (Search, Category Filter Pills, Sort, Rich M3 Cards)
     /// View 2: `InstalledSubTab::FileManager` (Real filesystem manager with Back/Forward history,
     /// Breadcrumbs, Multi-select, Copy/Cut/Paste, Import, Export, Rename, New Folder, Delete, Details)
+    /// Dedicated Live `.jar` & `.hnmod` Compiler Studio (`Page::Compiler`):
+    /// Lets users configure a Remote VPS Build Server (`mod_build_server_unlimited.py`) or Local Real-Time
+    /// Transpiler, trigger full or per-mod compilation, and watch the 6-stage pipeline + live terminal log.
+    fn draw_compiler_page(
+        &mut self,
+        ui: &mut Ui,
+        content_x: f32,
+        content_w: f32,
+        h: f32,
+        compact: bool,
+        slide_y: f32,
+    ) {
+        use horizon_client::content_files::Kind;
+        let header_y = 60.0 + slide_y;
+        ui.text(
+            Face::SemiBold,
+            19.0,
+            content_x,
+            header_y + 2.0,
+            my3_text(),
+            "Mod Compiler Studio (.jar & .hnmod)",
+        );
+
+        let is_running = self.catalog.compiler_running.load(Ordering::Relaxed);
+        let raw_prog = *self
+            .catalog
+            .compiler_progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let stage_str = self
+            .catalog
+            .compiler_stage
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+
+        // Top-right action buttons: Compile All, VPS .so Build, + Import Mod
+        let btn_w = if compact { 96.0 } else { 118.0 };
+        let imp_rect = [content_x + content_w - btn_w, header_y - 1.0, btn_w, 32.0];
+        let vps_rect = [
+            imp_rect[0] - btn_w - 8.0,
+            header_y - 1.0,
+            btn_w,
+            32.0,
+        ];
+        button(
+            ui,
+            &mut self.targets,
+            imp_rect,
+            "+ Import .jar",
+            Action::Import(Kind::Mods),
+            false,
+        );
+        button(
+            ui,
+            &mut self.targets,
+            vps_rect,
+            if is_running { "Compiling..." } else { "Compile All" },
+            Action::CompileAllMods,
+            true,
+        );
+
+        let top = 98.0 + slide_y;
+        let bottom = h - 38.0;
+        let view_h = (bottom - top).max(80.0);
+
+        let mod_items: Vec<(usize, crate::catalog::LocalItem)> = self
+            .catalog
+            .local
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter(|(_, item)| item.kind == Kind::Mods)
+            .collect();
+
+        let total_content_h = 118.0 + 96.0 + 162.0 + 34.0 + (mod_items.len().max(1) as f32) * 62.0 + 18.0;
+        let max_scroll = (total_content_h - view_h).max(0.0);
+        self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+        self.list_view = Some([top, bottom, max_scroll]);
+
+        ui.set_clip(Some([content_x - 2.0, top, content_w + 4.0, view_h]));
+        let mut cy = top - self.catalog.scroll;
+
+        // ---- Card 1: VPS & Local Compiler Configuration Bar ----
+        let c1_h = 110.0;
+        if cy + c1_h >= top && cy <= bottom {
+            ui.rounded(content_x, cy, content_w, c1_h, 18.0, my3_surface());
+            ui.border(content_x, cy, content_w, c1_h, 18.0, my3_border());
+            ui.rounded(content_x + 14.0, cy + 14.0, 38.0, 38.0, 12.0, my3_accent_soft());
+            ui.icon(Icon::Terminal, content_x + 23.0, cy + 23.0, 20.0, my3_accent());
+
+            let mode_title = if self.catalog.config.use_vps_compiler {
+                "VPS Cloud + Local Real-Time Compiler (Active)"
+            } else {
+                "Local Real-Time Transpiler (.jar -> .hnmod + .hmod)"
+            };
+            let fitted_t = ui.fit_text(Face::SemiBold, 14.5, mode_title, (content_w - 210.0).max(90.0));
+            ui.text(Face::SemiBold, 14.5, content_x + 62.0, cy + 12.0, my3_text(), &fitted_t);
+
+            let sub_desc = "Compiles Java .jar & .hnmod bytecode/Mixins into native Rust mod_api hooks & VPS libhorizon_android.so";
+            let fitted_s = ui.fit_text(Face::Regular, 11.5, sub_desc, (content_w - 210.0).max(90.0));
+            ui.text(Face::Regular, 11.5, content_x + 62.0, cy + 33.0, my3_muted(), &fitted_s);
+
+            let mode_btn_w = if compact { 114.0 } else { 138.0 };
+            let mode_rect = [content_x + content_w - mode_btn_w - 14.0, cy + 14.0, mode_btn_w, 34.0];
+            button(
+                ui,
+                &mut self.targets,
+                mode_rect,
+                if self.catalog.config.use_vps_compiler {
+                    "VPS: Enabled"
+                } else {
+                    "VPS: Local Only"
+                },
+                Action::ToggleVpsCompilerMode,
+                self.catalog.config.use_vps_compiler,
+            );
+            self.list_targets.push((mode_rect, Action::ToggleVpsCompilerMode));
+
+            // VPS Server URL Field + Build on VPS CTA
+            let row_y = cy + 62.0;
+            let build_vps_w = if compact { 118.0 } else { 148.0 };
+            let url_w = (content_w - build_vps_w - 36.0).max(120.0);
+            let url_rect = ui.text_field(
+                content_x + 14.0,
+                row_y,
+                url_w,
+                36.0,
+                "",
+                &self.catalog.config.vps_compiler_url,
+                "https://your-vps-domain:8788 (mod_build_server_unlimited.py)",
+                self.catalog.editing == Some("vps_url"),
+            );
+            if let Some(c) = ui.clip_rect(url_rect) {
+                self.targets.push((c, Action::Field("vps_url")));
+            }
+            self.list_targets.push((url_rect, Action::Field("vps_url")));
+
+            let vps_btn_rect = [content_x + 22.0 + url_w, row_y, build_vps_w, 36.0];
+            button(
+                ui,
+                &mut self.targets,
+                vps_btn_rect,
+                "Build .so on VPS",
+                Action::CompileModOnVps,
+                true,
+            );
+            self.list_targets.push((vps_btn_rect, Action::CompileModOnVps));
+        }
+        cy += c1_h + 10.0;
+
+        // ---- Card 2: Live 6-Stage Pipeline Progress Bar ----
+        let c2_h = 90.0;
+        if cy + c2_h >= top && cy <= bottom {
+            ui.rounded(content_x, cy, content_w, c2_h, 18.0, my3_card_bg());
+            ui.border(
+                content_x,
+                cy,
+                content_w,
+                c2_h,
+                18.0,
+                if is_running { my3_accent() } else { my3_card_border() },
+            );
+
+            let pct = (raw_prog * 100.0).round() as u32;
+            let fitted_stage = ui.fit_text(Face::SemiBold, 13.0, &stage_str, (content_w - 90.0).max(80.0));
+            ui.text(Face::SemiBold, 13.0, content_x + 16.0, cy + 10.0, my3_text(), &fitted_stage);
+            let pct_label = format!("{pct}%");
+            let pw = ui.measure(Face::SemiBold, 13.0, &pct_label);
+            ui.text(
+                Face::SemiBold,
+                13.0,
+                content_x + content_w - pw - 16.0,
+                cy + 10.0,
+                my3_accent(),
+                &pct_label,
+            );
+
+            // Animated Progress Track
+            let bar_x = content_x + 16.0;
+            let bar_y = cy + 34.0;
+            let bar_w = (content_w - 32.0).max(60.0);
+            ui.rounded(bar_x, bar_y, bar_w, 10.0, 5.0, my3_track());
+            let fill_frac = if is_running {
+                raw_prog.clamp(0.06, 1.0)
+            } else {
+                raw_prog.clamp(0.0, 1.0)
+            };
+            if fill_frac > 0.0 {
+                let fw = (bar_w * fill_frac).max(10.0);
+                ui.rounded(bar_x, bar_y, fw, 10.0, 5.0, my3_accent());
+                if is_running && fw > 28.0 {
+                    let sw = (fw * 0.28).clamp(18.0, 64.0);
+                    let sx = bar_x + (fw - sw) * self.anim.shimmer_phase.clamp(0.0, 1.0);
+                    ui.rounded(sx, bar_y + 1.5, sw, 7.0, 3.5, color::hex(0xDFD4FF, 180));
+                }
+            }
+
+            // 6 Stage Pills
+            let stages = ["1. Scan", "2. Bytecode", "3. Rust Gen", "4. VPS Build", "5. Verify", "6. Active"];
+            let active_stage_idx = ((raw_prog * 6.0).floor() as usize).min(5);
+            let gap = 5.0;
+            let pill_w = ((bar_w - gap * 5.0) / 6.0).max(32.0);
+            let pill_y = cy + 52.0;
+            for (i, s_name) in stages.iter().enumerate() {
+                let px = bar_x + i as f32 * (pill_w + gap);
+                let done = raw_prog >= 0.99 || (raw_prog > 0.01 && i < active_stage_idx);
+                let cur = is_running && i == active_stage_idx;
+                ui.rounded(
+                    px,
+                    pill_y,
+                    pill_w,
+                    24.0,
+                    8.0,
+                    if cur {
+                        my3_accent_soft()
+                    } else if done {
+                        my3_surface_high()
+                    } else {
+                        my3_surface()
+                    },
+                );
+                ui.border(
+                    px,
+                    pill_y,
+                    pill_w,
+                    24.0,
+                    8.0,
+                    if cur || done { my3_accent() } else { my3_border() },
+                );
+                ui.centered_fit(
+                    Face::Medium,
+                    10.0,
+                    [px + 3.0, pill_y, pill_w - 6.0, 24.0],
+                    if cur || done { my3_text() } else { my3_muted() },
+                    s_name,
+                );
+            }
+        }
+        cy += c2_h + 10.0;
+
+        // ---- Card 3: Live Real-Time Compiler Terminal Console ----
+        let c3_h = 152.0;
+        if cy + c3_h >= top && cy <= bottom {
+            ui.rounded(content_x, cy, content_w, c3_h, 18.0, color::hex(0x0B0D14, 248));
+            ui.border(content_x, cy, content_w, c3_h, 18.0, my3_border());
+            ui.text(
+                Face::SemiBold,
+                11.5,
+                content_x + 16.0,
+                cy + 10.0,
+                my3_accent(),
+                "LIVE COMPILER OUTPUT STREAM (REAL-TIME WATCH)",
+            );
+            let clr_rect = [content_x + content_w - 92.0, cy + 8.0, 78.0, 24.0];
+            button(
+                ui,
+                &mut self.targets,
+                clr_rect,
+                "Clear Log",
+                Action::ClearCompilerLogs,
+                false,
+            );
+
+            let logs = self
+                .catalog
+                .compiler_logs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let visible_lines = 6usize;
+            let start = logs.len().saturating_sub(visible_lines);
+            for (line_idx, line) in logs[start..].iter().enumerate() {
+                let ly = cy + 36.0 + line_idx as f32 * 18.0;
+                let fitted = ui.fit_text(Face::Mono, 11.0, line, (content_w - 32.0).max(80.0));
+                let col = if line.contains("SUCCESS:") || line.contains("succeeded") {
+                    color::hex(0x63E69A, 255)
+                } else if line.contains("[!]") || line.contains("Error") {
+                    color::hex(0xFF8080, 255)
+                } else if line.contains("[VPS]") {
+                    my3_accent()
+                } else {
+                    color::hex(0xD5DCF2, 245)
+                };
+                ui.text(Face::Mono, 11.0, content_x + 16.0, ly, col, &fitted);
+            }
+        }
+        cy += c3_h + 12.0;
+
+        // ---- Card 4: Installed Mod Compilation Queue ----
+        if cy + 28.0 >= top && cy <= bottom {
+            ui.text(
+                Face::SemiBold,
+                13.5,
+                content_x + 4.0,
+                cy,
+                my3_text(),
+                &format!("Profile Mod Compilation Queue ({})", mod_items.len()),
+            );
+        }
+        cy += 28.0;
+
+        if mod_items.is_empty() {
+            let empty_h = 64.0;
+            if cy + empty_h >= top && cy <= bottom {
+                ui.rounded(content_x, cy, content_w, empty_h, 16.0, my3_card_bg());
+                ui.border(content_x, cy, content_w, empty_h, 16.0, my3_card_border());
+                ui.text(
+                    Face::Medium,
+                    13.0,
+                    content_x + 16.0,
+                    cy + 12.0,
+                    my3_text(),
+                    "No external .jar or .hnmod mods in this profile yet.",
+                );
+                ui.text(
+                    Face::Regular,
+                    11.5,
+                    content_x + 16.0,
+                    cy + 34.0,
+                    my3_muted(),
+                    "Install any mod from the Mods tab or tap '+ Import .jar' above to compile and watch live.",
+                );
+            }
+        } else {
+            for (local_idx, item) in mod_items {
+                let row_h = 56.0;
+                if cy + row_h >= top && cy <= bottom {
+                    ui.rounded(content_x, cy, content_w, row_h, 16.0, my3_card_bg());
+                    ui.border(
+                        content_x,
+                        cy,
+                        content_w,
+                        row_h,
+                        16.0,
+                        if item.enabled { my3_accent() } else { my3_card_border() },
+                    );
+                    let badge_col = if item.enabled {
+                        color::hex(0x234937, 235)
+                    } else {
+                        my3_surface_high()
+                    };
+                    ui.rounded(content_x + 12.0, cy + 10.0, 74.0, 20.0, 10.0, badge_col);
+                    ui.centered_fit(
+                        Face::SemiBold,
+                        9.0,
+                        [content_x + 14.0, cy + 10.0, 70.0, 20.0],
+                        if item.enabled {
+                            color::hex(0x69F0AE, 255)
+                        } else {
+                            my3_muted()
+                        },
+                        if item.enabled { "COMPILED" } else { "DISABLED" },
+                    );
+
+                    let title_max = (content_w - 230.0).max(80.0);
+                    let fitted_title = ui.fit_text(Face::SemiBold, 14.0, &item.title, title_max);
+                    ui.text(Face::SemiBold, 14.0, content_x + 94.0, cy + 8.0, my3_text(), &fitted_title);
+
+                    let sub_max = (content_w - 210.0).max(80.0);
+                    let fitted_sub = ui.fit_text(Face::Regular, 11.2, &item.subtitle, sub_max);
+                    ui.text(Face::Regular, 11.2, content_x + 14.0, cy + 32.0, my3_muted(), &fitted_sub);
+
+                    let recomp_w = if compact { 90.0 } else { 108.0 };
+                    let recomp_rect = [
+                        content_x + content_w - recomp_w - 12.0,
+                        cy + (row_h - 34.0) * 0.5,
+                        recomp_w,
+                        34.0,
+                    ];
+                    button(
+                        ui,
+                        &mut self.targets,
+                        recomp_rect,
+                        "Recompile",
+                        Action::CompileSingleMod(local_idx),
+                        false,
+                    );
+                    self.list_targets.push((recomp_rect, Action::CompileSingleMod(local_idx)));
+                }
+                cy += row_h + 6.0;
+            }
+        }
+
+        ui.set_clip(None);
+    }
+
     fn draw_installed(
         &mut self,
         ui: &mut Ui,
@@ -6938,10 +7332,42 @@ impl Launcher {
                     "theme_grad_mid" => &self.catalog.config.theme.gradient_mid_hex,
                     "theme_grad_end" => &self.catalog.config.theme.gradient_end_hex,
                     "installed_search" => &self.catalog.installed_query,
+                    "vps_url" => &self.catalog.config.vps_compiler_url,
                     "fm_rename" | "fm_new_folder" => &self.catalog.fm_input_text,
                     _ => &self.catalog.query,
                 };
                 crate::platform::show(initial);
+            }
+            Some(Action::CompileAllMods) => {
+                self.catalog.start_live_compiler(&self.home, None, false);
+                self.catalog.status = "Live compiler started — watch real-time output in the Compiler console.".into();
+            }
+            Some(Action::CompileModOnVps) => {
+                self.catalog.start_live_compiler(&self.home, None, true);
+                self.catalog.status = "Submitting .hnmod bundles to remote VPS compiler server...".into();
+            }
+            Some(Action::CompileSingleMod(idx)) => {
+                if let Some(item) = self.catalog.local.get(idx).cloned() {
+                    let raw = item
+                        .file
+                        .strip_prefix("horizon-native-mods/")
+                        .or_else(|| item.file.strip_prefix("horizon-mods/"))
+                        .unwrap_or(&item.file)
+                        .to_owned();
+                    self.catalog.start_live_compiler(&self.home, Some(raw), false);
+                }
+            }
+            Some(Action::ToggleVpsCompilerMode) => {
+                self.catalog.config.use_vps_compiler = !self.catalog.config.use_vps_compiler;
+                let _ = self.catalog.config.save(&self.home);
+                self.catalog.status = if self.catalog.config.use_vps_compiler {
+                    "VPS Cloud + Local Real-Time Compiler enabled.".into()
+                } else {
+                    "Local Real-Time Transpiler mode enabled (offline-ready).".into()
+                };
+            }
+            Some(Action::ClearCompilerLogs) => {
+                self.catalog.clear_compiler_logs();
             }
             Some(Action::Install(i)) => self.catalog.install(&self.home, i),
             Some(Action::Next) => {

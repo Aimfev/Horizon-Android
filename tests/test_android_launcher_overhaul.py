@@ -1091,9 +1091,25 @@ class LauncherOverhaulTests(unittest.TestCase):
 
         ui_theme = (ROOT / "crates/horizon-client/src/ui_theme.rs").read_text(encoding="utf-8")
         self.assertIn("set_stagger_transition", ui_theme)
-        self.assertIn("is_glass_surface", ui_theme)
+        self.assertNotIn("is_glass_surface", ui_theme)
+        self.assertNotIn("sheen_h", ui_theme)
         self.assertIn("draw_convex_polygon_dp", ui_theme)
-        self.assertIn("ambient_time()", ui_theme)
+
+        game_rs = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
+        self.assertIn("else if (36..45).contains(&i)", game_rs)
+
+        bundled_rs = (ROOT / "crates/horizon-client/src/game/android_bundled.rs").read_text(encoding="utf-8")
+        self.assertNotIn("game.slot_view(usize::from(game.selected) + 36)", bundled_rs)
+        self.assertIn("game.inventory.get(game.selected).and_then(Option::as_ref).cloned()", bundled_rs)
+
+        catalog_rs = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
+        self.assertIn('Self::Compiler => "Compiler"', catalog_rs)
+        self.assertIn("pub fn start_live_compiler", catalog_rs)
+        self.assertIn("pub vps_compiler_url: String", catalog_rs)
+
+        lp_rs = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
+        self.assertIn("fn draw_compiler_page", lp_rs)
+        self.assertIn("LIVE COMPILER OUTPUT STREAM (REAL-TIME WATCH)", lp_rs)
 
 
 if __name__ == "__main__":

@@ -1637,7 +1637,7 @@ pub(super) fn native_hud(
     use horizon_client::extras::Corner;
 
     let [screen_w, screen_h] = [batch.width, batch.height];
-    let held_stack = game.slot_view(usize::from(game.selected) + 36);
+    let held_stack = game.inventory.get(game.selected).and_then(Option::as_ref).cloned();
     let held_item = held_stack.as_ref().map(|s| s.item.to_string());
     let (fps, min_fps, low_1_pct) = game.native_frame_rate();
     let (lmb_cps, rmb_cps) = game.native_clicks();
@@ -2623,8 +2623,10 @@ pub(super) fn native_visuals(
 
 impl Game<'_> {
     fn mod_held_item_id(&self) -> Option<String> {
-        let slot = usize::from(self.selected) + 36;
-        self.inventory.get(slot).and_then(|s| s.as_ref()).map(|s| s.item.to_string())
+        self.inventory
+            .get(self.selected)
+            .and_then(Option::as_ref)
+            .map(|s| s.item.to_string())
     }
 }
 

@@ -1554,7 +1554,7 @@ pub fn draw_goy_hud(
             continue;
         }
         let [nx, ny, nw, nh] = p.rect(tc.aspect());
-        let [mut rx, mut ry, mut rw, mut rh] = [nx * w, ny * h, nw * w, nh * h];
+        let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
         let alpha = (p.opacity.clamp(0.0, 1.0) * hud_scale).clamp(0.0, 1.0);
         if alpha <= 0.001 {
             continue;
@@ -1570,15 +1570,7 @@ pub fn draw_goy_hud(
         let held = is_active_token && !p.toggleable;
         let toggled = (is_active_token && p.toggleable) || is_vmouse_on;
 
-        // Tactile press squash micro-interaction when held or swiped through
-        if held {
-            let inset_x = rw * 0.03;
-            let inset_y = rh * 0.03;
-            rx += inset_x;
-            ry += inset_y;
-            rw -= inset_x * 2.0;
-            rh -= inset_y * 2.0;
-        }
+
 
         let raw_fill = if held {
             p.on_click_color
