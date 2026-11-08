@@ -762,8 +762,8 @@ pub fn sync_mods_folder(profile_root: &Path) {
     }
 
     // 2. Sync enabled built-in Horizon mods (ANDROID_BUNDLED) and any enabled mod IDs in horizon-mods.txt
-    let on = crate::mod_list::ModList::load(profile_root);
-    for &(b_id, b_title, b_desc) in &crate::mod_list::ANDROID_BUNDLED {
+    let on = horizon_client::mod_list::ModList::load(profile_root);
+    for &(b_id, b_title, b_desc) in &horizon_client::mod_list::ANDROID_BUNDLED {
         let descriptor = mods_dir.join(format!("{b_id}.mod.json"));
         if on.enabled.contains(b_id) && !on.disabled.contains(b_id) {
             if !descriptor.exists() {
@@ -1104,7 +1104,7 @@ pub fn fm_delete(
                 .or_else(|| mod_file.strip_suffix(".hmod"))
                 .or_else(|| mod_file.strip_suffix(".jar"))
                 .unwrap_or(mod_file);
-            let mut on = crate::mod_list::ModList::load(profile_root);
+            let mut on = horizon_client::mod_list::ModList::load(profile_root);
             if on.enabled.remove(mod_id) || mod_file.ends_with(".mod.json") {
                 on.disabled.insert(mod_id.to_owned());
                 on.save(profile_root);
@@ -1406,7 +1406,7 @@ pub fn extract_world_zip_if_valid(
     let mut level_dat_prefix: Option<String> = None;
     for i in 0..archive.len() {
         let Ok(entry) = archive.by_index(i) else { continue };
-        let Ok(entry_name) = entry.name() else { continue };
+        let entry_name = entry.name();
         let name = entry_name.replace('\\', "/");
         if name == "level.dat" {
             level_dat_prefix = Some(String::new());
@@ -1455,7 +1455,7 @@ pub fn extract_world_zip_if_valid(
 
     for i in 0..archive.len() {
         let Ok(mut entry) = archive.by_index(i) else { continue };
-        let Ok(entry_name) = entry.name() else { continue };
+        let entry_name = entry.name();
         let full_name = entry_name.replace('\\', "/");
         let rel = if prefix.is_empty() {
             full_name.as_str()

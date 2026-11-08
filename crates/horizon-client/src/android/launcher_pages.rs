@@ -1596,7 +1596,7 @@ impl Launcher {
                     );
                 }
 
-                let btn_y = (h - 92.0).max(card_y + card_h + 12.0);
+                let btn_y = (h - 92.0).max(log_y + log_h + 12.0);
                 let play_w = content_w.min(256.0);
                 let is_launching = self.launching || self.session_worker.is_some();
                 if is_launching && installed {

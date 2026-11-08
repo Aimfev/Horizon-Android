@@ -562,7 +562,7 @@ impl Game<'_> {
             sounds.extend(self.native_builds.mining.take_sounds());
             for sound in sounds {
                 self.audio
-                    .play_samples(sound.samples(), super::setup::fishing::RATE, 0.3);
+                    .play_samples(sound.samples().to_vec(), super::setup::fishing::RATE, 0.3);
             }
         }
         let card = &mut self.native_builds;

@@ -450,7 +450,6 @@ pub struct NativeZoom {
 
 /// A player on the server, as a server hook sees them.
 #[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
 pub struct NativeServerPlayer {
     pub uuid: u128,
     pub name: String,

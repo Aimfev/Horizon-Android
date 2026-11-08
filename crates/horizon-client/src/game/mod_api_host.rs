@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(super) use super::*;
 use super::BlockStateId;
 use horizon_client::mod_api::BlockPos;
 use horizon_world::level::Ticks;
@@ -26,8 +28,10 @@ impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
     fn attachments(
         &mut self,
         _holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
+    ) -> std::result::Result<
+        &mut horizon_client::mod_api::Attachments,
+        horizon_client::mod_api::AttachmentError,
+    > {
         Err(horizon_client::mod_api::AttachmentError::MissingHolder)
     }
     fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {
@@ -64,8 +68,10 @@ impl horizon_client::mod_api::LevelRandomHost for LevelTicks<'_, &mut super::Gam
     fn attachments(
         &mut self,
         holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
+    ) -> std::result::Result<
+        &mut horizon_client::mod_api::Attachments,
+        horizon_client::mod_api::AttachmentError,
+    > {
         horizon_client::mod_api::LevelRandomHost::attachments(&mut *self.level, holder)
     }
     fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {

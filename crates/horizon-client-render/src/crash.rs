@@ -602,6 +602,71 @@ pub fn report_if_debug_crash(
     true
 }
 
+/// A report for an error `main` got back: the game ends with it.
+pub fn report_error(
+    home: &Path,
+    side: &'static str,
+    error: &(dyn std::error::Error + 'static),
+) -> Option<PathBuf> {
+    if let Some(debug) = error.downcast_ref::<DebugCrash>() {
+        return deliver(
+            home,
+            Report {
+                time: Local::now(),
+                description: DebugCrash::MESSAGE.into(),
+                error: DebugCrash::MESSAGE.into(),
+                stack: debug.stack.clone(),
+                thread: thread_name(side),
+                side,
+                details: system_details(side),
+                log: crate::logging::recent_lines(),
+            },
+        );
+    }
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(e) = source {
+        let _ = write!(message, "\nCaused by: {e}");
+        source = e.source();
+    }
+    deliver(
+        home,
+        Report {
+            time: Local::now(),
+            description: "Fatal error".into(),
+            error: message,
+            stack: String::new(),
+            thread: thread_name(side),
+            side,
+            details: system_details(side),
+            log: crate::logging::recent_lines(),
+        },
+    )
+}
+
+/// Called every frame: panics once `HORIZON_DEBUG_CRASH` asks (development builds only).
+pub fn debug_crash_tick() {
+    static AT: std::sync::OnceLock<Option<(std::time::Instant, std::time::Duration)>> =
+        std::sync::OnceLock::new();
+    if let Some((first, after)) =
+        AT.get_or_init(|| debug_crash_after().map(|d| (std::time::Instant::now(), d)))
+        && first.elapsed() >= *after
+    {
+        panic!("Manually triggered debug crash");
+    }
+}
+
+/// Development builds crash on purpose when `HORIZON_DEBUG_CRASH` is set (vanilla has F3+C held
+/// for ten seconds): the number is seconds after the first frame (default 5).
+pub fn debug_crash_after() -> Option<std::time::Duration> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let value = std::env::var("HORIZON_DEBUG_CRASH").ok()?;
+    let seconds = value.parse::<f64>().unwrap_or(5.0).max(0.0);
+    Some(std::time::Duration::from_secs_f64(seconds))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,6 @@
-//! Android's native entry point. The simulation and renderer are shared with desktop.
-#![cfg(target_os = "android")]
+// Android's native entry point. The simulation and renderer are shared with desktop.
+
+pub use horizon_client::mod_list;
 
 #[allow(dead_code, clippy::collapsible_match)]
 // Shared vanilla match structure and desktop harnesses.
