@@ -24,6 +24,7 @@ pub fn inputs() -> horizon_shaders::GbuffersInputs {
          hz_ProjectionMatrixInverse = hz_hand_projection_inverse;\n    \
          hz_ModelViewProjectionMatrix = hz_hand_projection * hz_ModelViewMatrix;\n",
     );
+    inputs.item_id_declared = true;
     inputs
 }
 

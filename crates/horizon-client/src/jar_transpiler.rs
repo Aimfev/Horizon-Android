@@ -103,7 +103,7 @@ fn sanitize_identifier_path(raw: &str) -> String {
     out.trim_matches('_').to_owned()
 }
 
-fn extract_toml_field(toml_text: &str, key: &str) -> Option<String> {
+pub fn extract_toml_field(toml_text: &str, key: &str) -> Option<String> {
     for line in toml_text.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('#') {
@@ -553,10 +553,15 @@ pub fn compile_hnmod_bundle_realtime(
     let mut zip = ZipArchive::new(Cursor::new(&raw_bytes))
         .map_err(|e| format!("Invalid .hnmod zip archive {}: {e}", hnmod_source.display()))?;
 
-    let fallback_stem = hnmod_source
+    let raw_stem = hnmod_source
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("native_mod");
+    let fallback_stem = raw_stem
+        .find('-')
+        .filter(|&i| raw_stem[i + 1..].chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(|i| &raw_stem[..i])
+        .unwrap_or(raw_stem);
 
     let mut mod_id = sanitize_mod_id(fallback_stem);
     let mut version = "1.0.0".to_owned();
@@ -603,6 +608,24 @@ pub fn compile_hnmod_bundle_realtime(
                         .iter()
                         .filter_map(|p| p.as_str().map(str::to_owned))
                         .collect();
+                }
+            }
+        } else if name == "horizon-mod.toml" || name == "mod.toml" {
+            let s = String::from_utf8_lossy(&buf);
+            if let Some(id) = extract_toml_field(&s, "id") {
+                mod_id = sanitize_mod_id(&id);
+            }
+            if let Some(n) = extract_toml_field(&s, "name") {
+                if title.is_empty() {
+                    title = n;
+                }
+            }
+            if let Some(ver) = extract_toml_field(&s, "version") {
+                version = ver;
+            }
+            if let Some(desc) = extract_toml_field(&s, "description") {
+                if description.is_empty() {
+                    description = desc;
                 }
             }
         } else if name == "src/lib.rs" {

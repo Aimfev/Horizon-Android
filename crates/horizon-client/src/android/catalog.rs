@@ -2068,12 +2068,20 @@ impl Catalog {
             {
                 match browser::installed::install(source.as_ref(), &project, true, &game, &report) {
                     Ok(entries) => {
+                        let mut compiled_any = false;
                         for e in &entries {
                             let p = game.join(&e.file);
-                            if e.file.ends_with(".hnmod") && p.is_file() {
-                                let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&p, &game);
+                            if (e.file.ends_with(".hnmod") || e.file.ends_with(".hmod")) && p.is_file() {
+                                if horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&p, &game).is_ok() {
+                                    compiled_any = true;
+                                }
                             }
                         }
+                        if !compiled_any {
+                            let _ = horizon_client::jar_transpiler::install_builtin_horizon_mod(&project.id, &game);
+                        }
+                        let clean_id = horizon_client::jar_transpiler::sanitize_mod_id(&project.id);
+                        horizon_client::jar_transpiler::enable_mod_in_profile(&game, &clean_id);
                         entries.len()
                     }
                     Err(_) => {
@@ -2133,10 +2141,6 @@ impl Catalog {
         let mut settings = horizon_client::settings::Settings::load(&path);
         match item.kind {
             horizon_client::content_files::Kind::Mods => {
-                if !cfg!(target_pointer_width = "64") {
-                    self.status = "Sandboxed code mods require a 64-bit APK".into();
-                    return;
-                }
                 let mut on = horizon_client::mod_list::ModList::load(&game);
                 if let Some(bid) = item.file.strip_prefix("builtin:") {
                     if item.enabled {
@@ -2145,26 +2149,37 @@ impl Catalog {
                     } else {
                         on.disabled.remove(bid);
                         on.enabled.insert(bid.to_owned());
+                        let _ = horizon_client::jar_transpiler::install_builtin_horizon_mod(bid, &game);
                     }
                     on.save(&game);
-                    self.status = "Selection saved for the next game launch".into();
+                    self.status = "Mod updated and ready in-game".into();
                     self.refresh(home);
                     return;
                 }
-                let id = item
+                let raw_id = item
                     .file
                     .strip_prefix("horizon-native-mods/")
                     .or_else(|| item.file.strip_prefix("horizon-mods/"))
                     .unwrap_or(&item.file);
-                let id = id
+                let raw_id = raw_id
                     .strip_suffix(".hmod")
-                    .or_else(|| id.strip_suffix(".hnmod"))
-                    .or_else(|| id.strip_suffix(".jar"))
-                    .unwrap_or(id);
-                if item.enabled {
-                    on.enabled.remove(id);
-                } else {
-                    on.enabled.insert(id.to_owned());
+                    .or_else(|| raw_id.strip_suffix(".hnmod"))
+                    .or_else(|| raw_id.strip_suffix(".jar"))
+                    .unwrap_or(raw_id);
+                let base_id = raw_id
+                    .find('-')
+                    .filter(|&i| raw_id[i + 1..].chars().next().is_some_and(|c| c.is_ascii_digit()))
+                    .map(|i| &raw_id[..i])
+                    .unwrap_or(raw_id);
+                let clean_id = horizon_client::jar_transpiler::sanitize_mod_id(base_id);
+                for id in [raw_id, base_id, clean_id.as_str()] {
+                    if item.enabled {
+                        on.enabled.remove(id);
+                        on.disabled.insert(id.to_owned());
+                    } else {
+                        on.disabled.remove(id);
+                        on.enabled.insert(id.to_owned());
+                    }
                 }
                 on.save(&game);
             }

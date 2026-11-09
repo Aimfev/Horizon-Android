@@ -268,6 +268,7 @@ impl PackAtlas {
                 .collect(),
             after: String::new(),
             alpha_test: None,
+            ..Default::default()
         }
     }
 }

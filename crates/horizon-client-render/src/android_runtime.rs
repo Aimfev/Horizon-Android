@@ -155,7 +155,7 @@ pub fn keypad_state() -> crate::gamepad::PadState {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .poll()
 }
-static OPEN_GL: AtomicBool = AtomicBool::new(cfg!(target_pointer_width = "32"));
+static OPEN_GL: AtomicBool = AtomicBool::new(false);
 static PREFER_VULKAN: AtomicBool = AtomicBool::new(false);
 pub fn configure_graphics(open_gl: bool) {
     OPEN_GL.store(open_gl, Ordering::Relaxed);

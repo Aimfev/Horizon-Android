@@ -101,6 +101,7 @@ pub fn inputs() -> horizon_shaders::GbuffersInputs {
             op: ">",
             reference: 0.1,
         }),
+        ..Default::default()
     }
 }
 
@@ -136,6 +137,7 @@ pub fn cloud_inputs() -> horizon_shaders::GbuffersInputs {
             .collect(),
         after: String::new(),
         alpha_test: None,
+        ..Default::default()
     }
 }
 

@@ -147,6 +147,7 @@ struct DynamicRuntimeState {
     carried_block_name: Option<String>,
     fullbright_was_active: bool,
     saved_gamma: Option<f32>,
+    initial_modlist_loaded: bool,
 }
 
 static DYNAMIC_RUNTIME: OnceLock<Mutex<DynamicRuntimeState>> = OnceLock::new();
@@ -185,11 +186,16 @@ fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
     let bytes = fs::read(path).ok()?;
     let mut zip = zip::ZipArchive::new(Cursor::new(&bytes)).ok()?;
 
-    let mut mod_id = path
+    let raw_stem = path
         .file_stem()
         .and_then(|s| s.to_str())
-        .map(horizon_client::jar_transpiler::sanitize_mod_id)
-        .unwrap_or_else(|| "native_mod".to_owned());
+        .unwrap_or("native_mod");
+    let clean_stem = raw_stem
+        .find('-')
+        .filter(|&i| raw_stem[i + 1..].chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(|i| &raw_stem[..i])
+        .unwrap_or(raw_stem);
+    let mut mod_id = horizon_client::jar_transpiler::sanitize_mod_id(clean_stem);
     let mut version = "1.0.0".to_owned();
     let mut title = String::new();
     let mut description = String::new();
@@ -262,6 +268,28 @@ fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
                 if let Some(arr) = v.get("commands").and_then(|x| x.as_array()) {
                     for cmd in arr.iter().filter_map(|x| x.as_str()) {
                         commands.push(cmd.to_owned());
+                    }
+                }
+            }
+        } else if name == "horizon-mod.toml" || name == "mod.toml" {
+            let mut s = String::new();
+            if entry.read_to_string(&mut s).is_ok() {
+                if let Some(id) = horizon_client::jar_transpiler::extract_toml_field(&s, "id") {
+                    mod_id = horizon_client::jar_transpiler::sanitize_mod_id(&id);
+                }
+                if let Some(t) = horizon_client::jar_transpiler::extract_toml_field(&s, "name") {
+                    if title.is_empty() {
+                        title = t;
+                    }
+                }
+                if let Some(ver) = horizon_client::jar_transpiler::extract_toml_field(&s, "version") {
+                    if !ver.trim().is_empty() {
+                        version = ver;
+                    }
+                }
+                if let Some(d) = horizon_client::jar_transpiler::extract_toml_field(&s, "description") {
+                    if description.is_empty() {
+                        description = d;
                     }
                 }
             }
@@ -366,8 +394,63 @@ fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
     })
 }
 
+fn synthesize_builtin_hnmod(id: &str, name: &str, version: &str, desc: &str) -> DynamicHnmod {
+    let mod_id = horizon_client::jar_transpiler::sanitize_mod_id(id);
+    let features = horizon_client::jar_transpiler::infer_features_from_id_and_signals(
+        &mod_id,
+        name,
+        desc,
+        "",
+        &BTreeSet::new(),
+    );
+    let mut keys = Vec::new();
+    if features.contains("veinminer") {
+        keys.push([
+            "veinmine".into(),
+            "Veinmine / Excavate key".into(),
+            "key.keyboard.grave.accent".into(),
+        ]);
+    } else if features.contains("treefall") {
+        keys.push([
+            "treefall_toggle".into(),
+            "Toggle TreeFall".into(),
+            "key.keyboard.v".into(),
+        ]);
+    } else if features.contains("fullbright") {
+        keys.push([
+            "fullbright_toggle".into(),
+            "Toggle Fullbright".into(),
+            "key.keyboard.g".into(),
+        ]);
+    } else if features.contains("toggle_sprint") {
+        keys.push([
+            "toggle_sprint".into(),
+            "Toggle Sprint".into(),
+            "key.keyboard.r".into(),
+        ]);
+    } else if features.contains("waypoints") {
+        keys.push([
+            "waypoint_add".into(),
+            "Create Waypoint at Player".into(),
+            "key.keyboard.b".into(),
+        ]);
+    }
+    DynamicHnmod {
+        id: mod_id.clone(),
+        title: format!("{name} {version}"),
+        description: desc.to_owned(),
+        features,
+        custom_buttons: Vec::new(),
+        items: Vec::new(),
+        blocks: Vec::new(),
+        keys,
+        commands: vec![mod_id],
+        zoom_held: false,
+        vein_key_held: false,
+    }
+}
+
 fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
-    let _ = game;
     let mut guard = match runtime().lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
@@ -384,11 +467,14 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
 
     let roots = candidate_profile_roots();
 
-    // Sync ModList from disk if LIVE_MOD_STATE hasn't been populated yet
-    for root in &roots {
-        if root.join(horizon_client::mod_list::FILE).is_file() {
-            let _ = horizon_client::mod_list::ModList::load(root);
-            break;
+    // Sync ModList from disk once at startup so live in-game toggles are never overwritten
+    if !guard.initial_modlist_loaded {
+        guard.initial_modlist_loaded = true;
+        for root in &roots {
+            if root.join(horizon_client::mod_list::FILE).is_file() {
+                let _ = horizon_client::mod_list::ModList::load(root);
+                break;
+            }
         }
     }
 
@@ -412,7 +498,7 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
         }
     }
 
-    // Collect all .hnmod bundles across horizon-native-mods/ and horizon-mods/
+    // Collect all .hnmod AND .hmod bundles across horizon-native-mods/ and horizon-mods/
     let mut hnmod_paths = Vec::new();
     for root in &roots {
         for sub in [
@@ -426,7 +512,9 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
             };
             for entry in rd.flatten() {
                 let p = entry.path();
-                if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("hnmod")) {
+                if p.extension().is_some_and(|e| {
+                    e.eq_ignore_ascii_case("hnmod") || e.eq_ignore_ascii_case("hmod")
+                }) {
                     hnmod_paths.push((root.clone(), p));
                 }
             }
@@ -458,6 +546,24 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
             discovered.entry(parsed.id.clone()).or_insert(parsed);
         }
     }
+
+    // Also include any built-in Horizon mod that is enabled in settings or LIVE_MOD_STATE
+    for &(id, name, ver, desc, _) in horizon_client::jar_transpiler::BUILTIN_HORIZON_MODS.iter() {
+        if matches!(id, "zoom" | "minimap" | "recipes" | "smartf3") {
+            continue;
+        }
+        let explicitly_enabled = horizon_client::mod_list::is_live_disabled(id) == Some(false)
+            || game.settings.mods.enabled.contains(id);
+        if explicitly_enabled && !discovered.contains_key(id) {
+            let mut synth = synthesize_builtin_hnmod(id, name, ver, desc);
+            if let Some(prev) = guard.mods.get(id) {
+                synth.zoom_held = prev.zoom_held;
+                synth.vein_key_held = prev.vein_key_held;
+            }
+            discovered.insert(id.to_owned(), synth);
+        }
+    }
+
     guard.mods = discovered;
 }
 
@@ -1550,9 +1656,17 @@ pub(super) fn native_tick(game: &mut Game<'_>) {
                     guard.fullbright_was_active = true;
                 }
                 game.settings.gamma = target_gamma;
+                if let Some(r) = game.renderer.as_mut() {
+                    r.fullbright = true;
+                    r.gamma = target_gamma;
+                }
             } else if guard.fullbright_was_active {
                 if let Some(prev) = guard.saved_gamma.take() {
                     game.settings.gamma = prev;
+                }
+                if let Some(r) = game.renderer.as_mut() {
+                    r.fullbright = false;
+                    r.gamma = game.settings.gamma;
                 }
                 guard.fullbright_was_active = false;
             }
@@ -1628,17 +1742,13 @@ pub(super) fn native_camera_shake(game: &Game<'_>, partial: f32, shake: &mut Nat
     shake.roll += (phase * 2.1).sin() * 0.45 * decay;
 }
 
-pub(super) fn native_hud(
-    game: &mut Game<'_>,
-    batch: &mut horizon_client::hud::HudBatch,
-    corners: &mut horizon_client::extras_hud::Corners,
-) {
+pub(super) fn native_hud(game: &mut Game<'_>, batch: &mut HudBatch, corners: &mut Corners) {
     ensure_dynamic_mods_loaded(game, false);
     use horizon_client::extras::Corner;
 
-    let [screen_w, screen_h] = [batch.width, batch.height];
+    let [screen_w, screen_h] = game.native_screen_size(batch);
     let held_stack = game.inventory.get(game.selected).and_then(Option::as_ref).cloned();
-    let held_item = held_stack.as_ref().map(|s| s.item.to_string());
+    let held_item = held_stack.as_ref().map(|s| s.item.clone());
     let (fps, min_fps, low_1_pct) = game.native_frame_rate();
     let (lmb_cps, rmb_cps) = game.native_clicks();
     let w_key = game.native_mapping("key.forward").map(|(d, _)| d).unwrap_or(false);
@@ -1672,9 +1782,17 @@ pub(super) fn native_hud(
         game.native_text(batch, &text, [bx + 6.0, by + 3.5], 0xFFE082, true);
     }
 
-    for m in active_mods {
+    let mut rendered_features = BTreeSet::new();
+    let aimed_block = game
+        .aim()
+        .and_then(|(eye, dir)| game.clip_ray(eye, dir, 6.0));
+
+    for m in &active_mods {
         // 1. LookAt / Jade / BlockScope top-center block inspector card
-        if m.features.contains("jade_hud") && setting_bool(game, &m.id, "show_hud", true) {
+        if m.features.contains("jade_hud")
+            && setting_bool(game, &m.id, "show_hud", true)
+            && rendered_features.insert("jade_hud")
+        {
             let reach = setting_u32(game, &m.id, "reach", 6) as f64;
             if let Some((eye, dir)) = game.aim() {
                 if let Some(hit) = game.clip_ray(eye, dir, reach) {
@@ -1708,22 +1826,25 @@ pub(super) fn native_hud(
                         let w = game
                             .native_text_width(&line1)
                             .max(game.native_text_width(&line2))
-                            + 16.0;
+                            + 32.0;
                         let h = 28.0;
                         let x = (screen_w - w) * 0.5;
                         let y = 6.0;
-                        game.native_fill(batch, [x, y, w, h], 0xAA12101B);
-                        game.native_fill(batch, [x, y, w, 1.5], 0xFF80CBC4);
-                        game.native_text(batch, &line1, [x + 8.0, y + 4.0], 0xFFFFFF, true);
-                        game.native_text(batch, &line2, [x + 8.0, y + 16.0], 0x80CBC4, true);
+                        game.native_fill(batch, [x, y, w, h], 0xB812101B);
+                        game.native_fill(batch, [x, y, w, 1.8], 0xFF80CBC4);
+                        game.native_item_icon(batch, &block_name, [x + 6.0, y + 6.0], 16.0);
+                        game.native_text(batch, &line1, [x + 26.0, y + 4.0], 0xFFFFFF, true);
+                        game.native_text(batch, &line2, [x + 26.0, y + 16.0], 0x80CBC4, true);
                     }
                 }
             }
-            continue;
         }
 
         // 2. AppleSkin Saturation & Held Food Restoration HUD
-        if m.features.contains("appleskin_hud") && setting_bool(game, &m.id, "saturation_hud", true) {
+        if m.features.contains("appleskin_hud")
+            && setting_bool(game, &m.id, "saturation_hud", true)
+            && rendered_features.insert("appleskin_hud")
+        {
             if let Some(p) = &game.player {
                 let food = p.health.food.food.max(0);
                 let sat = p.health.food.saturation.max(0.0);
@@ -1736,163 +1857,212 @@ pub(super) fn native_hud(
                 } else {
                     String::new()
                 };
-                // Draw compact AppleSkin bar right above the hunger bar on the HUD
                 let bar_text = format!("Hunger {food}/20 • Sat {sat:.1}{preview}");
                 let tw = game.native_text_width(&bar_text) + 10.0;
                 let hx = (screen_w * 0.5 + 10.0).min(screen_w - tw - 4.0);
                 let hy = (screen_h - 49.0).max(20.0);
-                game.native_fill(batch, [hx, hy, tw, 13.0], 0x8014121E);
-                // Golden saturation progress underline
+                game.native_fill(batch, [hx, hy, tw, 13.0], 0x9014121E);
                 let sat_ratio = (sat / 20.0).clamp(0.0, 1.0);
                 game.native_fill(batch, [hx, hy + 11.5, tw * sat_ratio, 1.5], 0xFFFFD54F);
                 game.native_text(batch, &bar_text, [hx + 5.0, hy + 2.5], 0xFFD54F, true);
             }
-            continue;
         }
 
         // 3. FPS Counter
-        if m.features.contains("fps_overlay") {
+        if m.features.contains("fps_overlay") && rendered_features.insert("fps_overlay") {
             let corner = setting_corner(game, &m.id, Corner::TopLeft);
-            if !game.native_corner_shown(corner) {
-                continue;
+            if game.native_corner_shown(corner) {
+                let show_low = setting_bool(game, &m.id, "show_1pct_low", true);
+                let label = if show_low {
+                    format!("{fps} FPS (1% low: {low_1_pct}, min: {min_fps})")
+                } else {
+                    format!("{fps} FPS")
+                };
+                let w = game.native_text_width(&label) + 10.0;
+                let [x, y] = corners.place(corner, w, 14.0);
+                if setting_bool(game, &m.id, "backdrop", true) {
+                    game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
+                }
+                game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xA5D6A7, true);
             }
-            let show_low = setting_bool(game, &m.id, "show_1pct_low", true);
-            let label = if show_low {
-                format!("{fps} FPS (1% low: {low_1_pct}, min: {min_fps})")
-            } else {
-                format!("{fps} FPS")
-            };
-            let w = game.native_text_width(&label) + 10.0;
-            let (x, y) = corners.place(corner, w, 14.0);
-            if setting_bool(game, &m.id, "backdrop", true) {
-                game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
-            }
-            game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xA5D6A7, true);
-            continue;
         }
 
-        // 4. Keystrokes
-        if m.features.contains("keystrokes") {
+        // 4. Keystrokes & CPS
+        if m.features.contains("keystrokes") && rendered_features.insert("keystrokes") {
             let corner = setting_corner(game, &m.id, Corner::TopRight);
-            if !game.native_corner_shown(corner) {
-                continue;
-            }
-            let keys_str = format!(
-                "[{}] [{}] [{}] [{}]{}",
-                if w_key { "W" } else { "·" },
-                if a_key { "A" } else { "·" },
-                if s_key { "S" } else { "·" },
-                if d_key { "D" } else { "·" },
-                if jump_key { " [JUMP]" } else { "" }
-            );
-            let cps_str = if setting_bool(game, &m.id, "show_cps", true) {
-                format!(" • LMB: {lmb_cps} CPS | RMB: {rmb_cps} CPS")
-            } else {
-                String::new()
-            };
-            let label = format!("{keys_str}{cps_str}");
-            let w = game.native_text_width(&label) + 10.0;
-            let (x, y) = corners.place(corner, w, 14.0);
-            game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
-            game.native_text(batch, &label, [x + 5.0, y + 3.0], 0x90CAF9, true);
-            continue;
-        }
-
-        // 5. Coordinates HUD
-        if m.features.contains("coords_hud") {
-            let corner = setting_corner(game, &m.id, Corner::TopLeft);
-            if !game.native_corner_shown(corner) {
-                continue;
-            }
-            if let Some(p) = game.native_player() {
-                let dir_str = if setting_bool(game, &m.id, "show_dir", true) {
-                    let yaw = p.yaw.rem_euclid(360.0);
-                    let card = if !(45.0..315.0).contains(&yaw) {
-                        "S (+Z)"
-                    } else if yaw < 135.0 {
-                        "W (-X)"
-                    } else if yaw < 225.0 {
-                        "N (-Z)"
-                    } else {
-                        "E (+X)"
-                    };
-                    format!(" [{card}]")
+            if game.native_corner_shown(corner) {
+                let keys_str = format!(
+                    "[{}] [{}] [{}] [{}]{}",
+                    if w_key { "W" } else { "·" },
+                    if a_key { "A" } else { "·" },
+                    if s_key { "S" } else { "·" },
+                    if d_key { "D" } else { "·" },
+                    if jump_key { " [JUMP]" } else { "" }
+                );
+                let cps_str = if setting_bool(game, &m.id, "show_cps", true) {
+                    format!(" • LMB: {lmb_cps} CPS | RMB: {rmb_cps} CPS")
                 } else {
                     String::new()
                 };
-                let clock_str = if setting_bool(game, &m.id, "show_clock", true) {
-                    if let Some(c) = game.native_clock() {
-                        let ticks = (c.day_time + 6000).rem_euclid(24000);
-                        let hh = ticks / 1000;
-                        let mm = (ticks % 1000) * 60 / 1000;
-                        format!(" • {hh:02}:{mm:02}")
+                let label = format!("{keys_str}{cps_str}");
+                let w = game.native_text_width(&label) + 10.0;
+                let [x, y] = corners.place(corner, w, 14.0);
+                game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
+                game.native_text(batch, &label, [x + 5.0, y + 3.0], 0x90CAF9, true);
+            }
+        }
+
+        // 5. Coordinates & Direction HUD
+        if m.features.contains("coords_hud") && rendered_features.insert("coords_hud") {
+            let corner = setting_corner(game, &m.id, Corner::TopLeft);
+            if game.native_corner_shown(corner) {
+                if let Some(p) = game.native_player() {
+                    let dir_str = if setting_bool(game, &m.id, "show_dir", true) {
+                        let yaw = p.yaw.rem_euclid(360.0);
+                        let card = if !(45.0..315.0).contains(&yaw) {
+                            "S (+Z)"
+                        } else if yaw < 135.0 {
+                            "W (-X)"
+                        } else if yaw < 225.0 {
+                            "N (-Z)"
+                        } else {
+                            "E (+X)"
+                        };
+                        format!(" [{card}]")
                     } else {
                         String::new()
-                    }
-                } else {
-                    String::new()
-                };
-                let label = format!(
-                    "XYZ: {:.0}, {:.0}, {:.0}{}{}",
-                    p.x, p.y, p.z, dir_str, clock_str
-                );
-                let w = game.native_text_width(&label) + 10.0;
-                let (x, y) = corners.place(corner, w, 14.0);
-                game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
-                game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xFFF59D, true);
-            }
-            continue;
-        }
-
-        // 6. Armor Status / Held Item Info
-        if m.features.contains("armor_status") {
-            let corner = setting_corner(game, &m.id, Corner::BottomRight);
-            if !game.native_corner_shown(corner) {
-                continue;
-            }
-            let mut pieces = Vec::new();
-            for st in game.armor.iter().flatten() {
-                let short = wr_short(&st.item).replace('_', " ");
-                pieces.push(horizon_client::jar_transpiler::title_case_id(&short));
-            }
-            if setting_bool(game, &m.id, "show_held", true) {
-                if let Some(st) = &held_stack {
-                    let short = wr_short(&st.item).replace('_', " ");
-                    pieces.push(format!(
-                        "Hand: {} x{}",
-                        horizon_client::jar_transpiler::title_case_id(&short),
-                        st.count
-                    ));
+                    };
+                    let clock_str = if setting_bool(game, &m.id, "show_clock", true) {
+                        if let Some(c) = game.native_clock() {
+                            let ticks = (c.day_time + 6000).rem_euclid(24000);
+                            let hh = ticks / 1000;
+                            let mm = (ticks % 1000) * 60 / 1000;
+                            format!(" • {hh:02}:{mm:02}")
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    let label = format!(
+                        "XYZ: {:.0}, {:.0}, {:.0}{}{}",
+                        p.x, p.y, p.z, dir_str, clock_str
+                    );
+                    let w = game.native_text_width(&label) + 10.0;
+                    let [x, y] = corners.place(corner, w, 14.0);
+                    game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
+                    game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xFFF59D, true);
                 }
             }
-            if !pieces.is_empty() {
-                let label = format!("Armor: {}", pieces.join(" | "));
-                let w = game.native_text_width(&label) + 10.0;
-                let (x, y) = corners.place(corner, w, 14.0);
-                game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
-                game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xB39DDB, true);
-            }
-            continue;
         }
 
-        // 7. Toggle Sprint HUD
+        // 6. Armor Status & Held Item Info (with real item icons)
+        if m.features.contains("armor_status") && rendered_features.insert("armor_status") {
+            let corner = setting_corner(game, &m.id, Corner::BottomRight);
+            if game.native_corner_shown(corner) {
+                let mut entries: Vec<(String, String)> = Vec::new();
+                for st in game.armor.iter().flatten() {
+                    let short = wr_short(&st.item).replace('_', " ");
+                    entries.push((
+                        st.item.clone(),
+                        horizon_client::jar_transpiler::title_case_id(&short),
+                    ));
+                }
+                if setting_bool(game, &m.id, "show_held", true) {
+                    if let Some(st) = &held_stack {
+                        let short = wr_short(&st.item).replace('_', " ");
+                        entries.push((
+                            st.item.clone(),
+                            format!(
+                                "{} x{}",
+                                horizon_client::jar_transpiler::title_case_id(&short),
+                                st.count
+                            ),
+                        ));
+                    }
+                }
+                for (item_id, text_label) in entries {
+                    let w = game.native_text_width(&text_label) + 24.0;
+                    let [x, y] = corners.place(corner, w, 15.0);
+                    game.native_fill(batch, [x, y, w, 15.0], 0x7814121E);
+                    game.native_item_icon(batch, &item_id, [x + 3.0, y + 1.5], 12.0);
+                    game.native_text(batch, &text_label, [x + 18.0, y + 3.5], 0xB39DDB, true);
+                }
+            }
+        }
+
+        // 7. Status Effect HUD
+        if m.features.contains("status_effect_hud")
+            && setting_bool(game, &m.id, "show_timers", true)
+            && rendered_features.insert("status_effect_hud")
+        {
+            let corner = setting_corner(game, &m.id, Corner::TopRight);
+            if game.native_corner_shown(corner) {
+                if let Some(p) = &game.player {
+                    let hp = p.health.health.ceil() as i32;
+                    let abs = p.health.absorption.ceil() as i32;
+                    let sprinting = p.sprinting;
+                    let status_text = if abs > 0 {
+                        format!("❤ Health {hp}/20 (+{abs} Abs){}", if sprinting { " • ⚡ Speed" } else { "" })
+                    } else {
+                        format!("❤ Health {hp}/20{}", if sprinting { " • ⚡ Sprinting" } else { "" })
+                    };
+                    let w = game.native_text_width(&status_text) + 10.0;
+                    let [x, y] = corners.place(corner, w, 14.0);
+                    game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
+                    game.native_text(batch, &status_text, [x + 5.0, y + 3.0], 0x80CBC4, true);
+                }
+            }
+        }
+
+        // 8. Light Overlay HUD Indicator
+        if m.features.contains("light_overlay")
+            && setting_bool(game, &m.id, "enabled", true)
+            && rendered_features.insert("light_overlay_hud")
+        {
+            if let Some(p) = game.native_player() {
+                let feet = [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
+                let bl = game.world.block_light(feet[0], feet[1], feet[2]);
+                let sl = game.world.sky_light(feet[0], feet[1], feet[2]);
+                let safety = if bl == 0 {
+                    ("Mob Spawn Risk (Block Light 0)", 0xFF8A80u32)
+                } else if bl <= 7 {
+                    ("Low Block Light (<=7)", 0xFFD54Fu32)
+                } else {
+                    ("Safe Light Level", 0xA5D6A7u32)
+                };
+                let label = format!("Light: Block {bl} / Sky {sl} • {}", safety.0);
+                let w = game.native_text_width(&label) + 10.0;
+                let [x, y] = corners.place(Corner::BottomLeft, w, 14.0);
+                game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
+                game.native_text(batch, &label, [x + 5.0, y + 3.0], safety.1, true);
+            }
+        }
+
+        // 9. Toggle Sprint HUD
         if m.features.contains("toggle_sprint")
             && setting_bool(game, &m.id, "sprint_on", true)
             && setting_bool(game, &m.id, "show_hud", true)
             && game.native_corner_shown(Corner::BottomLeft)
+            && rendered_features.insert("toggle_sprint")
         {
-            let label = "[Sprint (Toggled)]";
+            let is_sprinting = game.player.as_ref().is_some_and(|p| p.sprinting);
+            let label = if is_sprinting {
+                "⚡ [Sprinting (Active)]"
+            } else {
+                "[Sprint (Toggled)]"
+            };
             let w = game.native_text_width(label) + 10.0;
-            let (x, y) = corners.place(Corner::BottomLeft, w, 14.0);
-            game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
+            let [x, y] = corners.place(Corner::BottomLeft, w, 14.0);
+            game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
             game.native_text(batch, label, [x + 5.0, y + 3.0], 0x80DEEA, true);
-            continue;
         }
 
-        // 8. Waypoints HUD
+        // 10. Waypoints HUD
         if m.features.contains("waypoints")
             && setting_bool(game, &m.id, "show_hud", true)
             && game.native_corner_shown(Corner::TopRight)
+            && rendered_features.insert("waypoints")
         {
             if let Some(p) = game.native_player() {
                 let wp = game
@@ -1908,16 +2078,111 @@ pub(super) fn native_hud(
                         + (p.z - coords[2]).powi(2))
                     .sqrt();
                     let label = format!(
-                        "Waypoint ({:.0}, {:.0}, {:.0}) • {:.0}m",
+                        "📍 Waypoint ({:.0}, {:.0}, {:.0}) • {:.0}m",
                         coords[0], coords[1], coords[2], dist
                     );
                     let w = game.native_text_width(&label) + 10.0;
-                    let (x, y) = corners.place(Corner::TopRight, w, 14.0);
-                    game.native_fill(batch, [x, y, w, 14.0], 0x7214121E);
+                    let [x, y] = corners.place(Corner::TopRight, w, 14.0);
+                    game.native_fill(batch, [x, y, w, 14.0], 0x7814121E);
                     game.native_text(batch, &label, [x + 5.0, y + 3.0], 0xCE93D8, true);
                 }
             }
-            continue;
+        }
+
+        // 11. Eating Animation visual food bob & progress bar
+        if m.features.contains("eatinganimation")
+            && setting_bool(game, &m.id, "bob_food", true)
+            && rendered_features.insert("eatinganimation")
+        {
+            if let Some(food_id) = held_item.as_deref() {
+                if let Some((hunger, sat)) = estimate_food_values(food_id) {
+                    let use_down = game.native_mapping("key.use").is_some_and(|(d, _)| d);
+                    if use_down {
+                        let phase = (game.world.game_time as f32 * 0.65).sin().abs();
+                        let bx = screen_w * 0.5 - 38.0;
+                        let by = screen_h * 0.5 + 22.0;
+                        game.native_fill(batch, [bx, by, 76.0, 14.0], 0xA814121E);
+                        game.native_fill(batch, [bx, by + 12.0, 76.0 * phase, 2.0], 0xFFFFB74D);
+                        game.native_item_icon(batch, food_id, [bx + 3.0, by + 1.0 - phase * 2.5], 12.0);
+                        let lbl = format!("Eating +{hunger} / +{sat:.1}");
+                        game.native_text(batch, &lbl, [bx + 18.0, by + 3.0], 0xFFE082, true);
+                    }
+                }
+            }
+        }
+    }
+
+    // Contextual Crosshair Target Readiness Badge for Veinminer, TreeFall, Wrench, and RightClickHarvest
+    if let Some(hit) = aimed_block {
+        let bname = game.native_block(hit.pos);
+        if bname != "minecraft:air" {
+            let mut badge: Option<(String, u32)> = None;
+            if ore_family(&bname).is_some()
+                && active_mods.iter().any(|m| m.features.contains("veinminer"))
+            {
+                badge = Some((
+                    format!(
+                        "⛏ Veinminer Ready • {}",
+                        horizon_client::jar_transpiler::title_case_id(wr_short(&bname))
+                    ),
+                    0xFFFFD54F,
+                ));
+            } else if is_tree_log(&bname)
+                && active_mods
+                    .iter()
+                    .any(|m| m.features.contains("treefall") || m.features.contains("veinminer"))
+            {
+                badge = Some((
+                    format!(
+                        "🪓 TreeFall Ready • {}",
+                        horizon_client::jar_transpiler::title_case_id(wr_short(&bname))
+                    ),
+                    0xFF81C784,
+                ));
+            } else if active_mods
+                .iter()
+                .any(|m| m.features.contains("rightclickharvest"))
+            {
+                let short = wr_short(&bname);
+                let max_age = match short {
+                    "wheat" | "carrots" | "potatoes" | "torchflower_crop" => Some(7u32),
+                    "beetroots" | "nether_wart" | "sweet_berry_bush" => Some(3u32),
+                    "cocoa" => Some(2u32),
+                    _ => None,
+                };
+                if let Some(max_a) = max_age {
+                    let cur_a = game
+                        .native_block_property(hit.pos, "age")
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    if cur_a >= max_a {
+                        badge = Some((
+                            "🌾 Mature Crop (100%) • Right-click to harvest".into(),
+                            0xFFAEEA00,
+                        ));
+                    } else {
+                        let pct = (cur_a * 100) / max_a.max(1);
+                        badge = Some((format!("🌱 Crop Growth: {pct}%"), 0xFFFFF176));
+                    }
+                }
+            }
+            if badge.is_none()
+                && active_mods.iter().any(|m| m.features.contains("wrench"))
+            {
+                let state = game.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+                if let Some(st) = game.pack.assets.registry.state(state) {
+                    if !wr_turns(&st.name, &st.properties, hit.face).is_empty() {
+                        badge = Some(("🔧 Wrench • Right-click to rotate".into(), 0xFF4FC3F7));
+                    }
+                }
+            }
+            if let Some((text, color)) = badge {
+                let tw = game.native_text_width(&text) + 12.0;
+                let bx = (screen_w - tw) * 0.5;
+                let by = screen_h * 0.5 + 12.0;
+                game.native_fill(batch, [bx, by, tw, 14.0], 0x9212101B);
+                game.native_text(batch, &text, [bx + 6.0, by + 3.0], color, true);
+            }
         }
     }
 }
@@ -1956,8 +2221,8 @@ pub(super) fn native_tooltip(
             && m.features.contains("enchantmenthints")
             && setting_bool(game, &m.id, "show_ench_hints", true)
     });
-    if has_ench_hints && !stack.enchantments().is_empty() {
-        for (ench_id, _) in stack.enchantments() {
+    if has_ench_hints && !stack.enchantments.is_empty() {
+        for (ench_id, _) in &stack.enchantments {
             if let Some(desc) = enchantment_description(ench_id) {
                 lines.push((
                     horizon_client::text::Text::literal(format!("§7  ↳ {desc}")),
@@ -1973,11 +2238,10 @@ pub(super) fn native_tooltip(
             && m.features.contains("shulkerpeek")
             && setting_bool(game, &m.id, "show_container_items", true)
     });
-    let container_items = stack.extra.as_ref().map(|d| d.container.as_slice());
-    if has_shulker && let Some(container) = container_items && !container.is_empty() {
+    if has_shulker && !stack.container.is_empty() {
         let mut counts: BTreeMap<String, u32> = BTreeMap::new();
-        for (_, st) in container {
-            if st.count > 0 && &*st.item != "minecraft:air" {
+        for st in stack.container.iter().flatten() {
+            if st.count > 0 && st.item != "minecraft:air" {
                 let pretty = horizon_client::jar_transpiler::title_case_id(wr_short(&st.item));
                 *counts.entry(pretty).or_default() += st.count;
             }
@@ -2213,11 +2477,7 @@ fn game_wrench_take_apart(game: &mut Game<'_>, pos: [i32; 3]) -> bool {
     if !wr_takes_apart(&name) {
         return false;
     }
-    let at = BlockPos::new(pos[0], pos[1], pos[2]);
-    let drop = !game.creative;
-    let broken = game.with_level(|b, level, ticks| b.destroy_block(level, ticks, at, drop));
-    let _ = game.process_level_events();
-    broken
+    game.break_block_as_player(pos)
 }
 
 fn try_right_click_harvest_crop(game: &mut Game<'_>, pos: [i32; 3]) -> bool {
@@ -2439,12 +2699,15 @@ pub(super) fn native_destroy_block(
                 }
             }
 
+            let _ = drop_items;
             if !to_break.is_empty() {
                 for np in to_break {
-                    let at = BlockPos::new(np[0], np[1], np[2]);
-                    let _ = game.with_level(|b, level, ticks| {
-                        b.destroy_block(level, ticks, at, drop_items)
-                    });
+                    if game.break_block_as_player(np) {
+                        game.native_flame_particle(
+                            [np[0] as f64 + 0.5, np[1] as f64 + 0.5, np[2] as f64 + 0.5],
+                            false,
+                        );
+                    }
                 }
                 let _ = game.process_level_events();
             }
@@ -2522,16 +2785,10 @@ pub(super) fn native_destroy_block(
 
             if !logs_to_break.is_empty() {
                 for np in logs_to_break {
-                    let at = BlockPos::new(np[0], np[1], np[2]);
-                    let _ = game.with_level(|b, level, ticks| {
-                        b.destroy_block(level, ticks, at, drop_items)
-                    });
+                    let _ = game.break_block_as_player(np);
                 }
                 for lp in leaves_to_break {
-                    let at = BlockPos::new(lp[0], lp[1], lp[2]);
-                    let _ = game.with_level(|b, level, ticks| {
-                        b.destroy_block(level, ticks, at, drop_items)
-                    });
+                    let _ = game.break_block_as_player(lp);
                 }
                 let _ = game.process_level_events();
             }
@@ -2619,6 +2876,161 @@ pub(super) fn native_visuals(
             }
         }
     }
+
+    // 4. Veinminer & TreeFall & Wrench & RightClickHarvest 3D block rim highlights
+    let has_vein = guard
+        .mods
+        .values()
+        .any(|m| game.native_on(&m.id) && m.features.contains("veinminer"));
+    let has_tree = guard
+        .mods
+        .values()
+        .any(|m| game.native_on(&m.id) && m.features.contains("treefall"));
+    let has_wrench = guard
+        .mods
+        .values()
+        .any(|m| game.native_on(&m.id) && m.features.contains("wrench"));
+    let has_harvest = guard
+        .mods
+        .values()
+        .any(|m| game.native_on(&m.id) && m.features.contains("rightclickharvest"));
+
+    if (has_vein || has_tree || has_wrench || has_harvest)
+        && let Some((eye, dir)) = game.aim()
+        && let Some(hit) = game.clip_ray(eye, dir, 6.0)
+    {
+        let bname = game.native_block(hit.pos);
+        if has_vein && let Some(fam) = ore_family(&bname) {
+            let mut visited = BTreeSet::new();
+            let mut queue = VecDeque::new();
+            visited.insert(hit.pos);
+            queue.push_back(hit.pos);
+            while let Some(cur) = queue.pop_front() {
+                rims.push(NativeBlockRim {
+                    pos: cur,
+                    argb: 0xEEFFB300,
+                    width: 2.4,
+                });
+                if rims.len() >= 24 {
+                    break;
+                }
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        for dz in -1..=1 {
+                            let np = [cur[0] + dx, cur[1] + dy, cur[2] + dz];
+                            if visited.insert(np)
+                                && ore_family(&game.native_block(np)) == Some(fam)
+                            {
+                                queue.push_back(np);
+                            }
+                        }
+                    }
+                }
+            }
+            lights.push(NativeColoredLight {
+                at: [
+                    hit.pos[0] as f64 + 0.5,
+                    hit.pos[1] as f64 + 0.5,
+                    hit.pos[2] as f64 + 0.5,
+                ],
+                rgb: 0xFFD54F,
+                radius: 6.0,
+                intensity: 0.75,
+            });
+        } else if (has_tree || has_vein) && is_tree_log(&bname) {
+            let mut visited = BTreeSet::new();
+            let mut queue = VecDeque::new();
+            visited.insert(hit.pos);
+            queue.push_back(hit.pos);
+            while let Some(cur) = queue.pop_front() {
+                rims.push(NativeBlockRim {
+                    pos: cur,
+                    argb: 0xEE66BB6A,
+                    width: 2.2,
+                });
+                if rims.len() >= 24 {
+                    break;
+                }
+                for dy in 0..=1 {
+                    for dx in -1..=1 {
+                        for dz in -1..=1 {
+                            let np = [cur[0] + dx, cur[1] + dy, cur[2] + dz];
+                            if visited.insert(np) && game.native_block(np) == bname {
+                                queue.push_back(np);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if has_harvest {
+            let short = wr_short(&bname);
+            let max_age = match short {
+                "wheat" | "carrots" | "potatoes" | "torchflower_crop" => Some("7"),
+                "beetroots" | "nether_wart" | "sweet_berry_bush" => Some("3"),
+                "cocoa" => Some("2"),
+                _ => None,
+            };
+            if let Some(mature) = max_age {
+                let is_mature =
+                    game.native_block_property(hit.pos, "age").as_deref() == Some(mature);
+                rims.push(NativeBlockRim {
+                    pos: hit.pos,
+                    argb: if is_mature { 0xEEAEEA00 } else { 0x99FDD835 },
+                    width: if is_mature { 2.4 } else { 1.6 },
+                });
+            }
+        } else if has_wrench {
+            let state = game.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+            if let Some(st) = game.pack.assets.registry.state(state) {
+                if !wr_turns(&st.name, &st.properties, hit.face).is_empty() {
+                    rims.push(NativeBlockRim {
+                        pos: hit.pos,
+                        argb: 0xEE29B6F6,
+                        width: 2.2,
+                    });
+                }
+            }
+        }
+    }
+
+    // 5. Light Overlay 3D low-light mob spawn risk markers around player
+    let has_light_overlay = guard.mods.values().any(|m| {
+        game.native_on(&m.id)
+            && m.features.contains("light_overlay")
+            && setting_bool(game, &m.id, "enabled", true)
+    });
+    if has_light_overlay && let Some(p) = game.native_player() {
+        let px = p.x.floor() as i32;
+        let py = p.y.floor() as i32;
+        let pz = p.z.floor() as i32;
+        let mut count = 0usize;
+        for dx in -4..=4 {
+            for dz in -4..=4 {
+                for dy in -2..=1 {
+                    if count >= 28 {
+                        break;
+                    }
+                    let bp = [px + dx, py + dy, pz + dz];
+                    let above = [bp[0], bp[1] + 1, bp[2]];
+                    if game.native_block(bp) != "minecraft:air"
+                        && game.native_block(above) == "minecraft:air"
+                    {
+                        let bl = game.world.block_light(above[0], above[1], above[2]);
+                        let sl = game.world.sky_light(above[0], above[1], above[2]);
+                        if bl == 0 {
+                            let argb = if sl == 0 { 0xCCFF5252 } else { 0xAAFFD740 };
+                            rims.push(NativeBlockRim {
+                                pos: bp,
+                                argb,
+                                width: 1.8,
+                            });
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Game<'_> {
@@ -2626,7 +3038,7 @@ impl Game<'_> {
         self.inventory
             .get(self.selected)
             .and_then(Option::as_ref)
-            .map(|s| s.item.to_string())
+            .map(|s| s.item.clone())
     }
 }
 

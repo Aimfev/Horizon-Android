@@ -1967,7 +1967,11 @@ impl Renderer {
         if previous.is_none() {
             startup_step(format_args!("creating the pipelines"));
         }
-        let gpu_timer = timing::GpuTimer::new(&device, &queue);
+        let gpu_timer = if cfg!(target_os = "android") {
+            None
+        } else {
+            timing::GpuTimer::new(&device, &queue)
+        };
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horizon terrain"),
             source: wgpu::ShaderSource::Wgsl(terrain_shader(

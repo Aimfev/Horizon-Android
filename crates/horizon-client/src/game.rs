@@ -3721,7 +3721,7 @@ impl Game<'_> {
         }
         let spectator = self.spectator();
         let Some(thrown) = horizon_client::items::take_held_drop(
-            &mut self.inventory[self.selected],
+            &mut self.inventory[self.selected.min(self.inventory.len().saturating_sub(1))],
             all,
             spectator,
         ) else {
@@ -5411,7 +5411,7 @@ impl Game<'_> {
     /// and loses its `damage_per_block` on a block that doesn't break
     /// instantly (`ShearsItem`: on any block but fire).
     fn mine_block_with_held(&mut self, name: &str, hardness: f32) {
-        let Some(stack) = self.inventory[self.selected].clone() else {
+        let Some(stack) = self.inventory.get(self.selected).cloned().flatten() else {
             return;
         };
         let Some((per_block, max)) = self
@@ -8198,7 +8198,15 @@ impl Game<'_> {
                         let stack = if slot == 40 {
                             self.offhand.as_ref()
                         } else {
-                            self.inventory[slot as usize].as_ref()
+                            self.inventory
+                                .get(slot as usize)
+                                .or_else(|| {
+                                    (36..45)
+                                        .contains(&slot)
+                                        .then(|| self.inventory.get((slot - 36) as usize))
+                                        .flatten()
+                                })
+                                .and_then(Option::as_ref)
                         };
                         if let Some(stack) = stack {
                             self.draw_item(&mut batch, stack, x as f32, y as f32);
@@ -12211,7 +12219,7 @@ impl Game<'_> {
             .zip(slots)
             .map(|(s, n)| (s.as_ref(), n))
             .collect();
-        equipped.push((self.inventory[self.selected].as_ref(), "mainhand"));
+        equipped.push((self.inventory.get(self.selected).and_then(Option::as_ref), "mainhand"));
         equipped.push((self.offhand.as_ref(), "offhand"));
         for (stack, slot) in equipped {
             let Some(info) = stack.and_then(|s| world_items!(self).get(&s.item)) else {
@@ -15772,10 +15780,11 @@ impl Game<'_> {
             KeyCode::KeyF if self.screen == Screen::Playing => {
                 // handlePlayerAction SWAP_ITEM_WITH_OFFHAND: setItemInHand for
                 // the off hand, then the main hand.
-                std::mem::swap(&mut self.offhand, &mut self.inventory[self.selected]);
+                let sel = self.selected.min(self.inventory.len().saturating_sub(1));
+                std::mem::swap(&mut self.offhand, &mut self.inventory[sel]);
                 self.hand_stack_replaced(self.selected);
                 self.hand_stack_replaced(shield::OFFHAND_SLOT);
-                let (offhand, main) = (self.offhand.clone(), self.inventory[self.selected].clone());
+                let (offhand, main) = (self.offhand.clone(), self.inventory.get(self.selected).cloned().flatten());
                 self.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                 self.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
                 self.using = None;

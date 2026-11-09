@@ -247,6 +247,95 @@ fn trim_fragment_outputs(module: &mut naga::Module, targets: &[Option<wgpu::Colo
     }
 }
 
+
+/// Strips storage image and writable storage buffer operations from a vertex shader module when the
+/// device does not support `VERTEX_WRITABLE_STORAGE` (such as Mali-G52 on Android), so passes like
+/// Photon's `shadow`, `shadow_water`, and `shadow_block` still compile and render shadow maps.
+fn strip_vertex_storage(module: &mut naga::Module) {
+    let mut forbidden = std::collections::HashSet::new();
+    for (h, gv) in module.global_variables.iter() {
+        let is_storage_img = matches!(
+            module.types[gv.ty].inner,
+            naga::TypeInner::Image {
+                class: naga::ImageClass::Storage { .. },
+                ..
+            }
+        );
+        let is_writable_buf = matches!(
+            gv.space,
+            naga::AddressSpace::Storage { access }
+                if access.contains(naga::StorageAccess::STORE)
+                    || access.contains(naga::StorageAccess::ATOMIC)
+        ) && gv.binding.as_ref().is_some_and(|b| b.group == 0 || b.group == 4);
+        if is_storage_img || is_writable_buf {
+            forbidden.insert(h);
+        }
+    }
+    if forbidden.is_empty() {
+        return;
+    }
+    fn pointer_uses_forbidden(
+        exprs: &naga::Arena<naga::Expression>,
+        mut h: naga::Handle<naga::Expression>,
+        forbidden: &std::collections::HashSet<naga::Handle<naga::GlobalVariable>>,
+    ) -> bool {
+        loop {
+            match exprs[h] {
+                naga::Expression::GlobalVariable(gv) => return forbidden.contains(&gv),
+                naga::Expression::Access { base, .. }
+                | naga::Expression::AccessIndex { base, .. } => h = base,
+                _ => return false,
+            }
+        }
+    }
+    fn clean_block(
+        block: &mut naga::Block,
+        exprs: &naga::Arena<naga::Expression>,
+        forbidden: &std::collections::HashSet<naga::Handle<naga::GlobalVariable>>,
+    ) {
+        block.retain_mut(|stmt| match stmt {
+            naga::Statement::ImageStore { .. } | naga::Statement::ImageAtomic { .. } => false,
+            naga::Statement::Store { pointer, .. } | naga::Statement::Atomic { pointer, .. } => {
+                !pointer_uses_forbidden(exprs, *pointer, forbidden)
+            }
+            naga::Statement::Block(b) => {
+                clean_block(b, exprs, forbidden);
+                true
+            }
+            naga::Statement::If { accept, reject, .. } => {
+                clean_block(accept, exprs, forbidden);
+                clean_block(reject, exprs, forbidden);
+                true
+            }
+            naga::Statement::Switch { cases, .. } => {
+                for case in cases.iter_mut() {
+                    clean_block(&mut case.body, exprs, forbidden);
+                }
+                true
+            }
+            naga::Statement::Loop {
+                body, continuing, ..
+            } => {
+                clean_block(body, exprs, forbidden);
+                clean_block(continuing, exprs, forbidden);
+                true
+            }
+            _ => true,
+        });
+    }
+    let funcs = module
+        .functions
+        .iter_mut()
+        .map(|(_, f)| f)
+        .chain(module.entry_points.iter_mut().map(|ep| &mut ep.function));
+    for f in funcs {
+        clean_block(&mut f.body, &f.expressions, &forbidden);
+        f.named_expressions.retain(|&eh, _| {
+            !pointer_uses_forbidden(&f.expressions, eh, &forbidden)
+        });
+    }
+}
+
 /// The sky's geometry and the programs that draw it: `gbuffers_skybasic` (disc, sunset, stars,
 /// void) and `gbuffers_skytextured` (sun, moon), each with its fallbacks. A part without a
 /// program is Horizon's own.
@@ -1103,6 +1192,8 @@ struct Resources<'a> {
     gpu: Gpu,
     /// The buffers whose format can be bound as an image.
     storable: u16,
+    /// Stage and flipped buffer mask so `texture.<stage>.colortexN` yields to buffer N once written.
+    released: std::cell::Cell<(&'static str, u16)>,
 }
 
 /// A program's bind group layout (its uniform block, samplers and images) and how each sampler
@@ -1172,7 +1263,14 @@ fn bindings(
             ));
             return None;
         }
-        let custom = pack_textures::find(textures, group, &s.ty, &s.name);
+        let released = pack.released.get();
+        let custom = pack_textures::find(textures, group, &s.ty, &s.name).filter(|&i| {
+            let t = &textures[i];
+            t.stage != pack_textures::stage(group)
+                || released.0 != t.stage
+                || horizon_shaders::buffer_index(&t.name)
+                    .is_none_or(|b| released.1 & 1 << b == 0)
+        });
         let image = pack
             .images
             .iter()
@@ -1610,6 +1708,8 @@ fn build_pass(
             share_samplers(&mut m, &slots);
             if is_frag {
                 trim_fragment_outputs(&mut m, &targets);
+            } else if !pack.gpu.vertex_writable_storage {
+                strip_vertex_storage(&mut m);
             }
             if let Some(slot) = buffers_group {
                 let offset = if slot == 0 { 160 } else { 0 };
@@ -1702,7 +1802,12 @@ fn build_pass(
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }),
-        block: vec![0; interface.uniform_size as usize],
+        block: {
+            let mut b = vec![0u8; interface.uniform_size as usize];
+            let n = interface.initial_values.len().min(b.len());
+            b[..n].copy_from_slice(&interface.initial_values[..n]);
+            b
+        },
         uniforms: interface
             .uniforms
             .iter()
@@ -1837,7 +1942,12 @@ fn build_compute(
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }),
-        block: vec![0; interface.uniform_size as usize],
+        block: {
+            let mut b = vec![0u8; interface.uniform_size as usize];
+            let n = interface.initial_values.len().min(b.len());
+            b[..n].copy_from_slice(&interface.initial_values[..n]);
+            b
+        },
         uniforms: interface
             .uniforms
             .iter()
@@ -1892,9 +2002,15 @@ impl PackPost {
         let mut formats: [wgpu::TextureFormat; BUFFERS] =
             std::array::from_fn(|i| texture_format(post.config.buffers[i].format, features));
         if cfg!(target_os = "android") {
-            for f in &mut formats {
-                if *f == wgpu::TextureFormat::Rgba32Float {
-                    *f = wgpu::TextureFormat::Rgba16Float;
+            let rgba32_ok = adapter
+                .get_texture_format_features(wgpu::TextureFormat::Rgba32Float)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT);
+            if !rgba32_ok {
+                for f in &mut formats {
+                    if *f == wgpu::TextureFormat::Rgba32Float {
+                        *f = wgpu::TextureFormat::Rgba16Float;
+                    }
                 }
             }
         }
@@ -2005,6 +2121,7 @@ impl PackPost {
             indices: indices.as_ref(),
             gpu,
             storable,
+            released: std::cell::Cell::new(("", 0)),
         };
         let mut build = |mut p: horizon_shaders::PostProgram, geometry: Option<&Geometry<'_>>| {
             let in_shadow = p.group.shadow();
@@ -2014,6 +2131,10 @@ impl PackPost {
                 p.program.as_ref()?;
             }
             let group = p.group;
+            let stage = pack_textures::stage(group);
+            if pack.released.get().0 != stage {
+                pack.released.set((stage, 0));
+            }
             let mut computes: Vec<Pass> = compute
                 .into_iter()
                 .filter_map(|(name, c)| {
@@ -2070,6 +2191,8 @@ impl PackPost {
                 return None;
             }
             for p in std::iter::once(&pass).chain(&pass.compute) {
+                let (stage, flipped) = pack.released.get();
+                pack.released.set((stage, flipped | p.flip));
                 if !in_shadow {
                     used |= p.reads | p.written | p.flip;
                 }
@@ -2668,7 +2791,7 @@ impl PackPost {
             }
         }
         let fog = self.uniforms.fog();
-        // Our block members first (`hz_target`, `hz_fog_color`, `hz_fog`), then the pack's.
+        // Our block members first (`hz_target`, `hz_fog_color`, `hz_fog`, `hz_depth_linear`), then the pack's.
         let ours = [
             [
                 out[0] as f32,
@@ -2678,6 +2801,7 @@ impl PackPost {
             ],
             fog[0].to_array(),
             fog[1].to_array(),
+            [1.0, 1.0, 1.0, 1.0],
         ];
         let head: &[u8] = bytemuck::cast_slice(&ours);
         let n = head.len().min(pass.block.len());
@@ -3577,6 +3701,9 @@ impl PackPost {
                 if self.copied & 1 << i != 0 {
                     attachment |= wgpu::TextureUsages::COPY_SRC;
                 }
+                if self.clears[i].is_none() {
+                    attachment |= wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
+                }
                 let sides = [0, 1]
                     .map(|_| texture_sized(&label, self.formats[i], attachment, levels, sizes[i]));
                 if mipped && let Some((_, layout)) = self.down.get(&self.formats[i]) {
@@ -4009,6 +4136,18 @@ impl PackPost {
             }
         }
         let Some(targets) = &self.targets else { return };
+        // Every frame starts on A. Any un-cleared temporal buffer that ended the last frame on B
+        // has B copied back to A so history buffers stay coherent across frames (#9009).
+        for b in (1..BUFFERS).filter(|&b| self.main & 1 << b != 0 && self.clears[b].is_none()) {
+            if let Some([a, b_side]) = &targets.color[b] {
+                encoder.copy_texture_to_texture(
+                    b_side.texture().as_image_copy(),
+                    a.texture().as_image_copy(),
+                    a.texture().size(),
+                );
+            }
+        }
+        self.main = 0;
         let main = |m: u16, i: usize| usize::from(m & 1 << i != 0);
         let view = |m: u16, i: usize, alt: bool| {
             targets.color[i]
@@ -4048,23 +4187,32 @@ impl PackPost {
             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
             store: wgpu::StoreOp::Store,
         };
-        // Attachments of a pass share a size.
-        let mut by_size: Vec<([u32; 2], Vec<usize>)> = Vec::new();
+        // Clear both sides (A and B) of cleared buffers so passes that blend or discard onto alt
+        // read the clean clear value instead of stale pixels from prior frames.
+        let alt_clears = (0..BUFFERS)
+            .filter(|&b| self.clears[b].is_some() && view(self.main, b, true).is_some())
+            .map(|b| (b, true));
+        let mut by_size: Vec<([u32; 2], Vec<(usize, bool)>)> = Vec::new();
         let max_clear_attachments = device.limits().max_color_attachments.clamp(1, 8) as usize;
-        for &b in &self.other_clears {
+        for (b, alt) in self
+            .other_clears
+            .iter()
+            .map(|&b| (b, false))
+            .chain(alt_clears)
+        {
             let at = targets.sizes[b];
             match by_size
                 .iter_mut()
                 .find(|(s, l)| *s == at && l.len() < max_clear_attachments)
             {
-                Some((_, l)) => l.push(b),
-                None => by_size.push((at, vec![b])),
+                Some((_, l)) => l.push((b, alt)),
+                None => by_size.push((at, vec![(b, alt)])),
             }
         }
         for (_, chunk) in &by_size {
             let attachments: Vec<_> = chunk
                 .iter()
-                .map(|&b| attach(view(self.main, b, false).expect("used buffer"), clear_op(b)))
+                .map(|&(b, alt)| attach(view(self.main, b, alt).expect("used buffer"), clear_op(b)))
                 .collect();
             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Shader pack clear"),
