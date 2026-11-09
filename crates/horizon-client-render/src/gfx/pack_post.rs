@@ -293,35 +293,41 @@ fn strip_vertex_storage(module: &mut naga::Module) {
         exprs: &naga::Arena<naga::Expression>,
         forbidden: &std::collections::HashSet<naga::Handle<naga::GlobalVariable>>,
     ) {
-        block.retain_mut(|stmt| match stmt {
-            naga::Statement::ImageStore { .. } | naga::Statement::ImageAtomic { .. } => false,
-            naga::Statement::Store { pointer, .. } | naga::Statement::Atomic { pointer, .. } => {
-                !pointer_uses_forbidden(exprs, *pointer, forbidden)
-            }
-            naga::Statement::Block(b) => {
-                clean_block(b, exprs, forbidden);
-                true
-            }
-            naga::Statement::If { accept, reject, .. } => {
-                clean_block(accept, exprs, forbidden);
-                clean_block(reject, exprs, forbidden);
-                true
-            }
-            naga::Statement::Switch { cases, .. } => {
-                for case in cases.iter_mut() {
-                    clean_block(&mut case.body, exprs, forbidden);
+        let old = std::mem::take(block);
+        for (mut stmt, span) in old.span_into_iter() {
+            let keep = match &mut stmt {
+                naga::Statement::ImageStore { .. } | naga::Statement::ImageAtomic { .. } => false,
+                naga::Statement::Store { pointer, .. } | naga::Statement::Atomic { pointer, .. } => {
+                    !pointer_uses_forbidden(exprs, *pointer, forbidden)
                 }
-                true
+                naga::Statement::Block(b) => {
+                    clean_block(b, exprs, forbidden);
+                    true
+                }
+                naga::Statement::If { accept, reject, .. } => {
+                    clean_block(accept, exprs, forbidden);
+                    clean_block(reject, exprs, forbidden);
+                    true
+                }
+                naga::Statement::Switch { cases, .. } => {
+                    for case in cases.iter_mut() {
+                        clean_block(&mut case.body, exprs, forbidden);
+                    }
+                    true
+                }
+                naga::Statement::Loop {
+                    body, continuing, ..
+                } => {
+                    clean_block(body, exprs, forbidden);
+                    clean_block(continuing, exprs, forbidden);
+                    true
+                }
+                _ => true,
+            };
+            if keep {
+                block.push(stmt, span);
             }
-            naga::Statement::Loop {
-                body, continuing, ..
-            } => {
-                clean_block(body, exprs, forbidden);
-                clean_block(continuing, exprs, forbidden);
-                true
-            }
-            _ => true,
-        });
+        }
     }
     let funcs = module
         .functions
