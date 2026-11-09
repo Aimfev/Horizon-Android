@@ -6996,6 +6996,11 @@ impl Game<'_> {
             [player.position.x, player.position.y, player.position.z],
         );
         if !riding {
+            let pre_wind_vy = if grounded && keys.jump && !player.flying && player.velocity.y > 0.45 {
+                Some(player.velocity.y)
+            } else {
+                None
+            };
             MotionWorld {
                 entities: &entity_collisions,
                 player,
@@ -7003,13 +7008,8 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
-            };
-            let pre_wind_vy = if grounded && keys.jump && !player.flying && sim.player.velocity.y > 0.45 {
-                Some(sim.player.velocity.y)
-            } else {
-                None
-            };
-            sim.controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
+            }
+            .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
             if let Some(wy) = pre_wind_vy {
                 player.velocity.y = player.velocity.y.max(wy + 0.42);
             }

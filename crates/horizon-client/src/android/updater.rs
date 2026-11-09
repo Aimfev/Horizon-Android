@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
