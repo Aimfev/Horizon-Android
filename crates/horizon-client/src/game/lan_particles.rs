@@ -424,10 +424,26 @@ impl Game<'_> {
             );
         }
         // Entity.pushFromExplosion.
+        let jump_held = self.keys.contains(&winit::keyboard::KeyCode::Space)
+            || self.pad.state.held(horizon_client::gamepad::Button::South);
         if let (Some(push), Some(player)) = (p.knockback, self.player.as_mut()) {
+            // When Jump + RMB (Wind Charge) are pressed on the same button, the client may have
+            // executed jump_from_ground() 1 tick before C::Explode arrives, losing 1 tick of jump
+            // impulse (0.42 -> 0.3332) to gravity/drag. Restore that impulse so GoyControl macro
+            // jumps reach the exact same apex height as MCPE controls.
+            let jump_sync = if push[1] > 0.35
+                && jump_held
+                && !player.ground.on_ground
+                && player.velocity.y > 0.24
+                && player.velocity.y < 0.43
+            {
+                0.42 - player.velocity.y
+            } else {
+                0.0
+            };
             player.velocity = Vec3::new(
                 player.velocity.x + push[0],
-                player.velocity.y + push[1],
+                player.velocity.y + push[1] + jump_sync,
                 player.velocity.z + push[2],
             );
         }

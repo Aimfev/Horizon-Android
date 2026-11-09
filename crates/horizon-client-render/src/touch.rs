@@ -202,7 +202,7 @@ pub struct TouchControls {
     pub editor: Option<editor::Editor>,
     fingers: BTreeMap<u64, (Role, [f32; 2])>,
     passthrough_fingers: BTreeSet<u64>,
-    custom_fingers: BTreeMap<u64, String>,
+    custom_fingers: BTreeMap<u64, Vec<String>>,
     custom_last_pos: BTreeMap<u64, [f32; 2]>,
     custom_swipe_btn: BTreeMap<u64, usize>,
     builtin_swipe_ctrl: BTreeMap<u64, Control>,
@@ -862,8 +862,13 @@ impl TouchControls {
             return None;
         }
         self.fingers
-            .values()
-            .find_map(|(r, point)| matches!(r, Role::Look { .. }).then_some(*point))
+            .iter()
+            .find_map(|(id, (r, point))| {
+                (!self.custom_fingers.contains_key(id)
+                    && !self.passthrough_fingers.contains(id)
+                    && matches!(r, Role::Look { .. }))
+                .then_some(*point)
+            })
             .or_else(|| {
                 self.last_marker
                     .filter(|(_, t)| t.elapsed() < Duration::from_millis(180))
@@ -1197,7 +1202,10 @@ impl TouchControls {
         self.holding_use = false;
         self.holding = false;
         if !self.crosshair() || self.settings.crosshair_gestures {
-            for (role, point) in self.fingers.values_mut() {
+            for (id, (role, point)) in &mut self.fingers {
+                if self.custom_fingers.contains_key(id) || self.passthrough_fingers.contains(id) {
+                    continue;
+                }
                 if let Role::Look {
                     start: _,
                     since,

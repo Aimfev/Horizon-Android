@@ -2057,7 +2057,9 @@ impl Settings {
         Ok(exported)
     }
     pub fn crosshair(&self) -> bool {
-        self.mode == Mode::Crosshair || self.split_controls
+        self.control_style == ControlStyle::GoyControl
+            || self.mode == Mode::Crosshair
+            || self.split_controls
     }
     /// Toggles split-touch (crosshair aiming vs tap-anywhere interaction) across all movement modes.
     pub fn toggle_split_touch(&mut self) {

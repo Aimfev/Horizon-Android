@@ -560,6 +560,10 @@ struct Pass {
     image_copies: u64,
     /// The pack's images a compute pass's loads read as they were before it: copied first.
     snapshots: u64,
+    /// `[scale, x, y]` of `scale.<program>` when not `[1, 0, 0]`: draws into that sub-viewport.
+    viewport: Option<[f32; 3]>,
+    /// `hz_depth_linear`: `1.0` where a depth sampler uses hardware linear filtering.
+    depth_linear: [f32; 4],
 }
 
 impl Pass {
@@ -1308,6 +1312,15 @@ fn bindings(
             }
             None => {
                 let mut src = source(&s.name, group.shadow(), shadow.is_some(), watershadow);
+                if matches!(group, Group::Deferred | Group::Composite | Group::Final)
+                    && (src == Source::Atlas || (src == Source::Dummy && s.ty == "sampler2D"))
+                {
+                    src = Source::Color(0);
+                } else if group == Group::Gbuffers
+                    && matches!(s.name.as_str(), "colortex0" | "gcolor" | "colortex1" | "gdepth" | "colortex2" | "gnormal" | "colortex3" | "composite")
+                {
+                    src = Source::Atlas;
+                }
                 let blank = match src {
                     // The shadow pass writes the shadow map.
                     Source::ShadowDepth(..) => group == Group::Shadow,
@@ -1539,7 +1552,7 @@ fn build_pass(
     let features = device.features();
     // The frame's uniforms, then the pack's custom ones.
     let index = |name: &str| {
-        pack_uniforms::index(name).or_else(|| {
+        pack_uniforms::index_in(name, geometry.is_some()).or_else(|| {
             let k = custom.iter().position(|c| c == name)?;
             Some(pack_uniforms::NAMES.len() + k)
         })
@@ -1587,15 +1600,18 @@ fn build_pass(
         } else if let Some(&buffer) = p.buffers.get(l) {
             let format = formats[buffer as usize];
             let mut state = target(format);
-            if let (Some(t), Some(b)) = (&mut state, p.blend)
+            let own = p.buffer_blends.iter().find(|(n, _)| *n == buffer);
+            if let Some(t) = &mut state
                 && format
                     .guaranteed_format_features(features)
                     .flags
                     .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
             {
-                t.blend = Some(blend_state(b));
-                if l < 16 {
-                    blends |= 1 << l;
+                if let Some(b) = own.map_or(p.blend, |(_, b)| *b) {
+                    t.blend = Some(blend_state(b));
+                    if l < 16 {
+                        blends |= 1 << l;
+                    }
                 }
             }
             targets[l] = state;
@@ -1626,11 +1642,12 @@ fn build_pass(
         .iter()
         .filter(|f| !f.1)
         .fold(0u16, |m, f| m | 1 << f.0);
-    // Gbuffers programs write in place (6.1.6).
+    // Gbuffers programs write in place (6.1.6); a forced flip on a written buffer is one flip,
+    // not two (XOR).
     let flip = if final_pass || geometry.is_some() {
         0
     } else {
-        (written & !kept) | mask(&p.flips)
+        (written & !kept) ^ mask(&p.flips)
     };
     let max_groups = device.limits().max_bind_groups as usize;
     let mut buffers_group = (!interface.buffers.is_empty()).then_some(4u32);
@@ -1846,6 +1863,8 @@ fn build_pass(
         geometry: p.geometry_triangles,
         image_copies,
         snapshots: 0,
+        viewport: (!final_pass && geometry.is_none() && p.scale != [1.0, 0.0, 0.0]).then_some(p.scale),
+        depth_linear: [1.0, 1.0, 1.0, 1.0],
     })
 }
 
@@ -1991,6 +2010,8 @@ fn build_compute(
         geometry: 0,
         image_copies,
         snapshots,
+        viewport: None,
+        depth_linear: [1.0, 1.0, 1.0, 1.0],
     })
 }
 
@@ -2008,16 +2029,13 @@ impl PackPost {
         let mut formats: [wgpu::TextureFormat; BUFFERS] =
             std::array::from_fn(|i| texture_format(post.config.buffers[i].format, features));
         if cfg!(target_os = "android") {
-            let rgba32_ok = adapter
-                .get_texture_format_features(wgpu::TextureFormat::Rgba32Float)
-                .allowed_usages
-                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT);
-            if !rgba32_ok {
-                for f in &mut formats {
-                    if *f == wgpu::TextureFormat::Rgba32Float {
-                        *f = wgpu::TextureFormat::Rgba16Float;
-                    }
-                }
+            for f in &mut formats {
+                *f = match *f {
+                    wgpu::TextureFormat::Rgba32Float => wgpu::TextureFormat::Rgba16Float,
+                    wgpu::TextureFormat::Rg32Float => wgpu::TextureFormat::Rg16Float,
+                    wgpu::TextureFormat::R32Float => wgpu::TextureFormat::R16Float,
+                    other => other,
+                };
             }
         }
         let sky_clear = Some(&post.config.buffers[0])
@@ -2038,11 +2056,15 @@ impl PackPost {
             notes.push("size.buffer.colortex0: colortex0 keeps the render size".into());
         }
         let textures = pack_textures::upload(device, queue, post.textures, &mut notes);
-        let shadow_config = post.config.shadow.clone();
+        let mut shadow_config = post.config.shadow.clone();
+        if cfg!(target_os = "android") {
+            shadow_config.resolution = shadow_config.resolution.min(1024);
+            shadow_config.distance = shadow_config.distance.min(80.0);
+        }
         let mut custom = post.custom;
         let custom_names: Vec<String> = custom.uniforms().map(|u| u.0.to_owned()).collect();
         // A first run finds the names neither the frame nor the pack defines.
-        custom.eval(0.0, &|n| pack_uniforms::index(n).map(|_| Val::scalar(0.0)));
+        custom.eval(0.0, &pack_uniforms::zero);
         // Its zeros are no start for `smooth`: the first frame's values are, as in Iris.
         custom.restart_smoothing();
         if !custom.notes.is_empty() {
@@ -2056,7 +2078,19 @@ impl PackPost {
         // The shadow buffers' formats when the shadow pass runs; their programs see them as
         // buffers 0 and 1.
         let shadow_formats: Option<[wgpu::TextureFormat; 2]> = post.shadow_pass.then(|| {
-            std::array::from_fn(|n| texture_format(shadow_config.colors[n].format, features))
+            std::array::from_fn(|n| {
+                let f = texture_format(shadow_config.colors[n].format, features);
+                if cfg!(target_os = "android") {
+                    match f {
+                        wgpu::TextureFormat::Rgba32Float => wgpu::TextureFormat::Rgba16Float,
+                        wgpu::TextureFormat::Rg32Float => wgpu::TextureFormat::Rg16Float,
+                        wgpu::TextureFormat::R32Float => wgpu::TextureFormat::R16Float,
+                        other => other,
+                    }
+                } else {
+                    f
+                }
+            })
         });
         let shadow_space: [wgpu::TextureFormat; BUFFERS] = std::array::from_fn(|i| {
             shadow_formats
@@ -3828,8 +3862,8 @@ impl PackPost {
         terrain: &mut TerrainDraw<'_>,
         frame: &super::Frame,
     ) {
-        // Opt-in only (`horizon-graphics.txt` shadowCache). Off: always redraw, drop any cache.
-        if !frame.shadow_cache {
+        // Opt-in on PC (`horizon-graphics.txt` shadowCache), automatic on Android for mobile GPU frame pacing.
+        if !frame.shadow_cache && !cfg!(target_os = "android") {
             self.shadow_cache = ShadowCache::default();
             self.draw_shadow_pass(device, queue, encoder, terrain);
             return;
@@ -3987,16 +4021,27 @@ impl PackPost {
             color.mipmap.hash(&mut hasher);
         }
         let shadow_settings_hash = hasher.finish();
-        let shadow_uniforms_hash = self.shadow_uniforms_hash();
+        let shadow_uniforms_hash = if cfg!(target_os = "android") {
+            0
+        } else {
+            self.shadow_uniforms_hash()
+        };
+        let quantize = |a: f32| {
+            if cfg!(target_os = "android") {
+                (a * 4.0).round() / 4.0
+            } else {
+                a
+            }
+        };
 
         ShadowCacheKey {
-            sun_angle: frame.sky.sun_angle,
-            moon_angle: frame.sky.moon_angle,
+            sun_angle: quantize(frame.sky.sun_angle),
+            moon_angle: quantize(frame.sky.moon_angle),
             snapped_camera,
             shadow_settings_hash,
             shadow_scene_revision: frame.shadow_scene_revision,
-            ticks: frame.ticks,
-            day_time: frame.pack.day_time,
+            ticks: if cfg!(target_os = "android") { 0 } else { frame.ticks },
+            day_time: if cfg!(target_os = "android") { frame.pack.day_time / 10 } else { frame.pack.day_time },
             shadow_uniforms_hash,
         }
     }
@@ -4359,17 +4404,18 @@ impl PackPost {
             } else if pass.sink {
                 attachments.push(attach(&targets.sink, overwrite));
             } else {
+                // Composite/deferred passes can `discard`, blend per buffer, or draw into a
+                // partial `scale.<program>` viewport, so keep the buffer's existing contents.
+                let op = if !pass.sink || pass.viewport.is_some() {
+                    keep
+                } else {
+                    overwrite
+                };
                 for &(location, buffer) in &pass.writes {
                     let l = location as usize;
                     if attachments.len() <= l {
                         attachments.resize(l + 1, None);
                     }
-                    let uses_blend = l < 16 && (pass.blends & (1 << l)) != 0;
-                    let op = if uses_blend || pass.geometry > 0 {
-                        keep
-                    } else {
-                        overwrite
-                    };
                     attachments[l] = view(buffer).and_then(|v| attach(v, op));
                 }
             }
@@ -4380,6 +4426,16 @@ impl PackPost {
                     timestamp_writes: self.timing.as_mut().and_then(|t| t.writes(&pass.name)),
                     ..Default::default()
                 });
+                if let Some([scale, x, y]) = pass.viewport {
+                    rp.set_viewport(
+                        out[0] as f32 * x,
+                        out[1] as f32 * (1.0 - y - scale),
+                        out[0] as f32 * scale,
+                        out[1] as f32 * scale,
+                        0.0,
+                        1.0,
+                    );
+                }
                 rp.set_pipeline(pass.render());
                 rp.set_bind_group(0, &group, &[]);
                 if pass.buffers

@@ -5663,6 +5663,15 @@ impl Game<'_> {
         } else if !dead && !riding {
             player.client_side = true;
             player.velocity = player.velocity.add_vector(pushed);
+            let pre_wind_vy = if player.ground.on_ground
+                && keys.jump
+                && !player.flying
+                && player.velocity.y > 0.45
+            {
+                Some(player.velocity.y)
+            } else {
+                None
+            };
             MotionWorld {
                 entities: &entity_collisions,
                 player,
@@ -5672,6 +5681,9 @@ impl Game<'_> {
                 resources: self.motion,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
+            if let Some(wy) = pre_wind_vy {
+                player.velocity.y = player.velocity.y.max(wy + 0.42);
+            }
         } else {
             // LivingEntity.baseTick counts hurtTime down for a dead or riding
             // player too (controlled_simulation_tick does it otherwise): left

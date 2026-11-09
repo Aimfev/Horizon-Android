@@ -37,6 +37,53 @@ pub struct PackInputs {
     pub held_light: [i32; 2],
     /// The values native mods hand their packs (`frame.mods`, `native_shader_params`).
     pub mod_params: [[f32; 4]; 8],
+    /// The local player's state for Iris's status uniforms (`currentPlayerHealth`, `is_hurt`, etc.).
+    pub status: PlayerStatus,
+}
+
+/// The local player's state behind Iris's status uniforms (`currentPlayerHealth`,
+/// `isSpectator`, `is_burning`...).
+#[derive(Clone, Copy, Debug)]
+pub struct PlayerStatus {
+    pub survival: bool,
+    pub health: f32,
+    pub max_health: f32,
+    pub food: f32,
+    pub air: f32,
+    pub armor: f32,
+    pub spectator: bool,
+    pub riding: bool,
+    pub feet_in_water: bool,
+    pub swimming: bool,
+    pub burning: bool,
+    pub hurt: bool,
+    pub invisible: bool,
+    pub sneaking: bool,
+    pub sprinting: bool,
+    pub elytra_flying: bool,
+}
+
+impl Default for PlayerStatus {
+    fn default() -> Self {
+        Self {
+            survival: true,
+            health: 20.0,
+            max_health: 20.0,
+            food: 20.0,
+            air: 300.0,
+            armor: 0.0,
+            spectator: false,
+            riding: false,
+            feet_in_water: false,
+            swimming: false,
+            burning: false,
+            hurt: false,
+            invisible: false,
+            sneaking: false,
+            sprinting: false,
+            elytra_flying: false,
+        }
+    }
 }
 
 /// One uniform's value: up to 16 floats or 3 integers.
@@ -192,7 +239,50 @@ pub const NAMES: &[&str] = &[
     "logicalHeightLimit",
     "hasSkylight",
     "hasCeiling",
+    "currentPlayerHealth",
+    "maxPlayerHealth",
+    "currentPlayerHunger",
+    "maxPlayerHunger",
+    "currentPlayerAir",
+    "maxPlayerAir",
+    "maxPlayerArmor",
+    "isSpectator",
+    "isRiding",
+    "feetInWater",
+    "inSwimmingAnimation",
+    "is_burning",
+    "is_hurt",
+    "is_invisible",
+    "is_sneaking",
+    "is_sprinting",
+    "isElytraFlying",
+    "ambientLight",
+    "playerMood",
+    "constantMood",
+    "centerDepthSmooth",
+    "alphaTestRef",
+    "entityId",
+    "blockEntityId",
+    "entityColor",
+    "cloudTime",
+    GBUFFERS_FOG_MODE,
+    GBUFFERS_FOG_SHAPE,
+    GBUFFERS_CENTER_DEPTH,
+    "farPlane",
+    "dhProjection",
+    "dhPreviousProjection",
+    "dhProjectionInverse",
+    "sunColor",
+    "nsunColor",
+    "sunIntensity",
+    "moonIntensity",
+    "skyIntensity",
+    "skyIntensityNight",
 ];
+
+const GBUFFERS_FOG_MODE: &str = "gbuffers.fogMode";
+const GBUFFERS_FOG_SHAPE: &str = "gbuffers.fogShape";
+const GBUFFERS_CENTER_DEPTH: &str = "gbuffers.centerDepthSmooth";
 
 /// Values carried from frame to frame.
 pub struct FrameUniforms {
@@ -331,7 +421,7 @@ impl FrameUniforms {
         let camera = frame.camera.as_vec3();
         let (previous_exact, previous_view, previous_projection) =
             self.previous
-                .unwrap_or((glam::DVec3::ZERO, Mat4::ZERO, Mat4::ZERO));
+                .unwrap_or((frame.camera, view, projection));
         let previous_camera = previous_exact.as_vec3();
         self.previous = Some((frame.camera, view, projection));
         // The camera's whole blocks and the rest, exact however far from the origin.
@@ -467,7 +557,52 @@ impl FrameUniforms {
                 "dhNearPlane" => Value::f(&[frame.depth_far * 0.5]),
                 "dhFarPlane" => Value::f(&[frame.depth_far * 4.0]),
                 "dhRenderDistance" => Value::i(&[frame.depth_far as i32]),
-                "currentPlayerArmor" => Value::f(&[0.0]),
+                "currentPlayerArmor" => Value::f(&[(inputs.status.armor / 50.0).clamp(0.0, 1.0)]),
+                "maxPlayerArmor" => Value::f(&[50.0]),
+                "currentPlayerHealth" => {
+                    let h = if inputs.status.spectator || inputs.status.max_health <= 0.0 || inputs.status.health <= 0.0 {
+                        1.0
+                    } else {
+                        (inputs.status.health / inputs.status.max_health).clamp(0.05, 1.0)
+                    };
+                    Value::f(&[h])
+                }
+                "maxPlayerHealth" => Value::f(&[inputs.status.max_health.max(20.0)]),
+                "currentPlayerHunger" => Value::f(&[(inputs.status.food / 20.0).clamp(0.0, 1.0)]),
+                "maxPlayerHunger" => Value::f(&[20.0]),
+                "currentPlayerAir" => Value::f(&[(inputs.status.air / 300.0).clamp(0.0, 1.0)]),
+                "maxPlayerAir" => Value::f(&[300.0]),
+                "isSpectator" => Value::i(&[i32::from(inputs.status.spectator)]),
+                "isRiding" => Value::i(&[i32::from(inputs.status.riding)]),
+                "feetInWater" => Value::i(&[i32::from(inputs.status.feet_in_water)]),
+                "inSwimmingAnimation" => Value::i(&[i32::from(inputs.status.swimming)]),
+                "is_burning" => Value::i(&[i32::from(inputs.status.burning)]),
+                "is_hurt" => Value::i(&[i32::from(inputs.status.hurt)]),
+                "is_invisible" => Value::i(&[i32::from(inputs.status.invisible || inputs.status.spectator)]),
+                "is_sneaking" => Value::i(&[i32::from(inputs.status.sneaking)]),
+                "is_sprinting" => Value::i(&[i32::from(inputs.status.sprinting)]),
+                "isElytraFlying" => Value::i(&[i32::from(inputs.status.elytra_flying)]),
+                "ambientLight" => Value::f(&[if inputs.biome_category == 16 { 0.1 } else { 0.0 }]),
+                "playerMood" | "constantMood" => Value::f(&[0.0]),
+                "centerDepthSmooth" => Value::f(&[0.5]),
+                "alphaTestRef" => Value::f(&[0.1]),
+                "entityId" => Value::i(&[0]),
+                "blockEntityId" => Value::i(&[-1]),
+                "entityColor" => Value::f(&[0.0; 4]),
+                "cloudTime" => Value::f(&[(seconds * 0.6) % 3600.0]),
+                GBUFFERS_FOG_MODE => Value::i(&[9729]),
+                GBUFFERS_FOG_SHAPE => Value::i(&[1]),
+                GBUFFERS_CENTER_DEPTH => Value::f(&[0.0]),
+                "farPlane" => Value::f(&[frame.depth_far.max(frame.detail_distance)]),
+                "dhProjection" => m4(projection),
+                "dhPreviousProjection" => m4(previous_projection),
+                "dhProjectionInverse" => m4(projection.inverse()),
+                "sunColor" => Value::f(&if day { [1.0, 0.95, 0.85] } else { [0.15, 0.2, 0.35] }),
+                "nsunColor" => Value::f(&[1.0, 0.95, 0.85]),
+                "sunIntensity" => Value::f(&[if day { 1.0 } else { 0.0 }]),
+                "moonIntensity" => Value::f(&[if day { 0.0 } else { 1.0 }]),
+                "skyIntensity" => Value::f(&[if day { 1.0 } else { 0.15 }]),
+                "skyIntensityNight" => Value::f(&[if day { 0.0 } else { 1.0 }]),
                 "maxBlindnessDarkness" => Value::f(&[inputs.blindness.max(frame.darkness.0)]),
                 "isEyeInCave" => Value::i(&[i32::from(eye[1] < 4.0 && frame.camera.y < 60.0)]),
                 "lightningBoltPosition" => Value::f(&[0.0, 10000.0, 0.0, 0.0]),
@@ -542,17 +677,45 @@ fn components(name: &str) -> usize {
         | "moonPosition"
         | "shadowLightPosition"
         | "fogColor"
-        | "skyColor" => 3,
-        "lightningBoltPosition" => 4,
+        | "skyColor"
+        | "endFlashPosition"
+        | "sunColor"
+        | "nsunColor" => 3,
+        "lightningBoltPosition" | "entityColor" => 4,
         "eyeBrightness" | "eyeBrightnessSmooth" | "atlasSize" => 2,
-        n if n == "normalMatrix" || n.starts_with("gbuffer") || n.starts_with("shadow") && n != "shadowAngle" => 16,
+        n if n == "normalMatrix"
+            || n.starts_with("gbuffer")
+            || n.starts_with("dh") && n.contains("Projection")
+            || n.starts_with("shadow") && n != "shadowAngle" =>
+        {
+            16
+        }
         _ => 1,
     }
+}
+
+/// What `name` gives custom uniforms before the first frame: zeros, at its size, so their
+/// shapes check out as on a frame (#9086).
+pub fn zero(name: &str) -> Option<horizon_shaders::Val> {
+    index(name)?;
+    Some(horizon_shaders::Val::vector(&[0.0; 16][..components(name)]))
 }
 
 /// The position of `name` in [`NAMES`].
 pub fn index(name: &str) -> Option<usize> {
     NAMES.iter().position(|n| *n == name)
+}
+
+/// The position in [`NAMES`] of the value a program reads as `name`; `geometry`: the program
+/// draws the game's geometry (gbuffers, shadow), which reads its own fog mode and shape and no
+/// centre depth.
+pub fn index_in(name: &str, geometry: bool) -> Option<usize> {
+    match name {
+        "fogMode" if geometry => index(GBUFFERS_FOG_MODE),
+        "fogShape" if geometry => index(GBUFFERS_FOG_SHAPE),
+        "centerDepthSmooth" if geometry => index(GBUFFERS_CENTER_DEPTH),
+        _ => index(name),
+    }
 }
 
 #[cfg(test)]

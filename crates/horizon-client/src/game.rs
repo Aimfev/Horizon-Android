@@ -7003,8 +7003,16 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+            };
+            let pre_wind_vy = if grounded && keys.jump && !player.flying && sim.player.velocity.y > 0.45 {
+                Some(sim.player.velocity.y)
+            } else {
+                None
+            };
+            sim.controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
+            if let Some(wy) = pre_wind_vy {
+                player.velocity.y = player.velocity.y.max(wy + 0.42);
             }
-            .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
             // Player.jumpFromGround: the jump statistic.
             if grounded && keys.jump && !player.flying && player.velocity.y > 0.2 {
                 self.stats.custom("jump", 1);
@@ -15107,7 +15115,7 @@ impl Game<'_> {
             // Draw the virtual mouse pointer directly above the vanilla game/menu GUI layer
             // and strictly underneath our touch controls and floating menu overlays.
             #[cfg(target_os = "android")]
-            if self.pad.touch_ui.virtual_mouse {
+            if self.pad.touch_ui.virtual_mouse && crate::touch_visible() {
                 horizon_client::touch_ui::draw_pointer(
                     &mut hud,
                     &self.gui.atlas,
@@ -16303,17 +16311,29 @@ impl ApplicationHandler for Game<'_> {
         {
             // MouseHandler.onMove with the pointer grabbed; applied once per frame.
             #[cfg(target_os = "android")]
-            {
+            let (x, y) = {
                 if !horizon_client::android_runtime::note_input(
                     horizon_client::android_gamepad::InputMode::KeyboardMouse,
                 ) {
                     return;
                 }
                 crate::touch_input(false);
+                if self.pad.touch_ui.virtual_mouse {
+                    self.android_sync_pointer();
+                }
                 if crate::keyboard_mouse_input() && self.captured && !self.os_mouse_captured {
                     self.os_mouse_captured = crate::platform::capture_mouse(true);
                 }
-            }
+                let otg_boost = 2.6
+                    * f64::from(
+                        self.pad
+                            .touch
+                            .settings
+                            .virtual_mouse_sensitivity
+                            .clamp(0.25, 4.0),
+                    );
+                (x * otg_boost, y * otg_boost)
+            };
             self.mouse.on_move(0.0, 0.0, x, y, true, true);
             self.last_input = Instant::now();
         }
@@ -16375,6 +16395,9 @@ impl Game<'_> {
                 horizon_client::android_gamepad::InputMode::KeyboardMouse,
             );
             crate::touch_input(false);
+            if self.pad.touch_ui.virtual_mouse {
+                self.android_sync_pointer();
+            }
             if event.state == ElementState::Pressed {
                 self.pad.hardware_keys.insert(key);
             } else {
@@ -16394,6 +16417,9 @@ impl Game<'_> {
                 horizon_client::android_gamepad::InputMode::KeyboardMouse,
             );
             crate::touch_input(false);
+            if self.pad.touch_ui.virtual_mouse {
+                self.android_sync_pointer();
+            }
             if self.captured && !self.os_mouse_captured {
                 self.os_mouse_captured = crate::platform::capture_mouse(true);
             }
@@ -16415,6 +16441,9 @@ impl Game<'_> {
                 && winit::platform::android::native_device_id(*device_id) > 0 =>
             {
                 crate::touch_input(false);
+                if self.pad.touch_ui.virtual_mouse {
+                    self.android_sync_pointer();
+                }
                 if crate::keyboard_mouse_input() && self.captured && !self.os_mouse_captured {
                     self.os_mouse_captured = crate::platform::capture_mouse(true);
                 }

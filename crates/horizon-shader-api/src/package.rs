@@ -658,39 +658,93 @@ gpu_ms = 1.5
                 "material.wgsl",
                 r#"override reflections: bool = true;
 
+// Ultra-soft 5-tap rotated Poisson penumbra filter for realistic soft shadows on mobile GPUs
+fn sample_soft_shadow(world_pos: vec3<f32>, normal: vec3<f32>, ndotl: f32) -> f32 {
+    if frame.has_shadow == 0u {
+        return 1.0;
+    }
+    let slope_bias = clamp(0.0012 + (1.0 - ndotl) * 0.0022, 0.001, 0.0035);
+    let sp = shadow_position(world_pos + normal * 0.055);
+    if sp.x <= 0.003 || sp.x >= 0.997 || sp.y <= 0.003 || sp.y >= 0.997 || sp.z >= 0.999 {
+        return 1.0;
+    }
+    let edge_fade = smoothstep(0.0, 0.08, min(min(sp.x, 1.0 - sp.x), min(sp.y, 1.0 - sp.y)));
+    let hash = fract(sin(dot(world_pos.xz, vec2<f32>(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+    let c = cos(hash);
+    let s = sin(hash);
+    let rot = mat2x2<f32>(vec2<f32>(c, s), vec2<f32>(-s, c));
+    let radius = (1.65 + (1.0 - frame.sun_direction.y) * 0.85) / 1024.0;
+    let z_ref = sp.z - slope_bias;
+    var acc = textureSampleCompareLevel(shadow_map, shadow_sampler, sp.xy, z_ref) * 0.28;
+    acc += textureSampleCompareLevel(shadow_map, shadow_sampler, sp.xy + rot * vec2<f32>(-0.85,  0.45) * radius, z_ref) * 0.18;
+    acc += textureSampleCompareLevel(shadow_map, shadow_sampler, sp.xy + rot * vec2<f32>( 0.85, -0.45) * radius, z_ref) * 0.18;
+    acc += textureSampleCompareLevel(shadow_map, shadow_sampler, sp.xy + rot * vec2<f32>( 0.45,  0.85) * radius, z_ref) * 0.18;
+    acc += textureSampleCompareLevel(shadow_map, shadow_sampler, sp.xy + rot * vec2<f32>(-0.45, -0.85) * radius, z_ref) * 0.18;
+    let soft_s = smoothstep(0.0, 1.0, acc);
+    return mix(1.0, soft_s, edge_fade * (1.0 - frame.rain * 0.65));
+}
+
 fn material(input: MaterialInput) -> Surface {
     let base = input.albedo * input.tint;
+    let world = input.position + frame.camera_position;
+    let dist = length(input.position);
     let ndotl = max(dot(input.normal, frame.light_direction), 0.0);
-    var shadow = 1.0;
-    if frame.has_shadow == 1u {
-        let sp = shadow_position(input.position + input.normal * 0.06);
-        if sp.x > 0.0 && sp.x < 1.0 && sp.y > 0.0 && sp.y < 1.0 && sp.z < 1.0 {
-            shadow = textureSampleCompareLevel(shadow_map, shadow_sampler, sp.xy, sp.z - 0.0015);
-        }
-    }
-    let direct_sun = ndotl * shadow * smoothstep(0.15, 0.85, input.light.y);
-    let sky_ambient = vec3<f32>(0.68, 0.78, 0.96) * (0.52 + 0.25 * input.normal.y);
-    let sun_color = vec3<f32>(1.28, 1.18, 0.98) * direct_sun * 0.75;
-    let shaded_light = input.lightmap * (sky_ambient + sun_color) + vec3<f32>(1.1, 0.72, 0.35) * input.light.x * 0.35;
+    let shadow = sample_soft_shadow(input.position, input.normal, ndotl);
+
+    let night = smoothstep(0.18, -0.18, frame.sun_direction.y);
+    let twilight = smoothstep(-0.12, 0.06, frame.sun_direction.y) * (1.0 - smoothstep(0.06, 0.34, frame.sun_direction.y));
+    let rain = clamp(frame.rain, 0.0, 1.0);
+
+    let direct_sun = ndotl * shadow * smoothstep(0.12, 0.88, input.light.y);
+    let day_sky_amb = vec3<f32>(0.64, 0.78, 0.98) * (0.52 + 0.26 * input.normal.y);
+    let night_sky_amb = vec3<f32>(0.18, 0.26, 0.48) * (0.44 + 0.22 * input.normal.y);
+    let rain_sky_amb = vec3<f32>(0.46, 0.52, 0.62) * (0.55 + 0.20 * input.normal.y);
+    let sky_ambient = mix(mix(day_sky_amb, night_sky_amb, night), rain_sky_amb, rain * 0.75);
+
+    let day_sun_col = mix(vec3<f32>(1.32, 1.18, 0.96), vec3<f32>(1.42, 0.78, 0.42), twilight);
+    let moon_col = vec3<f32>(0.42, 0.58, 0.92);
+    let sun_color = mix(day_sun_col, moon_col, night) * direct_sun * (0.82 - rain * 0.45);
+    let torch_glow = vec3<f32>(1.18, 0.74, 0.34) * (pow(input.light.x, 1.45) * 0.48 + input.emission * 0.55);
+
+    let shaded_light = input.lightmap * (sky_ambient + sun_color) + torch_glow;
     var color = base.rgb * shaded_light;
+
+    // Wet ground reflection sheen in rain
+    if rain > 0.01 && input.fluid == 0u && input.normal.y > 0.7 {
+        let view_dir = normalize(-input.position);
+        let puddle = smoothstep(0.35, 0.78, sin(world.x * 0.45) * cos(world.z * 0.45) * 0.5 + 0.5) * rain * input.light.y;
+        let wet_fresnel = pow(1.0 - max(dot(input.normal, view_dir), 0.0), 4.0) * puddle;
+        color = mix(color * (1.0 - puddle * 0.18), vec3<f32>(0.55, 0.64, 0.76) * input.light.y, wet_fresnel * 0.55);
+    }
+
     if input.fluid == 1u {
-        let world = input.position + frame.camera_position;
         let wave = vec2<f32>(
             sin(world.x * 2.2 + frame.time * 2.6) * 0.006,
             cos(world.z * 2.2 - frame.time * 2.1) * 0.006
         );
         let view_dir = normalize(-input.position);
         let fresnel = clamp(0.28 + 0.65 * pow(1.0 - max(dot(input.normal, view_dir), 0.0), 3.0), 0.25, 0.92);
-        let deep_water = vec3<f32>(0.06, 0.28, 0.46) * input.lightmap;
-        color = mix(color, deep_water, 0.45);
+        let deep_water = mix(vec3<f32>(0.05, 0.30, 0.48), vec3<f32>(0.03, 0.12, 0.26), night) * input.lightmap;
+        color = mix(color, deep_water, 0.46);
         if reflections && input.face == 1u && frame.has_reflection == 1u {
             let uv = clamp(input.screen + wave, vec2<f32>(0.002), vec2<f32>(0.998));
             let mirrored = textureSampleLevel(reflection, reflection_sampler, uv, 0.0);
             color = mix(color, mirrored.rgb, fresnel);
         }
-        let spec = pow(max(dot(reflect(-frame.light_direction, normalize(input.normal + vec3<f32>(wave.x * 8.0, 0.0, wave.y * 8.0))), view_dir), 0.0), 32.0) * shadow;
-        color += vec3<f32>(1.0, 0.95, 0.82) * spec * 0.9;
+        let spec = pow(max(dot(reflect(-frame.light_direction, normalize(input.normal + vec3<f32>(wave.x * 8.0, 0.0, wave.y * 8.0))), view_dir), 0.0), 36.0) * shadow;
+        color += mix(vec3<f32>(1.0, 0.95, 0.82), vec3<f32>(0.55, 0.72, 1.0), night) * spec * (0.92 - rain * 0.55);
     }
+
+    // Atmospheric night & rain fogs
+    let fog_density = mix(mix(0.0045, 0.0085, night), 0.0185, rain);
+    let height_mist = exp(-max(world.y - 62.0, 0.0) * 0.045) * (0.35 * night + 0.65 * rain);
+    let fog_factor = clamp((1.0 - exp(-dist * fog_density)) * (0.65 + height_mist), 0.0, 0.82) * smoothstep(0.1, 0.8, input.light.y);
+    let day_fog = mix(vec3<f32>(0.72, 0.84, 0.98), vec3<f32>(0.96, 0.62, 0.38), twilight);
+    let night_fog = vec3<f32>(0.07, 0.11, 0.22);
+    let rain_fog = mix(vec3<f32>(0.42, 0.48, 0.56), vec3<f32>(0.08, 0.11, 0.17), night);
+    let fog_col = mix(mix(day_fog, night_fog, night), rain_fog, rain);
+    color = mix(color, fog_col, fog_factor);
+
     return Surface(vec4<f32>(color, base.a));
 }
 "#,
@@ -1357,9 +1411,18 @@ gpu_ms = 0.3
 
 fn material(input: MaterialInput) -> Surface {
     let ndotl = max(dot(input.normal, frame.light_direction), 0.0);
-    let dir_shade = 0.76 + 0.38 * ndotl * input.light.y;
-    let light = pow(input.lightmap, vec3<f32>(contrast)) * dir_shade;
-    return Surface(vec4<f32>(input.albedo.rgb * input.tint.rgb * light, input.albedo.a * input.tint.a));
+    let night = smoothstep(0.18, -0.18, frame.sun_direction.y);
+    let rain = clamp(frame.rain, 0.0, 1.0);
+    let dir_shade = 0.74 + 0.42 * ndotl * input.light.y * (1.0 - rain * 0.4);
+    let warm_sun = mix(vec3<f32>(1.06, 1.02, 0.96), vec3<f32>(0.78, 0.86, 1.08), night);
+    let torch = vec3<f32>(1.16, 0.72, 0.32) * pow(input.light.x, 1.5) * 0.38;
+    let light = pow(input.lightmap, vec3<f32>(contrast)) * dir_shade * warm_sun + torch;
+    var col = input.albedo.rgb * input.tint.rgb * light;
+    let dist = length(input.position);
+    let fog_amt = clamp((1.0 - exp(-dist * mix(0.004, 0.016, max(night * 0.45, rain)))) * (0.35 * night + 0.75 * rain), 0.0, 0.78) * input.light.y;
+    let fog_col = mix(vec3<f32>(0.46, 0.52, 0.60), vec3<f32>(0.07, 0.11, 0.21), night);
+    col = mix(col, fog_col, fog_amt);
+    return Surface(vec4<f32>(col, input.albedo.a * input.tint.a));
 }
 "#,
             );

@@ -78,15 +78,22 @@ impl MouseState {
                 }
             }
         } else {
-            if sample.rel_x != 0.0 || sample.rel_y != 0.0 {
-                events.push(Event::Relative(sample.rel_x, sample.rel_y));
-            } else if matches!(sample.action, 2 | 7) {
+            let (px_dx, px_dy) = if matches!(sample.action, 2 | 7) {
                 if let (Some(px), Some(py)) = (self.x, self.y) {
-                    let (dx, dy) = (sample.x - px, sample.y - py);
-                    if dx != 0.0 || dy != 0.0 {
-                        events.push(Event::Relative(dx, dy));
-                    }
+                    (sample.x - px, sample.y - py)
+                } else {
+                    (0.0, 0.0)
                 }
+            } else {
+                (0.0, 0.0)
+            };
+            let (dx, dy) = if sample.rel_x.hypot(sample.rel_y) >= px_dx.hypot(px_dy) {
+                (sample.rel_x, sample.rel_y)
+            } else {
+                (px_dx, px_dy)
+            };
+            if dx != 0.0 || dy != 0.0 {
+                events.push(Event::Relative(dx, dy));
             }
             self.x = Some(sample.x);
             self.y = Some(sample.y);

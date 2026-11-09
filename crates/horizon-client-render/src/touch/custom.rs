@@ -97,6 +97,49 @@ impl CustomButton {
             }
         }
     }
+    pub fn token_dispatch_priority(token: &str) -> u8 {
+        match token {
+            "key.keyboard.1"
+            | "key.keyboard.2"
+            | "key.keyboard.3"
+            | "key.keyboard.4"
+            | "key.keyboard.5"
+            | "key.keyboard.6"
+            | "key.keyboard.7"
+            | "key.keyboard.8"
+            | "key.keyboard.9"
+            | "action:key.hotbar.1"
+            | "action:key.hotbar.2"
+            | "action:key.hotbar.3"
+            | "action:key.hotbar.4"
+            | "action:key.hotbar.5"
+            | "action:key.hotbar.6"
+            | "action:key.hotbar.7"
+            | "action:key.hotbar.8"
+            | "action:key.hotbar.9"
+            | "action:key.swapOffhand"
+            | "key.keyboard.f"
+            | "mouse.scroll.up"
+            | "mouse.scroll.down" => 0,
+            "key.keyboard.space"
+            | "action:key.jump"
+            | "key.keyboard.left.shift"
+            | "key.keyboard.right.shift"
+            | "action:key.sneak"
+            | "key.keyboard.left.control"
+            | "key.keyboard.right.control"
+            | "action:key.sprint"
+            | "key.keyboard.w"
+            | "key.keyboard.a"
+            | "key.keyboard.s"
+            | "key.keyboard.d"
+            | "action:key.forward"
+            | "action:key.left"
+            | "action:key.back"
+            | "action:key.right" => 1,
+            _ => 2,
+        }
+    }
     pub fn active_tokens(&self) -> Vec<String> {
         let mut out = Vec::new();
         for t in [&self.key, &self.second_key, &self.third_key] {
@@ -108,6 +151,7 @@ impl CustomButton {
                 out.push(t.clone());
             }
         }
+        out.sort_by_key(|t| Self::token_dispatch_priority(t));
         out
     }
     pub fn label(&self) -> String {
@@ -228,8 +272,11 @@ impl TouchControls {
             && self.custom_at(point).is_none()
             && let Some(token) = self.control_at(point).and_then(Self::inventory_token)
         {
-            let pressed = !self.custom_fingers.values().any(|v| v == token);
-            self.custom_fingers.insert(id, token.into());
+            let pressed = !self
+                .custom_fingers
+                .values()
+                .any(|toks| toks.iter().any(|v| v == token));
+            self.custom_fingers.insert(id, vec![token.into()]);
             self.fingers.insert(id, (Role::Ignore, point));
             if pressed {
                 self.custom_events.push((token.into(), true));
@@ -304,28 +351,18 @@ impl TouchControls {
         })
     }
     fn release_custom_finger_key(&mut self, id: u64) {
-        let Some(key) = self.custom_fingers.remove(&id) else {
+        self.passthrough_fingers.remove(&id);
+        let Some(tokens) = self.custom_fingers.remove(&id) else {
             return;
         };
-        if !self.custom_fingers.values().any(|k| *k == key) && !self.latched_custom.contains(&key) {
-            let mut extra_tokens = Vec::new();
-            for btn in &self.settings.custom_buttons {
-                if btn.key == key {
-                    for extra in [&btn.second_key, &btn.third_key] {
-                        if !extra.is_empty()
-                            && CustomButton::valid_token(extra)
-                            && extra != "key.keyboard.unknown"
-                            && !self.latched_custom.contains(extra)
-                            && !extra_tokens.contains(extra)
-                        {
-                            extra_tokens.push(extra.clone());
-                        }
-                    }
-                }
-            }
-            self.custom_events.push((key, false));
-            for extra in extra_tokens {
-                self.custom_events.push((extra, false));
+        for tok in tokens.into_iter().rev() {
+            let still_held = self
+                .custom_fingers
+                .values()
+                .any(|other| other.contains(&tok))
+                || self.latched_custom.contains(&tok);
+            if !still_held {
+                self.custom_events.push((tok, false));
             }
         }
     }
@@ -343,24 +380,27 @@ impl TouchControls {
         let Some(key) = active.first().cloned() else {
             return false;
         };
-        let extras: Vec<String> = active.into_iter().skip(1).collect();
         let placement = self.custom_placement(index);
         self.clicked = true;
         self.custom_swipe_btn.insert(id, index);
 
         if placement.toggleable && key != "mouse.virtual.toggle" {
-            let now_on = !self.latched_custom.remove(&key);
-            if now_on {
-                self.latched_custom.insert(key.clone());
-            }
-            self.custom_events.push((key, now_on));
-            for extra in extras {
+            let all_latched = active.iter().all(|t| self.latched_custom.contains(t));
+            let now_on = !all_latched;
+            for tok in active {
                 if now_on {
-                    self.latched_custom.insert(extra.clone());
-                } else {
-                    self.latched_custom.remove(&extra);
+                    if self.latched_custom.insert(tok.clone()) {
+                        self.custom_events.push((tok, true));
+                    }
+                } else if self.latched_custom.remove(&tok) {
+                    let held_by_finger = self
+                        .custom_fingers
+                        .values()
+                        .any(|other| other.contains(&tok));
+                    if !held_by_finger {
+                        self.custom_events.push((tok, false));
+                    }
                 }
-                self.custom_events.push((extra, now_on));
             }
             if !placement.passthrough || self.in_menu {
                 if !is_swipe || !self.fingers.contains_key(&id) {
@@ -368,19 +408,27 @@ impl TouchControls {
                 }
                 return true;
             }
+            self.passthrough_fingers.insert(id);
             return false;
         }
 
-        let pressed =
-            !self.custom_fingers.values().any(|k| *k == key) && !self.latched_custom.contains(&key);
-        self.custom_fingers.insert(id, key.clone());
-        if pressed {
-            self.custom_events.push((key, true));
-            for extra in extras {
-                self.custom_events.push((extra, true));
+        let mut to_emit = Vec::with_capacity(active.len());
+        for tok in &active {
+            let held_elsewhere = self
+                .custom_fingers
+                .iter()
+                .any(|(&fid, other)| fid != id && other.contains(tok))
+                || self.latched_custom.contains(tok);
+            let is_instant_slot = CustomButton::token_dispatch_priority(tok) == 0;
+            if !held_elsewhere || is_instant_slot {
+                to_emit.push((tok.clone(), true));
             }
         }
+        self.custom_fingers.insert(id, active);
+        self.custom_events.extend(to_emit);
+
         if placement.passthrough && !self.in_menu {
+            self.passthrough_fingers.insert(id);
             if !self
                 .fingers
                 .get(&id)
@@ -392,7 +440,7 @@ impl TouchControls {
                         Role::Look {
                             start: point,
                             since: Instant::now(),
-                            dragged: true,
+                            dragged: false,
                             held_use: false,
                             committed: false,
                         },
@@ -497,25 +545,33 @@ impl TouchControls {
         false
     }
     pub fn held_custom_tokens(&self) -> impl Iterator<Item = &str> {
-        let extra_tokens = self
-            .settings
-            .custom_buttons
-            .iter()
-            .filter(|btn| {
-                !btn.key.is_empty()
-                    && btn.key != "key.keyboard.unknown"
-                    && (self.custom_fingers.values().any(|k| *k == btn.key)
-                        || self.latched_custom.contains(&btn.key))
-            })
-            .flat_map(|btn| [btn.second_key.as_str(), btn.third_key.as_str()])
-            .filter(|t| {
-                !t.is_empty() && *t != "key.keyboard.unknown" && CustomButton::valid_token(t)
-            });
         self.custom_fingers
             .values()
+            .flat_map(|v| v.iter())
             .chain(self.latched_custom.iter())
             .map(String::as_str)
-            .chain(extra_tokens)
+    }
+    pub fn custom_button_held(&self, index: usize) -> bool {
+        if self.custom_swipe_btn.values().any(|&idx| idx == index) {
+            return true;
+        }
+        let Some(btn) = self.settings.custom_buttons.get(index) else {
+            return false;
+        };
+        let active = btn.active_tokens();
+        !active.is_empty()
+            && active.iter().all(|tok| {
+                self.custom_fingers
+                    .values()
+                    .any(|held| held.contains(tok))
+            })
+    }
+    pub fn custom_button_toggled(&self, index: usize) -> bool {
+        let Some(btn) = self.settings.custom_buttons.get(index) else {
+            return false;
+        };
+        let active = btn.active_tokens();
+        !active.is_empty() && active.iter().all(|tok| self.latched_custom.contains(tok))
     }
     pub fn has_pending_key_events(&self) -> bool {
         !self.custom_events.is_empty()
@@ -526,26 +582,12 @@ impl TouchControls {
     pub(super) fn clear_custom(&mut self) {
         self.custom_last_pos.clear();
         self.custom_swipe_btn.clear();
-        let mut keys: std::collections::BTreeSet<_> = std::mem::take(&mut self.custom_fingers)
-            .into_values()
-            .collect();
-        keys.extend(std::mem::take(&mut self.latched_custom));
-        let mut all_tokens = keys.clone();
-        for btn in &self.settings.custom_buttons {
-            if keys.contains(&btn.key)
-                || (!btn.second_key.is_empty() && keys.contains(&btn.second_key))
-                || (!btn.third_key.is_empty() && keys.contains(&btn.third_key))
-            {
-                for extra in [&btn.key, &btn.second_key, &btn.third_key] {
-                    if !extra.is_empty()
-                        && CustomButton::valid_token(extra)
-                        && extra != "key.keyboard.unknown"
-                    {
-                        all_tokens.insert(extra.clone());
-                    }
-                }
-            }
-        }
+        let mut all_tokens: std::collections::BTreeSet<String> =
+            std::mem::take(&mut self.custom_fingers)
+                .into_values()
+                .flatten()
+                .collect();
+        all_tokens.extend(std::mem::take(&mut self.latched_custom));
         self.custom_events
             .extend(all_tokens.into_iter().map(|k| (k, false)));
     }
@@ -570,8 +612,8 @@ impl TouchControls {
             }
             let [nx, ny, nw, nh] = p.rect(self.aspect());
             let rect = [nx * b.width, ny * b.height, nw * b.width, nh * b.height];
-            let held = self.custom_fingers.values().any(|key| *key == button.key);
-            let toggled = self.latched_custom.contains(&button.key);
+            let held = self.custom_button_held(i);
+            let toggled = self.custom_button_toggled(i);
             let pressed = held || toggled;
             let base_opacity = if self.editor.is_some() {
                 p.opacity.max(0.25)

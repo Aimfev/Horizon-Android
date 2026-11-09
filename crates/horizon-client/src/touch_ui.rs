@@ -573,6 +573,12 @@ impl TouchUi {
         if controls.editor.is_some() {
             return false;
         }
+        // When a physical OTG mouse or keyboard is active (!touch_active), never show the
+        // virtual mouse cursor or virtual LMB/RMB buttons — let the Native Android OTG mouse work directly.
+        if !touch_active {
+            self.goy_in_game_mouse = false;
+            return false;
+        }
         if self.floating_menu
             || self.preset_dialog.is_some()
             || self.presets_modal_open
@@ -994,14 +1000,14 @@ pub fn aux_mouse_phase(pressed: bool, owned: bool, touched: bool) -> Option<Touc
 }
 
 const COLOR_SWATCHES: [(u32, &str); 8] = [
-    (0xFF1E1B2E, "Obsidian"),
-    (0xFF9A7BFF, "Violet"),
-    (0xFFD0BCFF, "Lavender"),
-    (0xFF38BDF8, "Cyan"),
-    (0xFF34D399, "Emerald"),
-    (0xFFFBBF24, "Amber"),
-    (0xFFF87171, "Crimson"),
-    (0xFFF4EFFA, "Snow"),
+    (crate::ui_theme::color::hex(0x1E1B2E, 184), "Obsidian"),
+    (crate::ui_theme::color::hex(0x9A7BFF, 235), "Violet"),
+    (crate::ui_theme::color::hex(0xD0BCFF, 235), "Lavender"),
+    (crate::ui_theme::color::hex(0x38BDF8, 235), "Cyan"),
+    (crate::ui_theme::color::hex(0x34D399, 235), "Emerald"),
+    (crate::ui_theme::color::hex(0xFBBF24, 235), "Amber"),
+    (crate::ui_theme::color::hex(0xF87171, 235), "Crimson"),
+    (crate::ui_theme::color::hex(0xF4EFFA, 235), "Snow"),
 ];
 
 const KB_ROWS: &[&[(&str, &str, f32)]] = &[
@@ -1561,14 +1567,9 @@ pub fn draw_goy_hud(
         }
         let label = custom.label();
 
-        let is_active_token = tc.held_custom_tokens().any(|tok| {
-            tok == custom.key
-                || (!custom.second_key.is_empty() && tok == custom.second_key)
-                || (!custom.third_key.is_empty() && tok == custom.third_key)
-        });
         let is_vmouse_on = custom.key == "mouse.virtual.toggle" && virtual_mouse;
-        let held = is_active_token && !p.toggleable;
-        let toggled = (is_active_token && p.toggleable) || is_vmouse_on;
+        let held = tc.custom_button_held(i) && !p.toggleable;
+        let toggled = (tc.custom_button_toggled(i) && p.toggleable) || is_vmouse_on;
 
 
 
@@ -4136,6 +4137,50 @@ fn push_undo_snapshot(ed: &mut crate::touch::Editor, current: &crate::touch::Set
     ed.redo_stack.clear();
 }
 
+fn duplicate_selected_editor_button(ed: &mut crate::touch::Editor, tc: &mut TouchControls) {
+    if tc.settings.custom_buttons.len() >= 32 {
+        ed.status_msg = Some("Maximum of 32 custom buttons reached.".into());
+        return;
+    }
+    if let Some(idx) = ed.selected_custom {
+        if let Some(src) = tc.settings.custom_buttons.get(idx).cloned() {
+            push_undo_snapshot(ed, &tc.settings);
+            let mut copy = src;
+            for m in 0..3 {
+                copy.layouts[m].x = (copy.layouts[m].x + 0.04).clamp(0.0, 0.90);
+                copy.layouts[m].y = (copy.layouts[m].y + 0.04).clamp(0.0, 0.90);
+            }
+            let new_idx = tc.settings.custom_buttons.len();
+            let lbl = copy.label();
+            tc.settings.custom_buttons.push(copy);
+            ed.selected_custom = Some(new_idx);
+            ed.selected = None;
+            let _ = tc.settings.save();
+            ed.status_msg = Some(format!("Copied button '{lbl}'."));
+        }
+    } else if let Some(ctrl) = ed.selected {
+        if ctrl != Control::Move {
+            push_undo_snapshot(ed, &tc.settings);
+            let new_idx = tc.settings.custom_buttons.len();
+            let mut copy = CustomButton::new(tc.settings.control_key(ctrl).to_owned(), new_idx);
+            copy.custom_label = tc.settings.control_label(ctrl).to_owned();
+            let slot = tc.settings.slot(ctrl);
+            for m in 0..3 {
+                let mut pl = tc.settings.layouts[m][slot];
+                pl.x = (pl.x + 0.04).clamp(0.0, 0.90);
+                pl.y = (pl.y + 0.04).clamp(0.0, 0.90);
+                copy.layouts[m] = pl;
+            }
+            let lbl = copy.label();
+            tc.settings.custom_buttons.push(copy);
+            ed.selected_custom = Some(new_idx);
+            ed.selected = None;
+            let _ = tc.settings.save();
+            ed.status_msg = Some(format!("Copied '{lbl}' as a custom button."));
+        }
+    }
+}
+
 fn clamp_editor_custom_selection(ed: &mut crate::touch::Editor, settings: &crate::touch::Settings) {
     if let Some(idx) = ed.selected_custom
         && idx >= settings.custom_buttons.len()
@@ -4539,7 +4584,7 @@ pub fn draw_hud_editor(
         let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
         let is_sel = ed.selected == Some(c) && ed.selected_custom.is_none();
         let alpha = if vis {
-            p.opacity.clamp(0.25, 1.0)
+            p.opacity.clamp(0.0, 1.0)
         } else {
             0.35
         };
@@ -4591,12 +4636,13 @@ pub fn draw_hud_editor(
                 p.shadow_size,
                 shadow_c,
             );
+            let fg_col = crate::ui_theme::color::with_alpha(text_c, alpha);
             draw_button_icon_and_label(
                 &mut ui,
                 [rx, ry, rw, rh],
                 p.icon_id,
                 tc.settings.control_label(c),
-                text_c,
+                fg_col,
             );
         } else {
             // Authentic MCPE Sprite / Bevel rendering matching in-game MCPE controls!
@@ -4632,7 +4678,7 @@ pub fn draw_hud_editor(
         let [nx, ny, nw, nh] = p.rect(tc.aspect());
         let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
         let is_sel = ed.selected_custom == Some(i);
-        let alpha = p.opacity.clamp(0.25, 1.0);
+        let alpha = p.opacity.clamp(0.0, 1.0);
         let label = custom.label();
 
         if tc.settings.control_style == ControlStyle::GoyControl || p.use_goy_style {
@@ -4654,8 +4700,7 @@ pub fn draw_hud_editor(
                 p.shadow_size,
                 shadow_c,
             );
-            let fg_col =
-                crate::ui_theme::color::with_alpha(text_c, alpha.max(0.75).clamp(0.0, 1.0));
+            let fg_col = crate::ui_theme::color::with_alpha(text_c, alpha);
             draw_button_icon_and_label(&mut ui, [rx, ry, rw, rh], p.icon_id, &label, fg_col);
         } else {
             let dp_to_gui = ui.batch.width / w.max(1.0);
@@ -4718,7 +4763,7 @@ pub fn draw_hud_editor(
     }
 
     // 6. Larger Material You 3 Moveable Floating Menu Pod (`356x48dp`)
-    let pod_w = if ed.pod_expanded { 356.0 } else { 52.0 };
+    let pod_w = if ed.pod_expanded { 422.0 } else { 52.0 };
     let pod_h = 48.0;
     let pod_x = (tc.settings.floating_menu_pos[0] * w).clamp(8.0, (w - pod_w - 8.0).max(8.0));
     let pod_y = (tc.settings.floating_menu_pos[1] * h).clamp(6.0, (h - pod_h - 6.0).max(6.0));
@@ -4756,11 +4801,14 @@ pub fn draw_hud_editor(
     );
 
     if ed.pod_expanded {
-        let items: [(Option<Icon>, &str, f32, bool, bool); 5] = [
+        let can_copy = ed.selected_custom.is_some()
+            || (ed.selected.is_some() && ed.selected != Some(Control::Move));
+        let items: [(Option<Icon>, &str, f32, bool, bool); 6] = [
             (Some(Icon::Undo), "", 42.0, !ed.undo_stack.is_empty(), false),
             (Some(Icon::Redo), "", 42.0, !ed.redo_stack.is_empty(), false),
             (Some(Icon::Gear), "Props", 72.0, true, ed.props_open),
-            (Some(Icon::Plus), "Add", 64.0, true, false),
+            (Some(Icon::Plus), "Add", 62.0, true, false),
+            (Some(Icon::Plus), "Copy", 64.0, can_copy, false),
             (Some(Icon::Check), "Save", 68.0, true, true),
         ];
         let mut ix = pod_x + 50.0;
@@ -5017,10 +5065,24 @@ pub fn draw_hud_editor(
 
         // Telemetry Pill + Delete [🗑] Button (for Joystick & Custom Buttons) + Center-Snap [⛶] Button + Cyan [✓ Done] Button
         let pill_w = 122.0;
-        let pill_r = [dx + dw - 266.0, dy + 9.0, pill_w, 26.0];
+        let pill_r = [dx + dw - 318.0, dy + 9.0, pill_w, 26.0];
         ui.rounded(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 13.0, st_inner);
         ui.border(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 13.0, st_border);
         ui.centered_fit(Face::Mono, 8.5, pill_r, st_text, &telem);
+
+        if !is_joystick && (ed.selected_custom.is_some() || ed.selected.is_some()) {
+            let copy_r = [dx + dw - 190.0, dy + 9.0, 46.0, 26.0];
+            ui.rounded(
+                copy_r[0],
+                copy_r[1],
+                copy_r[2],
+                copy_r[3],
+                8.0,
+                color::with_alpha(st_cyan, 0.20),
+            );
+            ui.border(copy_r[0], copy_r[1], copy_r[2], copy_r[3], 8.0, st_cyan);
+            ui.centered_fit(Face::SemiBold, 9.0, copy_r, st_cyan, "Copy");
+        }
 
         if is_joystick || ed.selected_custom.is_some() {
             let del_r = [dx + dw - 138.0, dy + 9.0, 26.0, 26.0];
@@ -5668,6 +5730,7 @@ pub fn draw_hud_editor(
                     let bh_p = (38.0 * p.height_ratio.clamp(0.6, 1.35)).clamp(24.0, 48.0);
                     let bx_p = prev_r[0] + (prev_r[2] - bw_p) * 0.5;
                     let by_p = prev_r[1] + (prev_r[3] - bh_p) * 0.5;
+                    let prev_alpha = p.opacity.clamp(0.0, 1.0);
                     ui.goy_box(
                         bx_p,
                         by_p,
@@ -5675,20 +5738,20 @@ pub fn draw_hud_editor(
                         bh_p,
                         p.shape,
                         p.roundness,
-                        color::with_alpha(p.button_color, p.opacity.clamp(0.35, 1.0)),
-                        p.stroke_size.clamp(1.0, 3.5),
-                        0.0,
+                        color::with_alpha(p.button_color, prev_alpha),
+                        p.stroke_size.clamp(0.0, 6.0),
+                        p.stroke_margin,
                         p.stroke_roundness,
-                        p.stroke_color,
-                        2.0,
-                        p.shadow_color,
+                        color::with_alpha(p.stroke_color, prev_alpha),
+                        p.shadow_size,
+                        color::with_alpha(p.shadow_color, prev_alpha),
                     );
                     draw_button_icon_and_label(
                         &mut ui,
                         [bx_p, by_p, bw_p, bh_p],
                         p.icon_id,
                         &cur_hint,
-                        st_text,
+                        color::with_alpha(st_text, prev_alpha),
                     );
 
                     // Bottom Swatch Card ("BUTTON COLOR" + Circular Swatches + onClick/onToggle Cycle Pills)
@@ -5875,6 +5938,7 @@ pub fn draw_hud_editor(
                     let bh_p = (38.0 * p.height_ratio.clamp(0.6, 1.35)).clamp(24.0, 48.0);
                     let bx_p = prev_r[0] + (prev_r[2] - bw_p) * 0.5;
                     let by_p = prev_r[1] + (prev_r[3] - bh_p) * 0.5;
+                    let prev_alpha = p.opacity.clamp(0.0, 1.0);
                     ui.goy_box(
                         bx_p,
                         by_p,
@@ -5882,20 +5946,20 @@ pub fn draw_hud_editor(
                         bh_p,
                         p.shape,
                         p.roundness,
-                        color::with_alpha(p.button_color, p.opacity.clamp(0.35, 1.0)),
-                        p.stroke_size.clamp(1.0, 3.5),
-                        0.0,
+                        color::with_alpha(p.button_color, prev_alpha),
+                        p.stroke_size.clamp(0.0, 6.0),
+                        p.stroke_margin,
                         p.stroke_roundness,
-                        p.stroke_color,
-                        2.0,
-                        p.shadow_color,
+                        color::with_alpha(p.stroke_color, prev_alpha),
+                        p.shadow_size,
+                        color::with_alpha(p.shadow_color, prev_alpha),
                     );
                     draw_button_icon_and_label(
                         &mut ui,
                         [bx_p, by_p, bw_p, bh_p],
                         p.icon_id,
                         &cur_hint,
-                        st_text,
+                        color::with_alpha(st_text, prev_alpha),
                     );
 
                     // Bottom Stroke Color Swatch Strip
@@ -6786,7 +6850,7 @@ pub fn touch_hud_editor(
                 if drag_id == id {
                     match kind {
                         EditorDragKind::FloatingPod { offset, mut moved } => {
-                            let pod_w = if ed.pod_expanded { 356.0 } else { 52.0 };
+                            let pod_w = if ed.pod_expanded { 422.0 } else { 52.0 };
                             let cur_x = (tc.settings.floating_menu_pos[0] * w)
                                 .clamp(8.0, (w - pod_w - 8.0).max(8.0));
                             let cur_y = (tc.settings.floating_menu_pos[1] * h)
@@ -7316,8 +7380,17 @@ pub fn touch_hud_editor(
                 tc.clicked = true;
                 return false;
             }
-            // Header Delete [🗑] button (deletes Joystick or selected Custom Button from any tab)
+            // Header Copy button (duplicates the selected Custom Button or Built-in Button)
             let is_joy_sel = ed.selected == Some(Control::Move) && ed.selected_custom.is_none();
+            if !is_joy_sel
+                && (ed.selected_custom.is_some() || ed.selected.is_some())
+                && inside([dx + dw - 190.0, dy + 9.0, 46.0, 26.0])
+            {
+                duplicate_selected_editor_button(&mut ed, tc);
+                tc.clicked = true;
+                return false;
+            }
+            // Header Delete [🗑] button (deletes Joystick or selected Custom Button from any tab)
             if (is_joy_sel || ed.selected_custom.is_some())
                 && inside([dx + dw - 138.0, dy + 9.0, 26.0, 26.0])
             {
@@ -7351,7 +7424,7 @@ pub fn touch_hud_editor(
                 return false;
             }
             // Center-Snap via telemetry pill OR [⛶] button
-            if inside([dx + dw - 266.0, dy + 9.0, 122.0, 26.0])
+            if inside([dx + dw - 318.0, dy + 9.0, 122.0, 26.0])
                 || inside([dx + dw - 106.0, dy + 9.0, 26.0, 26.0])
             {
                 push_undo_snapshot(&mut ed, &tc.settings);
@@ -8154,7 +8227,7 @@ pub fn touch_hud_editor(
         }
 
         // 5. Check Larger Material You 3 Moveable Floating Menu Pod (356x48dp)
-        let pod_w = if ed.pod_expanded { 356.0 } else { 52.0 };
+        let pod_w = if ed.pod_expanded { 422.0 } else { 52.0 };
         let pod_h = 48.0;
         let pod_x = (tc.settings.floating_menu_pos[0] * w).clamp(8.0, (w - pod_w - 8.0).max(8.0));
         let pod_y = (tc.settings.floating_menu_pos[1] * h).clamp(6.0, (h - pod_h - 6.0).max(6.0));
@@ -8170,7 +8243,7 @@ pub fn touch_hud_editor(
             return false;
         }
         if ed.pod_expanded && inside([pod_x, pod_y, pod_w, pod_h]) {
-            let widths = [42.0, 42.0, 72.0, 64.0, 68.0];
+            let widths = [42.0, 42.0, 72.0, 62.0, 64.0, 68.0];
             let mut ix = pod_x + 50.0;
             for (btn_i, iw) in widths.into_iter().enumerate() {
                 if inside([ix, pod_y + 5.0, iw, 38.0]) {
@@ -8221,6 +8294,10 @@ pub fn touch_hud_editor(
                                 }
                                 let _ = tc.settings.save();
                             }
+                        }
+                        4 => {
+                            // Copy Selected Button
+                            duplicate_selected_editor_button(&mut ed, tc);
                         }
                         _ => {
                             // Open Save Dialog (Option A: Replace / Option B: Create New Preset)

@@ -56,8 +56,13 @@ impl Game<'_> {
         let (Some(eye), Some(p)) = (self.eye_position(), self.player.as_ref()) else {
             return Ok(false);
         };
-        let (on_ground, pos) = (p.ground.on_ground, p.position);
+        let pos = p.position;
         let velocity = self.known_player_movement();
+        // When jumping and throwing a Wind Charge downward on the same tick, controlled_simulation_tick
+        // has already cleared on_ground and set velocity.y = +0.42 before tick_local_hand runs.
+        // Treat downward throws while rising as grounded so upward jump velocity does not slow down
+        // the downward Wind Charge projectile and delay ground impact by 1 tick.
+        let on_ground = p.ground.on_ground || (self.pitch > 35.0 && velocity.y > 0.0);
         let start = Vec3::new(pos.x, eye[1], pos.z);
         let mut proj = Projectile::new(ProjectileKind::WindCharge, start, Some(Who::Player));
         proj.shoot_from_rotation(
@@ -383,8 +388,14 @@ impl Game<'_> {
             .and_then(|p| p.attribute("minecraft:explosion_knockback_resistance").ok())
             .unwrap_or(0.0);
         let creative = self.creative;
+        let known_vy = self.known_player_movement().y;
         let p = self.player.as_ref()?;
-        let feet = [p.position.x, p.position.y, p.position.z];
+        let launch_y = if wind_charge && known_vy > 0.0 {
+            (p.position.y - known_vy.clamp(0.0, 0.5)).max(center[1] - 0.25)
+        } else {
+            p.position.y
+        };
+        let feet = [p.position.x, launch_y, p.position.z];
         let dist = ((feet[0] - center[0]).powi(2)
             + (feet[1] - center[1]).powi(2)
             + (feet[2] - center[2]).powi(2))
@@ -412,10 +423,18 @@ impl Game<'_> {
         } else {
             eye.map(|d| d / l * power)
         };
+        let jump_held = self.keys.contains(&winit::keyboard::KeyCode::Space)
+            || self.pad.state.held(horizon_client::gamepad::Button::South);
         let p = self.player.as_mut()?;
+        let jump_boost = if wind_charge && p.ground.on_ground && jump_held && push[1] > 0.25 {
+            p.ground.on_ground = false;
+            0.42
+        } else {
+            0.0
+        };
         p.velocity = Vec3::new(
             p.velocity.x + push[0],
-            p.velocity.y + push[1],
+            p.velocity.y + push[1] + jump_boost,
             p.velocity.z + push[2],
         );
         // ServerPlayer.onExplosionHit: a wind charge's burst cancels the

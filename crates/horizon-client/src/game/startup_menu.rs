@@ -1334,6 +1334,7 @@ impl Loading {
                 let _ = horizon_client::android_runtime::note_input(
                     horizon_client::android_gamepad::InputMode::KeyboardMouse,
                 );
+                crate::touch_input(false);
             }
             WindowEvent::KeyboardInput {
                 device_id,
