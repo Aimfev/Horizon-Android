@@ -623,6 +623,12 @@ impl Game<'_> {
         };
         #[cfg(not(target_os = "android"))]
         let limit = framerate_limit(self.settings.max_fps as i32, context);
+        #[cfg(target_os = "android")]
+        if (!self.settings.vsync || self.settings.max_fps >= 260)
+            && !self.settings.horizon.battery
+        {
+            return limit;
+        }
         self.settings
             .horizon
             .battery_limit(limit, self.title.is_none(), self.focused)

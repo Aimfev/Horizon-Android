@@ -110,7 +110,7 @@ pub fn frame(enabled: bool, hz: u16, active: bool) -> Frame {
             return;
         }
         // Use an explicit frame budget; never infer it from a slow frame itself.
-        let target = 1_000_000_000i64 / i64::from(if hz == 0 { 60 } else { hz });
+        let target = 1_000_000_000i64 / i64::from(if hz == 0 { 120 } else { hz });
         unsafe {
             if r.session.is_null() && !r.hint_failed {
                 let get = r.symbol(c"APerformanceHint_getManager");

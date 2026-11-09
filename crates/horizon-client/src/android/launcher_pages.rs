@@ -7233,7 +7233,7 @@ impl Launcher {
                     && appearance == horizon_client::ui_theme::ThemeAppearance::Dark
                 {
                     self.catalog.config.theme.preset =
-                        horizon_client::ui_theme::ThemePreset::ObsidianViolet;
+                        horizon_client::ui_theme::ThemePreset::EmeraldForest;
                 }
                 horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
                 self.anim.trigger_theme_pulse();

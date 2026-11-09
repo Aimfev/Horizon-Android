@@ -2427,9 +2427,9 @@ fn wrapping_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemePreset {
-    #[default]
     ObsidianViolet,
     CyberCyan,
+    #[default]
     EmeraldForest,
     CrimsonEmber,
     SolarGold,
@@ -2625,16 +2625,16 @@ pub struct LauncherThemeConfig {
 impl Default for LauncherThemeConfig {
     fn default() -> Self {
         Self {
-            preset: ThemePreset::ObsidianViolet,
+            preset: ThemePreset::EmeraldForest,
             appearance: ThemeAppearance::Dark,
             background_mode: BackgroundMode::Solid,
-            custom_bg_hex: "#13111C".into(),
-            custom_surface_hex: "#1D192B".into(),
-            custom_accent_hex: "#9A7BFF".into(),
+            custom_bg_hex: "#0D1714".into(),
+            custom_surface_hex: "#152620".into(),
+            custom_accent_hex: "#34D399".into(),
             gradient_direction: GradientDirection::DiagonalDown,
-            gradient_start_hex: "#1A1333".into(),
-            gradient_mid_hex: "#131A2E".into(),
-            gradient_end_hex: "#0D0B14".into(),
+            gradient_start_hex: "#0F231C".into(),
+            gradient_mid_hex: "#163329".into(),
+            gradient_end_hex: "#0A120F".into(),
             gradient_mid_pos: 0.50,
             use_three_stops: true,
         }
@@ -2743,23 +2743,24 @@ impl LauncherThemeConfig {
             self.gradient_mid_pos = 0.50;
         }
         self.gradient_mid_pos = self.gradient_mid_pos.clamp(0.15, 0.85);
+        let (def_bg, def_surf, def_acc, def_gs, def_gm, def_ge, _) = self.preset.palette_rgb();
         if parse_hex_color(&self.custom_bg_hex).is_none() {
-            self.custom_bg_hex = "#13111C".into();
+            self.custom_bg_hex = format_hex_color(def_bg);
         }
         if parse_hex_color(&self.custom_surface_hex).is_none() {
-            self.custom_surface_hex = "#1D192B".into();
+            self.custom_surface_hex = format_hex_color(def_surf);
         }
         if parse_hex_color(&self.custom_accent_hex).is_none() {
-            self.custom_accent_hex = "#9A7BFF".into();
+            self.custom_accent_hex = format_hex_color(def_acc);
         }
         if parse_hex_color(&self.gradient_start_hex).is_none() {
-            self.gradient_start_hex = "#1A1333".into();
+            self.gradient_start_hex = format_hex_color(def_gs);
         }
         if parse_hex_color(&self.gradient_mid_hex).is_none() {
-            self.gradient_mid_hex = "#131A2E".into();
+            self.gradient_mid_hex = format_hex_color(def_gm);
         }
         if parse_hex_color(&self.gradient_end_hex).is_none() {
-            self.gradient_end_hex = "#0D0B14".into();
+            self.gradient_end_hex = format_hex_color(def_ge);
         }
     }
 
@@ -2802,7 +2803,7 @@ impl LauncherThemeConfig {
         if is_light && rgb_luminance(bg_rgb) < 0.45 {
             bg_rgb = blend_rgb(0xF3F1FA, def_acc, 0.06);
         } else if !is_light && rgb_luminance(bg_rgb) > 0.65 {
-            bg_rgb = 0x13111C;
+            bg_rgb = def_bg;
         }
 
         let mut accent_rgb = parse_hex_color(&self.custom_accent_hex).unwrap_or(def_acc);

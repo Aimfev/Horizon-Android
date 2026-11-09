@@ -230,9 +230,11 @@ impl Surface for NativeSurface {
                     )
                 }
                 .unwrap_or_default();
-                // Android's AOSP libvulkan.so (swapchain.cpp) ONLY calls
-                // window->setSwapInterval(window, 0) when presentMode is VK_PRESENT_MODE_MAILBOX_KHR.
-                if supported.contains(&vk::PresentModeKHR::MAILBOX) {
+                if config.present_mode == wgt::PresentMode::Immediate
+                    && supported.contains(&vk::PresentModeKHR::IMMEDIATE)
+                {
+                    mode = vk::PresentModeKHR::IMMEDIATE;
+                } else if supported.contains(&vk::PresentModeKHR::MAILBOX) {
                     mode = vk::PresentModeKHR::MAILBOX;
                 } else if supported.contains(&vk::PresentModeKHR::IMMEDIATE) {
                     mode = vk::PresentModeKHR::IMMEDIATE;

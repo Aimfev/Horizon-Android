@@ -191,13 +191,34 @@ public final class HorizonActivity extends android.app.NativeActivity {
                         }
                     }
                     android.view.WindowManager.LayoutParams lp = window.getAttributes();
+                    float targetRate = 0.0f;
                     if (best != null) {
                         lp.preferredDisplayModeId = best.getModeId();
                         lp.preferredRefreshRate = best.getRefreshRate();
+                        targetRate = best.getRefreshRate();
                     } else if (preferredHz > 0) {
                         lp.preferredRefreshRate = (float) preferredHz;
+                        targetRate = (float) preferredHz;
                     }
                     window.setAttributes(lp);
+
+                    if (android.os.Build.VERSION.SDK_INT >= 30) {
+                        try {
+                            android.view.View decor = window.getDecorView();
+                            if (decor instanceof android.view.ViewGroup) {
+                                android.view.ViewGroup vg = (android.view.ViewGroup) decor;
+                                for (int i = 0; i < vg.getChildCount(); i++) {
+                                    android.view.View child = vg.getChildAt(i);
+                                    if (child instanceof android.view.SurfaceView) {
+                                        android.view.Surface s = ((android.view.SurfaceView) child).getHolder().getSurface();
+                                        if (s != null && s.isValid()) {
+                                            s.setFrameRate(targetRate, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                    }
                 } catch (Throwable ignored) {}
             }
         });

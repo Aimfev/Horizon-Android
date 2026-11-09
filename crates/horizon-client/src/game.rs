@@ -18368,6 +18368,18 @@ impl Game<'_> {
                 let id = w.id();
                 self.handle_window_event(event_loop, id, WindowEvent::RedrawRequested);
             } else {
+                #[cfg(target_os = "android")]
+                {
+                    let uncapped = (!self.settings.vsync || self.settings.max_fps >= 260)
+                        && !self.settings.horizon.battery;
+                    if uncapped {
+                        let id = w.id();
+                        self.handle_window_event(event_loop, id, WindowEvent::RedrawRequested);
+                    } else {
+                        w.request_redraw();
+                    }
+                }
+                #[cfg(not(target_os = "android"))]
                 w.request_redraw();
             }
         } else if self.options.headless {

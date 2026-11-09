@@ -107,6 +107,8 @@ pub struct Config {
     #[serde(default)]
     pub max_fps_unlocked_v2: bool,
     #[serde(default)]
+    pub max_fps_unlocked_v3: bool,
+    #[serde(default)]
     pub theme: horizon_client::ui_theme::LauncherThemeConfig,
 }
 
@@ -147,6 +149,7 @@ impl Default for Config {
             custom_profile_desc: String::new(),
             preset_edit_mode: String::new(),
             max_fps_unlocked_v2: true,
+            max_fps_unlocked_v3: true,
             theme: horizon_client::ui_theme::LauncherThemeConfig::default(),
         }
     }
@@ -214,12 +217,16 @@ impl Config {
             .unwrap_or_default();
         config.device.migrate_missing(&value, &legacy);
         config.mod_source = crate::shader_catalog::Origin::Horizon;
-        if !config.max_fps_unlocked_v2 {
+        if !config.max_fps_unlocked_v3 {
             config.max_fps_unlocked_v2 = true;
+            config.max_fps_unlocked_v3 = true;
             config.max_fps_mode = true;
             config.battery_perf_mode = false;
             if config.device.display_hz < 120 {
                 config.device.display_hz = 120;
+            }
+            if config.theme.preset == horizon_client::ui_theme::ThemePreset::ObsidianViolet {
+                config.theme.apply_preset(horizon_client::ui_theme::ThemePreset::EmeraldForest);
             }
             config.apply_experimental_to_game(home);
             let _ = config.save(home);
