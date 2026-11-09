@@ -4137,7 +4137,7 @@ fn push_undo_snapshot(ed: &mut crate::touch::Editor, current: &crate::touch::Set
     ed.redo_stack.clear();
 }
 
-fn duplicate_selected_editor_button(ed: &mut crate::touch::Editor, tc: &mut TouchControls) {
+fn duplicate_selected_editor_button(ed: &mut crate::touch::Editor, tc: &mut crate::touch::TouchControls) {
     if tc.settings.custom_buttons.len() >= 32 {
         ed.status_msg = Some("Maximum of 32 custom buttons reached.".into());
         return;
@@ -4159,10 +4159,10 @@ fn duplicate_selected_editor_button(ed: &mut crate::touch::Editor, tc: &mut Touc
             ed.status_msg = Some(format!("Copied button '{lbl}'."));
         }
     } else if let Some(ctrl) = ed.selected {
-        if ctrl != Control::Move {
+        if ctrl != crate::touch::Control::Move {
             push_undo_snapshot(ed, &tc.settings);
             let new_idx = tc.settings.custom_buttons.len();
-            let mut copy = CustomButton::new(tc.settings.control_key(ctrl).to_owned(), new_idx);
+            let mut copy = crate::touch::CustomButton::new(tc.settings.control_key(ctrl).to_owned(), new_idx);
             copy.custom_label = tc.settings.control_label(ctrl).to_owned();
             let slot = tc.settings.slot(ctrl);
             for m in 0..3 {

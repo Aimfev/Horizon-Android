@@ -186,7 +186,7 @@ pub fn read_mod_archive_id(path: &Path, original_name: &str) -> crate::Result<(S
         if let Ok(bundle) = horizon_mods::index::native::Bundle::read(path) {
             return Ok((bundle.manifest.id, "hnmod"));
         }
-        if let Ok(mut entry) = zip.by_name("horizon-native.json") {
+        if let Ok(entry) = zip.by_name("horizon-native.json") {
             let mut buf = Vec::new();
             entry.take(65536).read_to_end(&mut buf)?;
             let val: serde_json::Value = serde_json::from_slice(&buf)
@@ -207,7 +207,7 @@ pub fn read_mod_archive_id(path: &Path, original_name: &str) -> crate::Result<(S
     }
 
     if lower.ends_with(".jar") && !has_hmod_toml {
-        if let Ok(mut entry) = zip.by_name("fabric.mod.json") {
+        if let Ok(entry) = zip.by_name("fabric.mod.json") {
             let mut buf = Vec::new();
             if entry.take(262_144).read_to_end(&mut buf).is_ok()
                 && let Ok(val) = serde_json::from_slice::<serde_json::Value>(&buf)
