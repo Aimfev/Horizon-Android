@@ -3720,8 +3720,9 @@ impl Game<'_> {
             return;
         }
         let spectator = self.spectator();
+        let sel = self.selected.min(self.inventory.len().saturating_sub(1));
         let Some(thrown) = horizon_client::items::take_held_drop(
-            &mut self.inventory[self.selected.min(self.inventory.len().saturating_sub(1))],
+            &mut self.inventory[sel],
             all,
             spectator,
         ) else {
