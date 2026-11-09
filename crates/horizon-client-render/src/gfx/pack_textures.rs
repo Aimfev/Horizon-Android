@@ -17,8 +17,6 @@ pub(super) struct PackTexture {
     pub(super) sample_type: wgpu::TextureSampleType,
     pub(super) blur: bool,
     pub(super) clamp: bool,
-    /// Decoded from a PNG, the pack's or the game's (not a raw dump, not a generated texture).
-    pub(super) png: bool,
     pub(super) image: Image,
 }
 
@@ -32,12 +30,12 @@ pub(super) fn upload(
     let features = device.features();
     let mut out = Vec::new();
     for t in textures {
-        let (image, dimension, sample_type, blur, clamp, png) = match t.source {
+        let (image, dimension, sample_type, blur, clamp) = match t.source {
             TextureSource::Image(texture) => {
                 let (view, sample_type) = match create(device, queue, &texture, features) {
                     Ok(created) => created,
                     Err(e) => {
-                        notes.push(format!("{}: {e}", key(&t.stage, &t.name)));
+                        notes.push(format!("texture.{}.{}: {e}", t.stage, t.name));
                         continue;
                     }
                 };
@@ -52,7 +50,6 @@ pub(super) fn upload(
                     sample_type,
                     texture.blur,
                     texture.clamp,
-                    !texture.raw,
                 )
             }
             TextureSource::Resource(location) => {
@@ -63,20 +60,13 @@ pub(super) fn upload(
                     Image::Atlas
                 } else {
                     notes.push(format!(
-                        "{}: `{location}` is not provided yet",
-                        key(&t.stage, &t.name)
+                        "texture.{}.{}: `{location}` is not provided yet",
+                        t.stage, t.name
                     ));
                     continue;
                 };
                 let float = wgpu::TextureSampleType::Float { filterable: true };
-                (
-                    image,
-                    wgpu::TextureViewDimension::D2,
-                    float,
-                    true,
-                    true,
-                    false,
-                )
+                (image, wgpu::TextureViewDimension::D2, float, true, true)
             }
         };
         out.push(PackTexture {
@@ -86,7 +76,6 @@ pub(super) fn upload(
             sample_type,
             blur,
             clamp,
-            png,
             image,
         });
     }
@@ -97,8 +86,6 @@ pub(super) fn upload(
 pub(super) fn stage(group: Group) -> &'static str {
     match group {
         Group::Gbuffers | Group::Translucent | Group::Shadow => "gbuffers",
-        Group::Setup => "setup",
-        Group::Begin => "begin",
         Group::Prepare => "prepare",
         Group::Deferred => "deferred",
         Group::Composite | Group::Final => "composite",
@@ -108,8 +95,7 @@ pub(super) fn stage(group: Group) -> &'static str {
 
 /// The custom texture a `ty name` sampler of a `group` program reads: same stage, the same
 /// name (or another name of the same buffer, `gaux1` for `colortex4`) and dimension. A unit
-/// may hold one texture per dimension. Without one, a `customTexture` of that name and
-/// dimension, which every program reads.
+/// may hold one texture per dimension.
 pub(super) fn find(textures: &[PackTexture], group: Group, ty: &str, name: &str) -> Option<usize> {
     let dimension = if ty.contains("1D") {
         wgpu::TextureViewDimension::D1
@@ -119,25 +105,12 @@ pub(super) fn find(textures: &[PackTexture], group: Group, ty: &str, name: &str)
         wgpu::TextureViewDimension::D2
     };
     let buffer = horizon_shaders::buffer_index(name);
-    let staged = textures.iter().position(|t| {
+    textures.iter().position(|t| {
         t.stage == stage(group)
             && t.dimension == dimension
             && (t.name == name
                 || buffer.is_some() && horizon_shaders::buffer_index(&t.name) == buffer)
-    });
-    staged.or_else(|| {
-        textures.iter().position(|t| {
-            t.stage == horizon_shaders::EVERY_STAGE && t.dimension == dimension && t.name == name
-        })
     })
-}
-
-/// The `shaders.properties` key a texture came from, for notes.
-fn key(stage: &str, name: &str) -> String {
-    match stage {
-        horizon_shaders::EVERY_STAGE => format!("customTexture.{name}"),
-        _ => format!("texture.{stage}.{name}"),
-    }
 }
 
 /// `texture.noise`, if the pack has one.
@@ -296,7 +269,6 @@ mod tests {
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
             blur: false,
             clamp: false,
-            png: false,
             image: Image::Lightmap,
         }
     }
@@ -309,7 +281,6 @@ mod tests {
             texels,
             blur: false,
             clamp: false,
-            raw: true,
         }
     }
 
@@ -342,47 +313,6 @@ mod tests {
         assert_eq!(
             find(&textures, Group::Deferred, "sampler2D", "colortex4"),
             None
-        );
-    }
-
-    /// Iris's `customTexture.<name>`: every program reads it under its own name and dimension;
-    /// a `texture.<stage>.<name>` of the same name comes first in its stage.
-    #[test]
-    fn custom_textures_reach_every_program() {
-        use wgpu::TextureViewDimension as D;
-        let every = horizon_shaders::EVERY_STAGE;
-        let textures = [
-            lightmap(every, "texClouds", D::D3),
-            lightmap("composite", "texClouds", D::D3),
-            lightmap(every, "colortex4", D::D2),
-        ];
-        for group in [
-            Group::Gbuffers,
-            Group::Translucent,
-            Group::Shadow,
-            Group::Prepare,
-            Group::Deferred,
-            Group::ShadowComp,
-        ] {
-            assert_eq!(
-                find(&textures, group, "sampler3D", "texClouds"),
-                Some(0),
-                "{group:?}"
-            );
-        }
-        // `final` reads the `composite` stage's textures too.
-        for group in [Group::Composite, Group::Final] {
-            assert_eq!(find(&textures, group, "sampler3D", "texClouds"), Some(1));
-        }
-        assert_eq!(
-            find(&textures, Group::Gbuffers, "sampler2D", "texClouds"),
-            None
-        );
-        // Only its own name: no other name of the same buffer.
-        assert_eq!(find(&textures, Group::Final, "sampler2D", "gaux1"), None);
-        assert_eq!(
-            find(&textures, Group::Final, "sampler2D", "colortex4"),
-            Some(2)
         );
     }
 

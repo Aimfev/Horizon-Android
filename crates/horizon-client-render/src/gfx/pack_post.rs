@@ -1600,18 +1600,15 @@ fn build_pass(
         } else if let Some(&buffer) = p.buffers.get(l) {
             let format = formats[buffer as usize];
             let mut state = target(format);
-            let own = p.buffer_blends.iter().find(|(n, _)| *n == buffer);
-            if let Some(t) = &mut state
+            if let (Some(t), Some(b)) = (&mut state, p.blend)
                 && format
                     .guaranteed_format_features(features)
                     .flags
                     .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
             {
-                if let Some(b) = own.map_or(p.blend, |(_, b)| *b) {
-                    t.blend = Some(blend_state(b));
-                    if l < 16 {
-                        blends |= 1 << l;
-                    }
+                t.blend = Some(blend_state(b));
+                if l < 16 {
+                    blends |= 1 << l;
                 }
             }
             targets[l] = state;
@@ -1863,7 +1860,7 @@ fn build_pass(
         geometry: p.geometry_triangles,
         image_copies,
         snapshots: 0,
-        viewport: (!final_pass && geometry.is_none() && p.scale != [1.0, 0.0, 0.0]).then_some(p.scale),
+        viewport: None,
         depth_linear: [1.0, 1.0, 1.0, 1.0],
     })
 }
