@@ -4147,8 +4147,8 @@ fn duplicate_selected_editor_button(ed: &mut crate::touch::Editor, tc: &mut crat
             push_undo_snapshot(ed, &tc.settings);
             let mut copy = src;
             for m in 0..3 {
-                copy.layouts[m].x = (copy.layouts[m].x + 0.04).clamp(0.0, 0.90);
-                copy.layouts[m].y = (copy.layouts[m].y + 0.04).clamp(0.0, 0.90);
+                copy.layouts[m].center[0] = (copy.layouts[m].center[0] + 0.04).clamp(0.0, 0.90);
+                copy.layouts[m].center[1] = (copy.layouts[m].center[1] + 0.04).clamp(0.0, 0.90);
             }
             let new_idx = tc.settings.custom_buttons.len();
             let lbl = copy.label();
@@ -4162,13 +4162,26 @@ fn duplicate_selected_editor_button(ed: &mut crate::touch::Editor, tc: &mut crat
         if ctrl != crate::touch::Control::Move {
             push_undo_snapshot(ed, &tc.settings);
             let new_idx = tc.settings.custom_buttons.len();
-            let mut copy = crate::touch::CustomButton::new(tc.settings.control_key(ctrl).to_owned(), new_idx);
+            let token = match ctrl {
+                crate::touch::Control::Attack => "action:key.attack",
+                crate::touch::Control::Use => "action:key.use",
+                crate::touch::Control::Jump => "action:key.jump",
+                crate::touch::Control::Sneak => "action:key.sneak",
+                crate::touch::Control::Sprint => "action:key.sprint",
+                crate::touch::Control::Offhand => "action:key.swapOffhand",
+                crate::touch::Control::Inventory => "action:key.inventory",
+                crate::touch::Control::Chat => "action:key.chat",
+                crate::touch::Control::Debug => "action:key.debug.overlay",
+                crate::touch::Control::Perspective => "action:key.togglePerspective",
+                _ => "key.keyboard.unknown",
+            };
+            let mut copy = crate::touch::CustomButton::new(token.into(), new_idx);
             copy.custom_label = tc.settings.control_label(ctrl).to_owned();
             let slot = tc.settings.slot(ctrl);
             for m in 0..3 {
                 let mut pl = tc.settings.layouts[m][slot];
-                pl.x = (pl.x + 0.04).clamp(0.0, 0.90);
-                pl.y = (pl.y + 0.04).clamp(0.0, 0.90);
+                pl.center[0] = (pl.center[0] + 0.04).clamp(0.0, 0.90);
+                pl.center[1] = (pl.center[1] + 0.04).clamp(0.0, 0.90);
                 copy.layouts[m] = pl;
             }
             let lbl = copy.label();
