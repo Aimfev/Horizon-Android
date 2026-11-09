@@ -338,7 +338,22 @@ impl Game<'_> {
             Dim::Nether => -1,
             Dim::End => 1,
         };
-        let path = Self::shader_packs_dir().join(&name);
+        let mut path = Self::shader_packs_dir().join(&name);
+        if !path.exists() {
+            if let Some(bytes) = horizon_shader_api::build_builtin_hshader_bytes(&name) {
+                let clean = name
+                    .strip_prefix("horizon:")
+                    .unwrap_or(&name)
+                    .strip_suffix(".hshader")
+                    .unwrap_or(&name);
+                let dir = Self::shader_packs_dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let target = dir.join(format!("{clean}.hshader"));
+                if std::fs::write(&target, bytes).is_ok() {
+                    path = target;
+                }
+            }
+        }
         if horizon_shader_api::package::is_pack(&path) {
             // One of Horizon's own packs (game/native_shaders.rs).
             self.tick_native_shader_pack(&path);

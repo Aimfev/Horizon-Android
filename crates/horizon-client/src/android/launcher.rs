@@ -419,7 +419,7 @@ impl Launcher {
         } else if self.catalog.fm_modal.take().is_some() {
             self.catalog.editing = None;
         } else if self.catalog.project_modal.take().is_some() {
-            self.catalog.scroll = 0.0;
+            self.catalog.modal_worker = None;
         } else if self.login.visible {
             self.login.hide();
         } else if self.chooser.take().is_some() {
@@ -992,32 +992,37 @@ impl ApplicationHandler for Launcher {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
-        let frame_ms = if self.worker.is_some()
-            || self.launching
-            || self.session_worker.is_some()
-            || self.catalog.busy()
-            || self.catalog.compiler_running.load(std::sync::atomic::Ordering::Relaxed)
-            || self.drag.is_some()
-            || self.login.pending()
-            || self.control_editor.is_some()
-            || self
-                .catalog
-                .project_modal
-                .as_ref()
-                .is_some_and(|m| m.loading)
-            || self.anim.is_active()
-            || (self.catalog.page == Page::Skins && self.wardrobe.is_animating())
-            || self
-                .feedback
-                .is_some_and(|(_, t)| t.elapsed() < Duration::from_millis(180))
+        if (self.catalog.config.max_fps_mode || self.catalog.config.super_perf_mode)
+            && !self.catalog.config.battery_perf_mode
         {
-            16
+            events.set_control_flow(ControlFlow::Poll);
         } else {
-            33
-        };
-        events.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(frame_ms),
-        ));
+            let frame_ms = if self.worker.is_some()
+                || self.launching
+                || self.session_worker.is_some()
+                || self.catalog.busy()
+                || self.drag.is_some()
+                || self.login.pending()
+                || self.control_editor.is_some()
+                || self
+                    .catalog
+                    .project_modal
+                    .as_ref()
+                    .is_some_and(|m| m.loading)
+                || self.anim.is_active()
+                || (self.catalog.page == Page::Skins && self.wardrobe.is_animating())
+                || self
+                    .feedback
+                    .is_some_and(|(_, t)| t.elapsed() < Duration::from_millis(180))
+            {
+                16
+            } else {
+                33
+            };
+            events.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(frame_ms),
+            ));
+        }
     }
     fn exiting(&mut self, events: &ActiveEventLoop) {
         if let Some(game) = &mut self.game {

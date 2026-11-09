@@ -104,20 +104,14 @@ pub struct Config {
     pub custom_profile_desc: String,
     #[serde(default)]
     pub preset_edit_mode: String,
-    #[serde(default = "default_vps_compiler_url")]
-    pub vps_compiler_url: String,
-    #[serde(default = "default_true")]
-    pub use_vps_compiler: bool,
+    #[serde(default)]
+    pub max_fps_unlocked_v2: bool,
     #[serde(default)]
     pub theme: horizon_client::ui_theme::LauncherThemeConfig,
 }
 
 fn default_true() -> bool {
     true
-}
-
-fn default_vps_compiler_url() -> String {
-    "https://191-234-193-205.sslip.io".to_owned()
 }
 
 impl Default for Config {
@@ -152,8 +146,7 @@ impl Default for Config {
             custom_profile_name: String::new(),
             custom_profile_desc: String::new(),
             preset_edit_mode: String::new(),
-            vps_compiler_url: default_vps_compiler_url(),
-            use_vps_compiler: true,
+            max_fps_unlocked_v2: true,
             theme: horizon_client::ui_theme::LauncherThemeConfig::default(),
         }
     }
@@ -220,6 +213,17 @@ impl Config {
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .unwrap_or_default();
         config.device.migrate_missing(&value, &legacy);
+        config.mod_source = crate::shader_catalog::Origin::Horizon;
+        if !config.max_fps_unlocked_v2 {
+            config.max_fps_unlocked_v2 = true;
+            config.max_fps_mode = true;
+            config.battery_perf_mode = false;
+            if config.device.display_hz < 120 {
+                config.device.display_hz = 120;
+            }
+            config.apply_experimental_to_game(home);
+            let _ = config.save(home);
+        }
         config.name = truncate_player_name(&config.name);
         config.theme.sanitize();
         horizon_client::ui_theme::set_active_theme(config.theme.resolve());
@@ -322,6 +326,7 @@ impl Config {
             settings.graphics_preset = "fast".into();
             settings.horizon.upload_budget_kib = 1536;
         }
+        settings.horizon.battery = self.battery_perf_mode;
         if self.battery_perf_mode {
             settings.render_distance = settings.render_distance.min(8);
             settings.simulation_distance = settings.simulation_distance.min(5);
@@ -333,12 +338,10 @@ impl Config {
             settings.max_fps = 260;
             settings.vsync = false;
             settings.horizon.present_mode = horizon_client::graphics::PresentMode::Immediate;
-        } else {
-            if settings.max_fps > 120 {
-                settings.max_fps = 120;
-            }
-            settings.vsync = true;
-            settings.horizon.present_mode = horizon_client::graphics::PresentMode::Auto;
+            settings.inactivity_fps_limit = "minimized".into();
+        } else if !settings.vsync || settings.max_fps >= 260 {
+            settings.horizon.present_mode = horizon_client::graphics::PresentMode::Immediate;
+            settings.inactivity_fps_limit = "minimized".into();
         }
         if self.fast_chunk_upload {
             settings.horizon.upload_budget_kib = settings.horizon.upload_budget_kib.max(4096);
@@ -367,6 +370,8 @@ impl Config {
         let _ = touch_cfg.save_to(&touch_path);
     }
 }
+pub const CATALOG_PAGE_SIZE: usize = 10;
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum Page {
     Play,
@@ -374,18 +379,16 @@ pub enum Page {
     Packs,
     Shaders,
     Installed,
-    Compiler,
     Settings,
     Skins,
 }
 impl Page {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 7] = [
         Self::Play,
         Self::Mods,
         Self::Packs,
         Self::Shaders,
         Self::Installed,
-        Self::Compiler,
         Self::Settings,
         Self::Skins,
     ];
@@ -396,7 +399,6 @@ impl Page {
             Self::Packs => "Resource Pack",
             Self::Shaders => "Shaders",
             Self::Installed => "Installed",
-            Self::Compiler => "Compiler",
             Self::Settings => "Settings",
             Self::Skins => "Skins",
         }
@@ -686,11 +688,6 @@ pub struct Catalog {
     pub update_scroll: f32,
     pub update_info: Option<crate::updater::ReleaseInfo>,
     pub duplicate_preset_confirm: Option<(String, String, String)>,
-    pub compiler_running: Arc<AtomicBool>,
-    pub compiler_progress: Arc<Mutex<f32>>,
-    pub compiler_stage: Arc<Mutex<String>>,
-    pub compiler_logs: Arc<Mutex<Vec<String>>>,
-    pub compiler_started: Option<std::time::Instant>,
     worker: Option<mpsc::Receiver<Result<Reply, String>>>,
     search_worker: Option<mpsc::Receiver<Result<Vec<Project>, String>>>,
     icon_worker: Option<mpsc::Receiver<IconData>>,
@@ -755,14 +752,6 @@ impl Catalog {
             update_scroll: 0.0,
             update_info: None,
             duplicate_preset_confirm: None,
-            compiler_running: Arc::new(AtomicBool::new(false)),
-            compiler_progress: Arc::new(Mutex::new(0.0)),
-            compiler_stage: Arc::new(Mutex::new("Idle — Ready to compile .jar & .hnmod packages".into())),
-            compiler_logs: Arc::new(Mutex::new(vec![
-                "[00:00.0] Horizon Native Mod (.hnmod) & Java (.jar) Compiler Studio initialized.".into(),
-                "[00:00.0] Local Real-Time Bytecode/Mixin Transpiler + Remote VPS Native Build Server ready.".into(),
-            ])),
-            compiler_started: None,
             worker: None,
             search_worker: None,
             icon_worker: None,
@@ -1400,6 +1389,13 @@ impl Catalog {
                             || item.file == format!("horizon-mods/{}", project.slug)
                             || item.file == format!("horizon-native-mods/{}.hnmod", project.id))
                 }))
+            || (project.kind == Kind::Shader
+                && self.local.iter().any(|item| {
+                    item.kind == horizon_client::content_files::Kind::Shaders
+                        && (item.file == format!("{}.hshader", project.id)
+                            || item.file == format!("{}-1.0.0.hshader", project.id)
+                            || item.file == format!("{}.zip", project.slug))
+                }))
         {
             return Some("Installed".into());
         }
@@ -1514,7 +1510,9 @@ impl Catalog {
             match reply {
                 Ok(Reply::Done(s, kind)) => {
                     self.status = s;
-                    self.show_installed(Some(kind));
+                    if !self.page.is_catalog() {
+                        self.show_installed(Some(kind));
+                    }
                 }
                 Err(e) => self.status = e,
             }
@@ -1819,14 +1817,18 @@ impl Catalog {
             }
             return;
         }
-        self.scroll = 0.0;
         let source = match self.page {
             Page::Packs => browser::SourceId::Modrinth,
             Page::Shaders => self.config.shader_source.source(),
-            Page::Mods => self.config.mod_source.source(),
+            Page::Mods => browser::SourceId::Horizon,
             _ => browser::SourceId::Horizon,
         };
-        let key = (self.page, source, self.query.trim().to_owned(), self.offset);
+        let query_offset = if source == browser::SourceId::Horizon {
+            0
+        } else {
+            self.offset
+        };
+        let key = (self.page, source, self.query.trim().to_owned(), query_offset);
         if let Some(items) = self.searches.request(key, refresh) {
             self.show_results(items);
             self.fetch_icons(home);
@@ -1843,20 +1845,27 @@ impl Catalog {
         {
             "No Horizon shader packs match this search. Try another query or import a .hshader."
                 .into()
-        } else if self.page == Page::Mods
-            && self.config.mod_source == crate::shader_catalog::Origin::Modrinth
+        } else if self.page == Page::Shaders
+            && self.config.shader_source == crate::shader_catalog::Origin::Horizon
         {
             format!(
-                "{} Modrinth mods — tap Install to auto-compile into Horizon Native (.hnmod)",
+                "{} Horizon Native Shaders (.hshader) — tap Install to activate",
                 items.len()
             )
         } else if self.page == Page::Mods {
+            let bundled_matches = horizon_client::mod_list::ANDROID_BUNDLED
+                .iter()
+                .filter(|(id, title, _)| {
+                    let q = self.query.trim().to_lowercase();
+                    q.is_empty() || id.contains(&q) || title.to_lowercase().contains(&q)
+                })
+                .count();
+            let total = bundled_matches + items.len();
             format!(
-                "{} Horizon mods available (playhorizon.dev/mods) - select Install to download",
-                items.len()
+                "{total} Horizon mods available (10 per page) — tap Install to enable"
             )
         } else {
-            format!("{} results - select Install to download", items.len())
+            format!("{} results — tap Install to download", items.len())
         };
         self.results = items;
     }
@@ -1876,19 +1885,61 @@ impl Catalog {
                 _ => Kind::ResourcePack,
             };
             let mut query = Query::new(&text, kind);
-            query.offset = offset;
-            query.limit = 100;
             query.everything = true;
             let result = if page == Page::Shaders && source == browser::SourceId::Modrinth {
-                query.everything = true;
+                query.offset = offset;
+                query.limit = CATALOG_PAGE_SIZE;
                 browser::modrinth::search_shader_packs(&query)
-            } else if page == Page::Packs
-                || (page == Page::Mods && source == browser::SourceId::Modrinth)
-            {
-                query.everything = true;
+            } else if page == Page::Packs {
+                query.offset = offset;
+                query.limit = CATALOG_PAGE_SIZE;
                 browser::modrinth::Modrinth.search(&query)
+            } else if page == Page::Shaders {
+                query.offset = 0;
+                query.limit = 200;
+                let mut combined = browser::horizon::Registry.search(&query).unwrap_or_default();
+                for builtin in crate::shader_catalog::horizon_builtin_shader_projects(&text) {
+                    if !combined.iter().any(|p| p.id == builtin.id) {
+                        combined.push(builtin);
+                    }
+                }
+                Ok(combined)
             } else {
-                browser::horizon::Registry.search(&query)
+                query.offset = 0;
+                query.limit = 200;
+                let mut combined = browser::horizon::Registry.search(&query).unwrap_or_default();
+                let words: Vec<String> = text
+                    .split_whitespace()
+                    .map(|w| w.to_lowercase())
+                    .collect();
+                for (id, title, summary, downloads) in horizon_client::jar_transpiler::HORIZON_CATALOG_MODS {
+                    if horizon_client::mod_list::ANDROID_BUNDLED
+                        .iter()
+                        .any(|(bid, _, _)| *bid == id)
+                        || combined.iter().any(|p| p.id == id)
+                    {
+                        continue;
+                    }
+                    let hay = format!("{id} {title} {summary} horizon").to_lowercase();
+                    if words.iter().all(|w| hay.contains(w)) {
+                        combined.push(Project {
+                            source: browser::SourceId::Horizon,
+                            id: id.to_owned(),
+                            slug: id.to_owned(),
+                            title: title.to_owned(),
+                            summary: summary.to_owned(),
+                            author: "Horizon".into(),
+                            downloads,
+                            page: format!("https://playhorizon.dev/mods/{id}"),
+                            icon: None,
+                            license: "MIT".into(),
+                            kind: Kind::Mod,
+                            game_versions: vec![browser::GAME.into()],
+                            loaders: vec!["horizon".into(), "hnmod".into()],
+                        });
+                    }
+                }
+                Ok(combined)
             };
             let _ = tx.send(result);
         });
@@ -1974,16 +2025,12 @@ impl Catalog {
         *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = 0.0;
         let progress = self.progress.clone();
         let progress_stage = self.progress_stage.clone();
-        let comp_logs = self.compiler_logs.clone();
-        let comp_stage = self.compiler_stage.clone();
-        let comp_prog = self.compiler_progress.clone();
-        let is_mod_install = project.kind == Kind::Mod;
         let paused = self.paused.clone();
         let cancelled = self.cancelled.clone();
         let status = match (project.kind, project.source) {
             (Kind::Shader, browser::SourceId::Modrinth) => "Downloading shader pack ZIP...",
-            (Kind::Mod, browser::SourceId::Modrinth) => "Downloading and porting Modrinth mod...",
-            (Kind::Mod, _) => "Downloading Horizon mod package...",
+            (Kind::Shader, browser::SourceId::Horizon) => "Installing Horizon Native Shader (.hshader)...",
+            (Kind::Mod, _) => "Installing Horizon mod package...",
             _ => "Checking compatibility and downloading...",
         };
         self.job(status, move || {
@@ -1994,24 +2041,9 @@ impl Catalog {
                 }
                 if !stage.is_empty() {
                     *progress_stage.lock().unwrap_or_else(|e| e.into_inner()) = stage.to_owned();
-                    if is_mod_install {
-                        *comp_stage.lock().unwrap_or_else(|e| e.into_inner()) = stage.to_owned();
-                        let mut l = comp_logs.lock().unwrap_or_else(|e| e.into_inner());
-                        let entry = format!("[auto-compile] {stage} ({:.0}%)", p.clamp(0.0, 1.0) * 100.0);
-                        if l.last() != Some(&entry) {
-                            l.push(entry);
-                            if l.len() > 160 {
-                                let excess = l.len() - 160;
-                                l.drain(0..excess);
-                            }
-                        }
-                    }
                 }
                 if p.is_finite() {
                     *progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clamp(0.0, 1.0);
-                    if is_mod_install {
-                        *comp_prog.lock().unwrap_or_else(|e| e.into_inner()) = p.clamp(0.0, 1.0);
-                    }
                 }
             };
             let source = browser::source(project.source).ok_or("Unsupported download source")?;
@@ -2019,6 +2051,50 @@ impl Catalog {
                 && project.source == browser::SourceId::Modrinth
             {
                 crate::shader_catalog::install(source.as_ref(), &project, &game, &report)?
+            } else if project.kind == Kind::Shader
+                && project.source == browser::SourceId::Horizon
+                && horizon_shader_api::builtin_shader_pack(&project.id).is_some()
+            {
+                crate::shader_catalog::install_horizon_builtin_shader(&project, &game, &report)?
+            } else if project.kind == Kind::Mod
+                && project.source == browser::SourceId::Horizon
+            {
+                match browser::installed::install(source.as_ref(), &project, true, &game, &report) {
+                    Ok(entries) => {
+                        for e in &entries {
+                            let p = game.join(&e.file);
+                            if e.file.ends_with(".hnmod") && p.is_file() {
+                                let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&p, &game);
+                            }
+                        }
+                        entries.len()
+                    }
+                    Err(_) => {
+                        report(&format!("Installing {} (.hnmod)...", project.title), 0.55);
+                        let info = horizon_client::jar_transpiler::install_builtin_horizon_mod(&project.id, &game)?;
+                        let mut list = Installed::load(&game);
+                        list.entries.retain(|e| !(e.source == project.source && e.project == project.id));
+                        list.entries.push(browser::installed::Entry {
+                            source: project.source,
+                            project: project.id.clone(),
+                            slug: info.id.clone(),
+                            title: project.title.clone(),
+                            kind: Kind::Mod,
+                            version: info.version.clone(),
+                            number: info.version,
+                            file: format!("horizon-native-mods/{}.hnmod", info.id),
+                            checksum: String::new(),
+                            page: project.page.clone(),
+                            dependency: false,
+                            verdict: Some("Verified".into()),
+                            skipped: Vec::new(),
+                            namespaces: vec![info.id],
+                        });
+                        list.save(&game)?;
+                        report(&format!("Installed & enabled {}", project.title), 1.0);
+                        1
+                    }
+                }
             } else if project.kind == Kind::Mod
                 && project.source == browser::SourceId::Modrinth
             {
@@ -2026,12 +2102,6 @@ impl Catalog {
             } else {
                 let entries =
                     browser::installed::install(source.as_ref(), &project, true, &game, &report)?;
-                for e in &entries {
-                    let p = game.join(&e.file);
-                    if e.file.ends_with(".hnmod") && p.is_file() {
-                        let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&p, &game);
-                    }
-                }
                 entries.len()
             };
             if cancelled.load(Ordering::Relaxed) {
@@ -2246,347 +2316,6 @@ impl Catalog {
         };
         self.refresh(home);
     }
-    pub fn push_compiler_log(&self, line: impl Into<String>) {
-        let mut logs = self.compiler_logs.lock().unwrap_or_else(|e| e.into_inner());
-        logs.push(line.into());
-        if logs.len() > 160 {
-            let excess = logs.len() - 160;
-            logs.drain(0..excess);
-        }
-    }
-
-    pub fn clear_compiler_logs(&mut self) {
-        let mut logs = self.compiler_logs.lock().unwrap_or_else(|e| e.into_inner());
-        logs.clear();
-        logs.push("[00:00.0] Compiler terminal log cleared. Ready.".into());
-        *self.compiler_progress.lock().unwrap_or_else(|e| e.into_inner()) = 0.0;
-        *self.compiler_stage.lock().unwrap_or_else(|e| e.into_inner()) =
-            "Idle — Ready to compile .jar & .hnmod packages".into();
-    }
-
-    pub fn start_live_compiler(&mut self, home: &Path, single_mod: Option<String>, force_vps: bool) {
-        if self.compiler_running.swap(true, Ordering::SeqCst) {
-            self.status = "Compilation is already running — watch live progress in the Compiler console.".into();
-            return;
-        }
-        let game = self.config.game_home(home);
-        let root_home = home.to_path_buf();
-        let use_vps = force_vps || self.config.use_vps_compiler;
-        let vps_url = if self.config.vps_compiler_url.trim().is_empty() {
-            default_vps_compiler_url()
-        } else {
-            self.config.vps_compiler_url.trim().trim_end_matches('/').to_owned()
-        };
-        let running = self.compiler_running.clone();
-        let progress = self.compiler_progress.clone();
-        let stage = self.compiler_stage.clone();
-        let logs = self.compiler_logs.clone();
-        self.compiler_started = Some(std::time::Instant::now());
-        *progress.lock().unwrap_or_else(|e| e.into_inner()) = 0.04;
-        *stage.lock().unwrap_or_else(|e| e.into_inner()) = "Stage 1/6: Scanning profile mod directories...".into();
-
-        std::thread::spawn(move || {
-            let t0 = std::time::Instant::now();
-            let log_line = |msg: String| {
-                let elapsed = t0.elapsed().as_secs_f32();
-                let mins = (elapsed as u64) / 60;
-                let secs = elapsed - (mins as f32 * 60.0);
-                let formatted = format!("[{mins:02}:{secs:04.1}] {msg}");
-                let mut l = logs.lock().unwrap_or_else(|e| e.into_inner());
-                l.push(formatted);
-                if l.len() > 160 {
-                    let excess = l.len() - 160;
-                    l.drain(0..excess);
-                }
-            };
-            let set_stage = |s: &str, p: f32| {
-                *stage.lock().unwrap_or_else(|e| e.into_inner()) = s.to_owned();
-                *progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clamp(0.0, 1.0);
-            };
-
-            log_line(format!(
-                "Starting Horizon Compiler Pipeline (Profile: {})",
-                game.display()
-            ));
-            set_stage("Stage 1/6: Scanning mods/, horizon-mods/, horizon-native-mods/...", 0.10);
-            crate::document_store::sync_mods_folder(&game);
-
-            let mut candidates: Vec<PathBuf> = Vec::new();
-            for sub in ["mods", "horizon-mods", "horizon-native-mods"] {
-                let d = game.join(sub);
-                for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-                    let p = entry.path();
-                    if !p.is_file() {
-                        continue;
-                    }
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    if !name.ends_with(".jar") && !name.ends_with(".hnmod") {
-                        continue;
-                    }
-                    if let Some(ref target_filter) = single_mod {
-                        let stem = name
-                            .strip_suffix(".hnmod")
-                            .or_else(|| name.strip_suffix(".jar"))
-                            .unwrap_or(&name);
-                        let cid = horizon_client::jar_transpiler::sanitize_mod_id(stem);
-                        if &cid != target_filter && &name != target_filter && stem != target_filter {
-                            continue;
-                        }
-                    }
-                    candidates.push(p);
-                }
-            }
-
-            candidates.sort_by_key(|p| {
-                if p.extension().and_then(|e| e.to_str()) == Some("jar") {
-                    0
-                } else {
-                    1
-                }
-            });
-            let mut seen = std::collections::BTreeSet::new();
-            let mut unique_candidates = Vec::new();
-            for p in candidates {
-                let fname = p.file_name().unwrap_or_default().to_string_lossy();
-                let stem = fname
-                    .strip_suffix(".hnmod")
-                    .or_else(|| fname.strip_suffix(".jar"))
-                    .unwrap_or(&fname);
-                let cid = horizon_client::jar_transpiler::sanitize_mod_id(stem);
-                if seen.insert(cid) {
-                    unique_candidates.push(p);
-                }
-            }
-
-            if unique_candidates.is_empty() {
-                log_line("No external .jar or .hnmod files found in profile — verifying built-in Horizon native mods.".into());
-                set_stage("Stage 6/6: Built-in Horizon mods verified & active", 1.0);
-                running.store(false, Ordering::SeqCst);
-                return;
-            }
-
-            log_line(format!(
-                "Discovered {} mod package(s) queued for compilation.",
-                unique_candidates.len()
-            ));
-
-            let mut compiled_hnmods: Vec<PathBuf> = Vec::new();
-            let total = unique_candidates.len().max(1) as f32;
-
-            for (idx, path) in unique_candidates.iter().enumerate() {
-                let fname = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                let base_p = 0.14 + (idx as f32 / total) * 0.44;
-                set_stage(
-                    &format!("Stage 2/6: Parsing bytecode & Mixin AST for {fname}..."),
-                    base_p,
-                );
-                log_line(format!(
-                    "[{}/{}] Inspecting archive {} ({} bytes)...",
-                    idx + 1,
-                    unique_candidates.len(),
-                    fname,
-                    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-                ));
-
-                if fname.ends_with(".jar") {
-                    set_stage(
-                        &format!("Stage 3/6: Transpiling {fname} -> Rust mod_api (.hnmod + .hmod)..."),
-                        base_p + 0.15 / total,
-                    );
-                    match horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(path, &game) {
-                        Ok(res) => {
-                            log_line(format!(
-                                "  -> Extracted {} items, {} blocks, {} features",
-                                res.items.len(),
-                                res.blocks.len(),
-                                res.features.len()
-                            ));
-                            log_line(format!(
-                                "  -> Generated Rust mod_api crate & packaged {} + {}",
-                                res.hnmod_path.file_name().unwrap_or_default().to_string_lossy(),
-                                res.hmod_path.file_name().unwrap_or_default().to_string_lossy()
-                            ));
-                            horizon_client::jar_transpiler::enable_mod_in_profile(&game, &res.id);
-                            compiled_hnmods.push(res.hnmod_path);
-                        }
-                        Err(e) => {
-                            log_line(format!("  [!] Error transpiling {fname}: {e}"));
-                        }
-                    }
-                } else if fname.ends_with(".hnmod") {
-                    set_stage(
-                        &format!("Stage 3/6: Compiling native Rust hooks in {fname}..."),
-                        base_p + 0.15 / total,
-                    );
-                    match horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(path, &game) {
-                        Ok(res) => {
-                            log_line(format!(
-                                "  -> Verified horizon-native-mod.toml & src/lib.rs for '{}' ({})",
-                                res.title, res.id
-                            ));
-                            log_line(format!(
-                                "  -> Synthesized companion runtime package horizon-mods/{}.hmod",
-                                res.id
-                            ));
-                            horizon_client::jar_transpiler::enable_mod_in_profile(&game, &res.id);
-                            compiled_hnmods.push(res.hnmod_path);
-                        }
-                        Err(e) => {
-                            log_line(format!("  [!] Error compiling {fname}: {e}"));
-                        }
-                    }
-                }
-            }
-
-            if use_vps && !compiled_hnmods.is_empty() {
-                set_stage(
-                    &format!("Stage 4/6: Connecting to VPS Compiler ({vps_url})..."),
-                    0.64,
-                );
-                log_line(format!(
-                    "Preparing length-prefixed .hnmod payload ({} bundle(s)) for VPS server {}...",
-                    compiled_hnmods.len(),
-                    vps_url
-                ));
-
-                let mut body = Vec::new();
-                for p in &compiled_hnmods {
-                    if let Ok(bytes) = std::fs::read(p) {
-                        body.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
-                        body.extend_from_slice(&bytes);
-                    }
-                }
-
-                let version = crate::updater::CURRENT_VERSION;
-                let agent = ureq::AgentBuilder::new()
-                    .timeout_connect(Duration::from_secs(12))
-                    .timeout_read(Duration::from_secs(30))
-                    .build();
-                let post_url = format!("{vps_url}/v1/build?version={version}");
-                log_line(format!("POST {post_url} ({} bytes)...", body.len()));
-
-                match agent
-                    .post(&post_url)
-                    .set("Content-Type", "application/octet-stream")
-                    .send_bytes(&body)
-                {
-                    Ok(resp) => {
-                        if let Ok(json) = resp.into_json::<serde_json::Value>() {
-                            let job = json["job"].as_str().unwrap_or_default().to_owned();
-                            if !job.is_empty() {
-                                log_line(format!(
-                                    "VPS accepted build job '{job}'. Streaming remote rustc cargo ndk build..."
-                                ));
-                                let poll_start = std::time::Instant::now();
-                                loop {
-                                    if poll_start.elapsed() > Duration::from_secs(180) {
-                                        log_line("VPS build timed out after 180s — using local in-process runtime.".into());
-                                        break;
-                                    }
-                                    std::thread::sleep(Duration::from_secs(2));
-                                    let job_url = format!("{vps_url}/v1/job/{job}");
-                                    let Ok(r) = agent.get(&job_url).call() else {
-                                        continue;
-                                    };
-                                    let Ok(st) = r.into_json::<serde_json::Value>() else {
-                                        continue;
-                                    };
-                                    match st["state"].as_str() {
-                                        Some("starting") => {
-                                            set_stage("Stage 4/6: Waking remote VPS compiler container...", 0.68);
-                                            log_line("  [VPS] Waking build container...".into());
-                                        }
-                                        Some("queued") => {
-                                            let ahead = st["ahead"].as_u64().unwrap_or(0);
-                                            set_stage(&format!("Stage 4/6: Queued on VPS ({ahead} ahead)..."), 0.70);
-                                            log_line(format!("  [VPS] Queued ({ahead} job(s) ahead)..."));
-                                        }
-                                        Some("building") => {
-                                            let secs = st["seconds"].as_u64().unwrap_or(0);
-                                            let p = (0.72 + (secs as f32 / 90.0) * 0.16).clamp(0.72, 0.88);
-                                            set_stage(&format!("Stage 4/6: VPS compiling libhorizon_android.so ({secs}s)..."), p);
-                                            log_line(format!("  [VPS] cargo ndk -t arm64-v8a build --release ({secs}s elapsed)..."));
-                                        }
-                                        Some("done") => {
-                                            let want_sha = st["sha256"].as_str().unwrap_or_default().to_owned();
-                                            let size = st["size"].as_u64().unwrap_or(0);
-                                            set_stage("Stage 5/6: Downloading compiled libhorizon_android.so from VPS...", 0.90);
-                                            log_line(format!(
-                                                "  [VPS] Build succeeded! Downloading libhorizon_android.so ({:.1} MiB, SHA256: {}...)...",
-                                                size as f64 / (1024.0 * 1024.0),
-                                                &want_sha.chars().take(12).collect::<String>()
-                                            ));
-                                            let lib_url = format!("{vps_url}/v1/job/{job}/lib");
-                                            if let Ok(dl) = agent.get(&lib_url).call() {
-                                                let mut lib_bytes = Vec::new();
-                                                use std::io::Read;
-                                                if dl.into_reader().read_to_end(&mut lib_bytes).is_ok() && !lib_bytes.is_empty() {
-                                                    let build_name = format!("compiled-{job}");
-                                                    let native_root = root_home.join("native");
-                                                    let folder = native_root.join(&build_name);
-                                                    let _ = std::fs::create_dir_all(&folder);
-                                                    let lib_file = folder.join("libhorizon_android.so");
-                                                    if std::fs::write(&lib_file, &lib_bytes).is_ok() {
-                                                        let _ = std::fs::write(folder.join("for"), version);
-                                                        let _ = std::fs::write(
-                                                            folder.join("build.json"),
-                                                            st["build"].to_string().as_bytes(),
-                                                        );
-                                                        let _ = std::fs::write(native_root.join("current"), &build_name);
-                                                        let _ = std::fs::remove_file(native_root.join("starts"));
-                                                        log_line(format!(
-                                                            "  [VPS] Installed native/{build_name}/libhorizon_android.so & activated hot-swap!"
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                            break;
-                                        }
-                                        Some("failed") => {
-                                            let err = st["error"].as_str().unwrap_or("Unknown VPS build error");
-                                            log_line(format!("  [VPS] Remote build reported: {err}"));
-                                            log_line("  -> Falling back to Local In-Process Mod Runtime (all hooks active).".into());
-                                            break;
-                                        }
-                                        _ => break,
-                                    }
-                                }
-                            } else {
-                                log_line("VPS response did not contain a job ID — using Local In-Process Mod Runtime.".into());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log_line(format!("VPS endpoint ({vps_url}) unreachable ({e})."));
-                        log_line("Using Local Real-Time Mod Runtime — all compiled .hnmod & .hmod hooks are active in-process!".into());
-                    }
-                }
-            } else {
-                set_stage("Stage 4/6: Local Real-Time Mod Runtime selected (skipping remote VPS)...", 0.78);
-                log_line("Local Real-Time Mod Runtime selected — skipping remote VPS upload.".into());
-            }
-
-            set_stage("Stage 5/6: Verifying mod manifests & registering gameplay hooks...", 0.92);
-            log_line(format!(
-                "Verified {} compiled mod package(s) in horizon-native-mods/ and horizon-mods/.",
-                compiled_hnmods.len()
-            ));
-
-            set_stage(
-                &format!(
-                    "Stage 6/6: Compilation complete! {} mod(s) compiled & active in Minecraft.",
-                    compiled_hnmods.len()
-                ),
-                1.0,
-            );
-            log_line(format!(
-                "SUCCESS: {} mod(s) compiled and enabled. Launch Minecraft to play!",
-                compiled_hnmods.len()
-            ));
-            running.store(false, Ordering::SeqCst);
-        });
-    }
-
     pub fn edit(&mut self, out: horizon_client::osk::Output, home: &Path) {
         use horizon_client::osk::Output;
         let is_name = self.editing == Some("name");
@@ -2619,7 +2348,6 @@ impl Catalog {
             Some("theme_grad_mid") => &mut self.config.theme.gradient_mid_hex,
             Some("theme_grad_end") => &mut self.config.theme.gradient_end_hex,
             Some("installed_search") => &mut self.installed_query,
-            Some("vps_url") => &mut self.config.vps_compiler_url,
             Some("fm_rename" | "fm_new_folder") => &mut self.fm_input_text,
             _ => &mut self.query,
         };

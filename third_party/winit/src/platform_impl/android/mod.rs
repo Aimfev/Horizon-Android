@@ -110,6 +110,7 @@ pub(crate) use crate::cursor::{
 pub(crate) use crate::icon::NoIcon as PlatformIcon;
 
 static HAS_FOCUS: AtomicBool = AtomicBool::new(true);
+static IN_SINGLE_ITERATION: AtomicBool = AtomicBool::new(false);
 
 /// Returns the minimum `Option<Duration>`, taking into account that `None`
 /// equates to an infinite timeout, not a zero timeout (so can't just use
@@ -208,9 +209,9 @@ impl RedrawRequester {
     }
 
     pub fn request_redraw(&self) {
-        if self.flag.set() {
+        if self.flag.set() && !IN_SINGLE_ITERATION.load(Ordering::Relaxed) {
             // Only explicitly try to wake up the main loop when the flag
-            // value changes
+            // value changes outside single_iteration
             self.waker.wake();
         }
     }
@@ -454,9 +455,11 @@ impl<T: 'static> EventLoop<T> {
         }
 
         // This is always the last event we dispatch before poll again
+        IN_SINGLE_ITERATION.store(true, Ordering::Relaxed);
         callback(event::Event::AboutToWait, self.window_target());
+        IN_SINGLE_ITERATION.store(false, Ordering::Relaxed);
 
-        self.pending_redraw = pending_redraw;
+        self.pending_redraw = pending_redraw | self.redraw_flag.get_and_reset();
     }
 
     fn handle_input_event<F>(

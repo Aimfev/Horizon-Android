@@ -1899,12 +1899,15 @@ impl Renderer {
                 .map(|renderer| renderer.config.present_mode)
                 .filter(|mode| caps.present_modes.contains(mode))
                 .unwrap_or_else(|| {
-                    // Android GPU drivers can stall inside a mailbox present for
-                    // seconds (seen on Mali), which ANRs the activity before the
-                    // first world frame. Present through the vsync queue there.
-                    if cfg!(not(target_os = "android"))
-                        && caps.present_modes.contains(&wgpu::PresentMode::Mailbox)
-                    {
+                    if cfg!(target_os = "android") {
+                        if caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+                            wgpu::PresentMode::Immediate
+                        } else if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                            wgpu::PresentMode::Mailbox
+                        } else {
+                            wgpu::PresentMode::Fifo
+                        }
+                    } else if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
                         wgpu::PresentMode::Mailbox
                     } else {
                         wgpu::PresentMode::Fifo
@@ -3996,7 +3999,7 @@ impl Renderer {
             .take();
         self.offscreen = None;
         self.suspended = false;
-        if self.config.present_mode != previous.config.present_mode {
+        if cfg!(target_os = "android") || self.config.present_mode != previous.config.present_mode {
             self.surface_unconfigured = true;
         }
         if self.surface.is_none() {
@@ -4541,8 +4544,12 @@ impl Renderer {
             Some(PresentMode::Immediate) => wgpu::PresentMode::Immediate,
             _ => wgpu::PresentMode::Fifo,
         };
-        if self.config.present_mode != mode {
+        let desired_latency = if vsync { 2 } else { 3 };
+        if self.config.present_mode != mode
+            || self.config.desired_maximum_frame_latency != desired_latency
+        {
             self.config.present_mode = mode;
+            self.config.desired_maximum_frame_latency = desired_latency;
             if self.surface.is_some() {
                 self.configure_surface();
             } else {

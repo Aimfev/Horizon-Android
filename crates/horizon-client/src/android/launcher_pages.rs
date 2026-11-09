@@ -236,7 +236,6 @@ pub(super) enum Action {
     CancelCatalogDownload,
     Search,
     ShaderSource(crate::shader_catalog::Origin),
-    ModSource(crate::shader_catalog::Origin),
     Field(&'static str),
     FinishNameEdit,
     Install(usize),
@@ -417,11 +416,6 @@ pub(super) enum Action {
     CloseUpdateScreen,
     TriggerUpdateInstall,
     CheckForUpdates,
-    CompileAllMods,
-    CompileModOnVps,
-    CompileSingleMod(usize),
-    ToggleVpsCompilerMode,
-    ClearCompilerLogs,
 }
 
 pub(super) fn button(
@@ -789,7 +783,6 @@ fn page_icon(page: Page) -> Icon {
         Page::Packs => Icon::Packs,
         Page::Shaders => Icon::Shaders,
         Page::Installed => Icon::Installed,
-        Page::Compiler => Icon::Terminal,
         Page::Settings => Icon::Settings,
         Page::Skins => Icon::Skins,
     }
@@ -1711,27 +1704,19 @@ impl Launcher {
                     "Resource Packs"
                 },
             );
-            if matches!(page, Page::Shaders | Page::Mods) {
+            if page == Page::Shaders {
                 use crate::shader_catalog::Origin;
                 let seg_w = 100.0;
                 for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
                     let rx = content_x + content_w - (2 - i) as f32 * (seg_w + 6.0) + 6.0;
                     let rect = [rx, header_y - 2.0, seg_w, 30.0];
-                    let active = (if page == Page::Mods {
-                        self.catalog.config.mod_source
-                    } else {
-                        self.catalog.config.shader_source
-                    }) == origin;
+                    let active = self.catalog.config.shader_source == origin;
                     button(
                         &mut ui,
                         &mut self.targets,
                         rect,
                         origin.source().label(),
-                        if page == Page::Mods {
-                            Action::ModSource(origin)
-                        } else {
-                            Action::ShaderSource(origin)
-                        },
+                        Action::ShaderSource(origin),
                         active,
                     );
                 }
@@ -1811,14 +1796,14 @@ impl Launcher {
                 );
             }
 
-            let bundled: Vec<_> = if page == Page::Mods
-                && self.catalog.config.mod_source == crate::shader_catalog::Origin::Horizon
-            {
-                let query = self.catalog.query.to_lowercase();
+            let bundled: Vec<_> = if page == Page::Mods {
+                let query = self.catalog.query.trim().to_lowercase();
                 horizon_client::mod_list::ANDROID_BUNDLED
                     .into_iter()
                     .filter(|(id, title, _)| {
-                        id.contains(&query) || title.to_lowercase().contains(&query)
+                        query.is_empty()
+                            || id.contains(&query)
+                            || title.to_lowercase().contains(&query)
                     })
                     .collect()
             } else {
@@ -1837,8 +1822,42 @@ impl Launcher {
                             .any(|(id, _, _)| *id == p.id))
                 })
                 .collect();
+            let is_horizon_paged = page == Page::Mods
+                || (page == Page::Shaders
+                    && self.catalog.config.shader_source == crate::shader_catalog::Origin::Horizon);
+            let total_horizon_items = bundled.len() + catalog_rows.len();
+            let total_pages = if is_horizon_paged {
+                total_horizon_items
+                    .div_ceil(crate::catalog::CATALOG_PAGE_SIZE)
+                    .max(1)
+            } else {
+                1
+            };
+            if is_horizon_paged {
+                let max_offset = (total_pages - 1) * crate::catalog::CATALOG_PAGE_SIZE;
+                if self.catalog.offset > max_offset {
+                    self.catalog.offset = max_offset;
+                }
+            }
+            let page_start = if is_horizon_paged {
+                self.catalog.offset.min(total_horizon_items)
+            } else {
+                0
+            };
+            let page_end = if is_horizon_paged {
+                (page_start + crate::catalog::CATALOG_PAGE_SIZE).min(total_horizon_items)
+            } else {
+                catalog_rows.len().min(crate::catalog::CATALOG_PAGE_SIZE)
+            };
+            let bundled_start = page_start.min(bundled.len());
+            let bundled_end = page_end.min(bundled.len());
+            let page_bundled = &bundled[bundled_start..bundled_end];
+            let cat_start = page_start.saturating_sub(bundled.len()).min(catalog_rows.len());
+            let cat_end = page_end.saturating_sub(bundled.len()).min(catalog_rows.len());
+            let page_catalog_rows = &catalog_rows[cat_start..cat_end];
+
             let row_h = 72.0;
-            let row_count = bundled.len() + catalog_rows.len();
+            let row_count = page_bundled.len() + page_catalog_rows.len();
             let top = 176.0 + slide_y;
             let bottom = h - 46.0;
             self.catalog.scroll = self
@@ -1859,7 +1878,7 @@ impl Launcher {
                 (bottom - top).max(1.0),
             ]));
 
-            for (row, (id, title, description)) in bundled.iter().enumerate() {
+            for (row, (id, title, description)) in page_bundled.iter().enumerate() {
                 let y = top + row as f32 * row_h - self.catalog.scroll;
                 let enabled = self.catalog.bundled_enabled.contains(*id);
                 let card_rect = [content_x, y, content_w - 118.0, 64.0];
@@ -1944,8 +1963,8 @@ impl Launcher {
                 );
             }
 
-            for (row, (i, p)) in catalog_rows.into_iter().enumerate() {
-                let y = top + (row + bundled.len()) as f32 * row_h - self.catalog.scroll;
+            for (row, &(i, p)) in page_catalog_rows.iter().enumerate() {
+                let y = top + (row + page_bundled.len()) as f32 * row_h - self.catalog.scroll;
                 let download = self.catalog.download_label(p);
                 let card_rect = [content_x, y, content_w - 118.0, 64.0];
                 let btn_rect = [content_x + content_w - 112.0, y + 13.0, 100.0, 38.0];
@@ -2082,13 +2101,19 @@ impl Launcher {
 
             ui.set_clip(None);
             let pager_y = h - 42.0;
+            let has_prev = self.catalog.offset >= crate::catalog::CATALOG_PAGE_SIZE;
+            let has_next = if is_horizon_paged {
+                self.catalog.offset + crate::catalog::CATALOG_PAGE_SIZE < total_horizon_items
+            } else {
+                self.catalog.results.len() >= crate::catalog::CATALOG_PAGE_SIZE
+            };
             button(
                 &mut ui,
                 &mut self.targets,
                 [content_x, pager_y, 102.0, 32.0],
                 "Previous",
                 Action::Previous,
-                false,
+                has_prev,
             );
             button(
                 &mut ui,
@@ -2096,12 +2121,37 @@ impl Launcher {
                 [content_x + 110.0, pager_y, 102.0, 32.0],
                 "Next",
                 Action::Next,
-                false,
+                has_next,
+            );
+            let page_num = (self.catalog.offset / crate::catalog::CATALOG_PAGE_SIZE) + 1;
+            let page_info = if is_horizon_paged {
+                let shown_first = if total_horizon_items == 0 {
+                    0
+                } else {
+                    page_start + 1
+                };
+                format!(
+                    "Page {page_num} of {total_pages}  •  Showing {shown_first}–{page_end} of {total_horizon_items}"
+                )
+            } else {
+                format!("Page {page_num}  •  {} per page", crate::catalog::CATALOG_PAGE_SIZE)
+            };
+            let fitted_page_info = ui.fit_text(
+                Face::Medium,
+                12.5,
+                &page_info,
+                (content_w - 226.0).max(60.0),
+            );
+            ui.text(
+                Face::Medium,
+                12.5,
+                content_x + 222.0,
+                pager_y + 7.0,
+                my3_muted(),
+                &fitted_page_info,
             );
         } else if page == Page::Installed {
             self.draw_installed(&mut ui, content_x, content_w, h, compact, slide_y);
-        } else if page == Page::Compiler {
-            self.draw_compiler_page(&mut ui, content_x, content_w, h, compact, slide_y);
         } else {
             self.draw_settings_page(
                 &mut ui, content_x, content_w, h, compact, slide_y, ime_top_dp,
@@ -2405,392 +2455,6 @@ impl Launcher {
     /// View 1: `InstalledSubTab::Library` (Search, Category Filter Pills, Sort, Rich M3 Cards)
     /// View 2: `InstalledSubTab::FileManager` (Real filesystem manager with Back/Forward history,
     /// Breadcrumbs, Multi-select, Copy/Cut/Paste, Import, Export, Rename, New Folder, Delete, Details)
-    /// Dedicated Live `.jar` & `.hnmod` Compiler Studio (`Page::Compiler`):
-    /// Lets users configure a Remote VPS Build Server (`mod_build_server_unlimited.py`) or Local Real-Time
-    /// Transpiler, trigger full or per-mod compilation, and watch the 6-stage pipeline + live terminal log.
-    fn draw_compiler_page(
-        &mut self,
-        ui: &mut Ui,
-        content_x: f32,
-        content_w: f32,
-        h: f32,
-        compact: bool,
-        slide_y: f32,
-    ) {
-        use horizon_client::content_files::Kind;
-        let header_y = 60.0 + slide_y;
-        ui.text(
-            Face::SemiBold,
-            19.0,
-            content_x,
-            header_y + 2.0,
-            my3_text(),
-            "Mod Compiler Studio (.jar & .hnmod)",
-        );
-
-        let is_running = self.catalog.compiler_running.load(Ordering::Relaxed);
-        let raw_prog = *self
-            .catalog
-            .compiler_progress
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let stage_str = self
-            .catalog
-            .compiler_stage
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-
-        // Top-right action buttons: Compile All, VPS .so Build, + Import Mod
-        let btn_w = if compact { 96.0 } else { 118.0 };
-        let imp_rect = [content_x + content_w - btn_w, header_y - 1.0, btn_w, 32.0];
-        let vps_rect = [
-            imp_rect[0] - btn_w - 8.0,
-            header_y - 1.0,
-            btn_w,
-            32.0,
-        ];
-        button(
-            ui,
-            &mut self.targets,
-            imp_rect,
-            "+ Import .jar",
-            Action::Import(Kind::Mods),
-            false,
-        );
-        button(
-            ui,
-            &mut self.targets,
-            vps_rect,
-            if is_running { "Compiling..." } else { "Compile All" },
-            Action::CompileAllMods,
-            true,
-        );
-
-        let top = 98.0 + slide_y;
-        let bottom = h - 38.0;
-        let view_h = (bottom - top).max(80.0);
-
-        let mod_items: Vec<(usize, crate::catalog::LocalItem)> = self
-            .catalog
-            .local
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter(|(_, item)| item.kind == Kind::Mods)
-            .collect();
-
-        let total_content_h = 118.0 + 96.0 + 162.0 + 34.0 + (mod_items.len().max(1) as f32) * 62.0 + 18.0;
-        let max_scroll = (total_content_h - view_h).max(0.0);
-        self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-        self.list_view = Some([top, bottom, max_scroll]);
-
-        ui.set_clip(Some([content_x - 2.0, top, content_w + 4.0, view_h]));
-        let mut cy = top - self.catalog.scroll;
-
-        // ---- Card 1: VPS & Local Compiler Configuration Bar ----
-        let c1_h = 110.0;
-        if cy + c1_h >= top && cy <= bottom {
-            ui.rounded(content_x, cy, content_w, c1_h, 18.0, my3_surface());
-            ui.border(content_x, cy, content_w, c1_h, 18.0, my3_border());
-            ui.rounded(content_x + 14.0, cy + 14.0, 38.0, 38.0, 12.0, my3_accent_soft());
-            ui.icon(Icon::Terminal, content_x + 23.0, cy + 23.0, 20.0, my3_accent());
-
-            let mode_title = if self.catalog.config.use_vps_compiler {
-                "VPS Cloud + Local Real-Time Compiler (Active)"
-            } else {
-                "Local Real-Time Transpiler (.jar -> .hnmod + .hmod)"
-            };
-            let fitted_t = ui.fit_text(Face::SemiBold, 14.5, mode_title, (content_w - 210.0).max(90.0));
-            ui.text(Face::SemiBold, 14.5, content_x + 62.0, cy + 12.0, my3_text(), &fitted_t);
-
-            let sub_desc = "Compiles Java .jar & .hnmod bytecode/Mixins into native Rust mod_api hooks & VPS libhorizon_android.so";
-            let fitted_s = ui.fit_text(Face::Regular, 11.5, sub_desc, (content_w - 210.0).max(90.0));
-            ui.text(Face::Regular, 11.5, content_x + 62.0, cy + 33.0, my3_muted(), &fitted_s);
-
-            let mode_btn_w = if compact { 114.0 } else { 138.0 };
-            let mode_rect = [content_x + content_w - mode_btn_w - 14.0, cy + 14.0, mode_btn_w, 34.0];
-            button(
-                ui,
-                &mut self.targets,
-                mode_rect,
-                if self.catalog.config.use_vps_compiler {
-                    "VPS: Enabled"
-                } else {
-                    "VPS: Local Only"
-                },
-                Action::ToggleVpsCompilerMode,
-                self.catalog.config.use_vps_compiler,
-            );
-            self.list_targets.push((mode_rect, Action::ToggleVpsCompilerMode));
-
-            // VPS Server URL Field + Build on VPS CTA
-            let row_y = cy + 62.0;
-            let build_vps_w = if compact { 118.0 } else { 148.0 };
-            let url_w = (content_w - build_vps_w - 36.0).max(120.0);
-            let url_rect = ui.text_field(
-                content_x + 14.0,
-                row_y,
-                url_w,
-                36.0,
-                "",
-                &self.catalog.config.vps_compiler_url,
-                "https://your-vps-domain:8788 (mod_build_server_unlimited.py)",
-                self.catalog.editing == Some("vps_url"),
-            );
-            if let Some(c) = ui.clip_rect(url_rect) {
-                self.targets.push((c, Action::Field("vps_url")));
-            }
-            self.list_targets.push((url_rect, Action::Field("vps_url")));
-
-            let vps_btn_rect = [content_x + 22.0 + url_w, row_y, build_vps_w, 36.0];
-            button(
-                ui,
-                &mut self.targets,
-                vps_btn_rect,
-                "Build .so on VPS",
-                Action::CompileModOnVps,
-                true,
-            );
-            self.list_targets.push((vps_btn_rect, Action::CompileModOnVps));
-        }
-        cy += c1_h + 10.0;
-
-        // ---- Card 2: Live 6-Stage Pipeline Progress Bar ----
-        let c2_h = 90.0;
-        if cy + c2_h >= top && cy <= bottom {
-            ui.rounded(content_x, cy, content_w, c2_h, 18.0, my3_card_bg());
-            ui.border(
-                content_x,
-                cy,
-                content_w,
-                c2_h,
-                18.0,
-                if is_running { my3_accent() } else { my3_card_border() },
-            );
-
-            let pct = (raw_prog * 100.0).round() as u32;
-            let fitted_stage = ui.fit_text(Face::SemiBold, 13.0, &stage_str, (content_w - 90.0).max(80.0));
-            ui.text(Face::SemiBold, 13.0, content_x + 16.0, cy + 10.0, my3_text(), &fitted_stage);
-            let pct_label = format!("{pct}%");
-            let pw = ui.measure(Face::SemiBold, 13.0, &pct_label);
-            ui.text(
-                Face::SemiBold,
-                13.0,
-                content_x + content_w - pw - 16.0,
-                cy + 10.0,
-                my3_accent(),
-                &pct_label,
-            );
-
-            // Animated Progress Track
-            let bar_x = content_x + 16.0;
-            let bar_y = cy + 34.0;
-            let bar_w = (content_w - 32.0).max(60.0);
-            ui.rounded(bar_x, bar_y, bar_w, 10.0, 5.0, my3_track());
-            let fill_frac = if is_running {
-                raw_prog.clamp(0.06, 1.0)
-            } else {
-                raw_prog.clamp(0.0, 1.0)
-            };
-            if fill_frac > 0.0 {
-                let fw = (bar_w * fill_frac).max(10.0);
-                ui.rounded(bar_x, bar_y, fw, 10.0, 5.0, my3_accent());
-                if is_running && fw > 28.0 {
-                    let sw = (fw * 0.28).clamp(18.0, 64.0);
-                    let sx = bar_x + (fw - sw) * self.anim.shimmer_phase.clamp(0.0, 1.0);
-                    ui.rounded(sx, bar_y + 1.5, sw, 7.0, 3.5, color::hex(0xDFD4FF, 180));
-                }
-            }
-
-            // 6 Stage Pills
-            let stages = ["1. Scan", "2. Bytecode", "3. Rust Gen", "4. VPS Build", "5. Verify", "6. Active"];
-            let active_stage_idx = ((raw_prog * 6.0).floor() as usize).min(5);
-            let gap = 5.0;
-            let pill_w = ((bar_w - gap * 5.0) / 6.0).max(32.0);
-            let pill_y = cy + 52.0;
-            for (i, s_name) in stages.iter().enumerate() {
-                let px = bar_x + i as f32 * (pill_w + gap);
-                let done = raw_prog >= 0.99 || (raw_prog > 0.01 && i < active_stage_idx);
-                let cur = is_running && i == active_stage_idx;
-                ui.rounded(
-                    px,
-                    pill_y,
-                    pill_w,
-                    24.0,
-                    8.0,
-                    if cur {
-                        my3_accent_soft()
-                    } else if done {
-                        my3_surface_high()
-                    } else {
-                        my3_surface()
-                    },
-                );
-                ui.border(
-                    px,
-                    pill_y,
-                    pill_w,
-                    24.0,
-                    8.0,
-                    if cur || done { my3_accent() } else { my3_border() },
-                );
-                ui.centered_fit(
-                    Face::Medium,
-                    10.0,
-                    [px + 3.0, pill_y, pill_w - 6.0, 24.0],
-                    if cur || done { my3_text() } else { my3_muted() },
-                    s_name,
-                );
-            }
-        }
-        cy += c2_h + 10.0;
-
-        // ---- Card 3: Live Real-Time Compiler Terminal Console ----
-        let c3_h = 152.0;
-        if cy + c3_h >= top && cy <= bottom {
-            ui.rounded(content_x, cy, content_w, c3_h, 18.0, color::hex(0x0B0D14, 248));
-            ui.border(content_x, cy, content_w, c3_h, 18.0, my3_border());
-            ui.text(
-                Face::SemiBold,
-                11.5,
-                content_x + 16.0,
-                cy + 10.0,
-                my3_accent(),
-                "LIVE COMPILER OUTPUT STREAM (REAL-TIME WATCH)",
-            );
-            let clr_rect = [content_x + content_w - 92.0, cy + 8.0, 78.0, 24.0];
-            button(
-                ui,
-                &mut self.targets,
-                clr_rect,
-                "Clear Log",
-                Action::ClearCompilerLogs,
-                false,
-            );
-
-            let logs = self
-                .catalog
-                .compiler_logs
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            let visible_lines = 6usize;
-            let start = logs.len().saturating_sub(visible_lines);
-            for (line_idx, line) in logs[start..].iter().enumerate() {
-                let ly = cy + 36.0 + line_idx as f32 * 18.0;
-                let fitted = ui.fit_text(Face::Mono, 11.0, line, (content_w - 32.0).max(80.0));
-                let col = if line.contains("SUCCESS:") || line.contains("succeeded") {
-                    color::hex(0x63E69A, 255)
-                } else if line.contains("[!]") || line.contains("Error") {
-                    color::hex(0xFF8080, 255)
-                } else if line.contains("[VPS]") {
-                    my3_accent()
-                } else {
-                    color::hex(0xD5DCF2, 245)
-                };
-                ui.text(Face::Mono, 11.0, content_x + 16.0, ly, col, &fitted);
-            }
-        }
-        cy += c3_h + 12.0;
-
-        // ---- Card 4: Installed Mod Compilation Queue ----
-        if cy + 28.0 >= top && cy <= bottom {
-            ui.text(
-                Face::SemiBold,
-                13.5,
-                content_x + 4.0,
-                cy,
-                my3_text(),
-                &format!("Profile Mod Compilation Queue ({})", mod_items.len()),
-            );
-        }
-        cy += 28.0;
-
-        if mod_items.is_empty() {
-            let empty_h = 64.0;
-            if cy + empty_h >= top && cy <= bottom {
-                ui.rounded(content_x, cy, content_w, empty_h, 16.0, my3_card_bg());
-                ui.border(content_x, cy, content_w, empty_h, 16.0, my3_card_border());
-                ui.text(
-                    Face::Medium,
-                    13.0,
-                    content_x + 16.0,
-                    cy + 12.0,
-                    my3_text(),
-                    "No external .jar or .hnmod mods in this profile yet.",
-                );
-                ui.text(
-                    Face::Regular,
-                    11.5,
-                    content_x + 16.0,
-                    cy + 34.0,
-                    my3_muted(),
-                    "Install any mod from the Mods tab or tap '+ Import .jar' above to compile and watch live.",
-                );
-            }
-        } else {
-            for (local_idx, item) in mod_items {
-                let row_h = 56.0;
-                if cy + row_h >= top && cy <= bottom {
-                    ui.rounded(content_x, cy, content_w, row_h, 16.0, my3_card_bg());
-                    ui.border(
-                        content_x,
-                        cy,
-                        content_w,
-                        row_h,
-                        16.0,
-                        if item.enabled { my3_accent() } else { my3_card_border() },
-                    );
-                    let badge_col = if item.enabled {
-                        color::hex(0x234937, 235)
-                    } else {
-                        my3_surface_high()
-                    };
-                    ui.rounded(content_x + 12.0, cy + 10.0, 74.0, 20.0, 10.0, badge_col);
-                    ui.centered_fit(
-                        Face::SemiBold,
-                        9.0,
-                        [content_x + 14.0, cy + 10.0, 70.0, 20.0],
-                        if item.enabled {
-                            color::hex(0x69F0AE, 255)
-                        } else {
-                            my3_muted()
-                        },
-                        if item.enabled { "COMPILED" } else { "DISABLED" },
-                    );
-
-                    let title_max = (content_w - 230.0).max(80.0);
-                    let fitted_title = ui.fit_text(Face::SemiBold, 14.0, &item.title, title_max);
-                    ui.text(Face::SemiBold, 14.0, content_x + 94.0, cy + 8.0, my3_text(), &fitted_title);
-
-                    let sub_max = (content_w - 210.0).max(80.0);
-                    let fitted_sub = ui.fit_text(Face::Regular, 11.2, &item.subtitle, sub_max);
-                    ui.text(Face::Regular, 11.2, content_x + 14.0, cy + 32.0, my3_muted(), &fitted_sub);
-
-                    let recomp_w = if compact { 90.0 } else { 108.0 };
-                    let recomp_rect = [
-                        content_x + content_w - recomp_w - 12.0,
-                        cy + (row_h - 34.0) * 0.5,
-                        recomp_w,
-                        34.0,
-                    ];
-                    button(
-                        ui,
-                        &mut self.targets,
-                        recomp_rect,
-                        "Recompile",
-                        Action::CompileSingleMod(local_idx),
-                        false,
-                    );
-                    self.list_targets.push((recomp_rect, Action::CompileSingleMod(local_idx)));
-                }
-                cy += row_h + 6.0;
-            }
-        }
-
-        ui.set_clip(None);
-    }
-
     fn draw_installed(
         &mut self,
         ui: &mut Ui,
@@ -6586,6 +6250,7 @@ impl Launcher {
                 });
             }
             Some(Action::CycleMaxFps) => {
+                let mut now_uncapped = false;
                 self.modify_game_settings(|s| {
                     s.max_fps = match s.max_fps {
                         0..=45 => 60,
@@ -6596,8 +6261,16 @@ impl Launcher {
                     };
                     if s.max_fps >= 260 {
                         s.vsync = false;
+                        s.horizon.present_mode = horizon_client::graphics::PresentMode::Immediate;
+                        s.inactivity_fps_limit = "minimized".into();
+                        now_uncapped = true;
                     }
                 });
+                self.catalog.config.max_fps_mode = now_uncapped;
+                if now_uncapped {
+                    self.catalog.config.battery_perf_mode = false;
+                }
+                let _ = self.catalog.config.save(&self.home);
             }
             Some(Action::CycleGraphicsPreset) => {
                 self.modify_game_settings(|s| {
@@ -6609,7 +6282,25 @@ impl Launcher {
                 });
             }
             Some(Action::ToggleVsync) => {
-                self.modify_game_settings(|s| s.vsync = !s.vsync);
+                let mut vsync_now = false;
+                let mut fps_now = 120;
+                self.modify_game_settings(|s| {
+                    s.vsync = !s.vsync;
+                    vsync_now = s.vsync;
+                    fps_now = s.max_fps;
+                    s.horizon.present_mode = if s.vsync {
+                        horizon_client::graphics::PresentMode::Fifo
+                    } else {
+                        horizon_client::graphics::PresentMode::Immediate
+                    };
+                });
+                if vsync_now {
+                    self.catalog.config.max_fps_mode = false;
+                } else if fps_now >= 260 {
+                    self.catalog.config.max_fps_mode = true;
+                    self.catalog.config.battery_perf_mode = false;
+                }
+                let _ = self.catalog.config.save(&self.home);
             }
             Some(Action::ToggleSmoothLighting) => {
                 self.modify_game_settings(|s| s.smooth_lighting = !s.smooth_lighting);
@@ -6676,8 +6367,15 @@ impl Launcher {
                     if self.catalog.config.device.display_hz < 120 {
                         self.catalog.config.device.display_hz = 120;
                     }
-                } else if self.catalog.config.device.display_hz == 120 {
-                    self.catalog.config.device.display_hz = 0;
+                } else {
+                    if self.catalog.config.device.display_hz == 120 {
+                        self.catalog.config.device.display_hz = 0;
+                    }
+                    self.modify_game_settings(|s| {
+                        s.max_fps = 120;
+                        s.vsync = true;
+                        s.horizon.present_mode = horizon_client::graphics::PresentMode::Auto;
+                    });
                 }
                 crate::device_runtime::configure(self.catalog.config.device);
                 self.catalog.config.save(&self.home)?;
@@ -7047,16 +6745,11 @@ impl Launcher {
                 crate::device_runtime::configure(self.catalog.config.device);
             }
 
-            Some(Action::ModSource(origin)) => {
-                self.catalog.config.mod_source = origin;
-                self.catalog.config.save(&self.home)?;
-                self.catalog.offset = 0;
-                self.catalog.browse(&self.home);
-            }
             Some(Action::ShaderSource(origin)) => {
                 self.catalog.config.shader_source = origin;
                 self.catalog.config.save(&self.home)?;
                 self.catalog.offset = 0;
+                self.catalog.scroll = 0.0;
                 self.catalog.browse(&self.home);
             }
             Some(Action::OpenFolder(kind)) => {
@@ -7291,6 +6984,7 @@ impl Launcher {
             Some(Action::Search) => {
                 crate::platform::hide();
                 self.catalog.offset = 0;
+                self.catalog.scroll = 0.0;
                 self.catalog.search(&self.home);
             }
             Some(Action::FinishNameEdit) => {
@@ -7332,51 +7026,66 @@ impl Launcher {
                     "theme_grad_mid" => &self.catalog.config.theme.gradient_mid_hex,
                     "theme_grad_end" => &self.catalog.config.theme.gradient_end_hex,
                     "installed_search" => &self.catalog.installed_query,
-                    "vps_url" => &self.catalog.config.vps_compiler_url,
                     "fm_rename" | "fm_new_folder" => &self.catalog.fm_input_text,
                     _ => &self.catalog.query,
                 };
                 crate::platform::show(initial);
             }
-            Some(Action::CompileAllMods) => {
-                self.catalog.start_live_compiler(&self.home, None, false);
-                self.catalog.status = "Live compiler started — watch real-time output in the Compiler console.".into();
-            }
-            Some(Action::CompileModOnVps) => {
-                self.catalog.start_live_compiler(&self.home, None, true);
-                self.catalog.status = "Submitting .hnmod bundles to remote VPS compiler server...".into();
-            }
-            Some(Action::CompileSingleMod(idx)) => {
-                if let Some(item) = self.catalog.local.get(idx).cloned() {
-                    let raw = item
-                        .file
-                        .strip_prefix("horizon-native-mods/")
-                        .or_else(|| item.file.strip_prefix("horizon-mods/"))
-                        .unwrap_or(&item.file)
-                        .to_owned();
-                    self.catalog.start_live_compiler(&self.home, Some(raw), false);
-                }
-            }
-            Some(Action::ToggleVpsCompilerMode) => {
-                self.catalog.config.use_vps_compiler = !self.catalog.config.use_vps_compiler;
-                let _ = self.catalog.config.save(&self.home);
-                self.catalog.status = if self.catalog.config.use_vps_compiler {
-                    "VPS Cloud + Local Real-Time Compiler enabled.".into()
-                } else {
-                    "Local Real-Time Transpiler mode enabled (offline-ready).".into()
-                };
-            }
-            Some(Action::ClearCompilerLogs) => {
-                self.catalog.clear_compiler_logs();
-            }
             Some(Action::Install(i)) => self.catalog.install(&self.home, i),
             Some(Action::Next) => {
-                self.catalog.offset += 12;
-                self.catalog.search(&self.home);
+                let is_horizon_paged = self.catalog.page == Page::Mods
+                    || (self.catalog.page == Page::Shaders
+                        && self.catalog.config.shader_source
+                            == crate::shader_catalog::Origin::Horizon);
+                if is_horizon_paged {
+                    let bundled_count = if self.catalog.page == Page::Mods {
+                        let query = self.catalog.query.trim().to_lowercase();
+                        horizon_client::mod_list::ANDROID_BUNDLED
+                            .iter()
+                            .filter(|(id, title, _)| {
+                                query.is_empty()
+                                    || id.contains(&query)
+                                    || title.to_lowercase().contains(&query)
+                            })
+                            .count()
+                    } else {
+                        0
+                    };
+                    let cat_count = self
+                        .catalog
+                        .results
+                        .iter()
+                        .filter(|p| {
+                            !(self.catalog.page == Page::Mods
+                                && p.source == crate::browser::SourceId::Horizon
+                                && horizon_client::mod_list::ANDROID_BUNDLED
+                                    .iter()
+                                    .any(|(id, _, _)| *id == p.id))
+                        })
+                        .count();
+                    let total = bundled_count + cat_count;
+                    if self.catalog.offset + crate::catalog::CATALOG_PAGE_SIZE < total {
+                        self.catalog.offset += crate::catalog::CATALOG_PAGE_SIZE;
+                        self.catalog.scroll = 0.0;
+                    }
+                } else if self.catalog.results.len() >= crate::catalog::CATALOG_PAGE_SIZE {
+                    self.catalog.offset += crate::catalog::CATALOG_PAGE_SIZE;
+                    self.catalog.scroll = 0.0;
+                    self.catalog.search(&self.home);
+                }
             }
             Some(Action::Previous) => {
-                self.catalog.offset = self.catalog.offset.saturating_sub(12);
-                self.catalog.search(&self.home);
+                if self.catalog.offset >= crate::catalog::CATALOG_PAGE_SIZE {
+                    self.catalog.offset -= crate::catalog::CATALOG_PAGE_SIZE;
+                    self.catalog.scroll = 0.0;
+                    let is_horizon_paged = self.catalog.page == Page::Mods
+                        || (self.catalog.page == Page::Shaders
+                            && self.catalog.config.shader_source
+                                == crate::shader_catalog::Origin::Horizon);
+                    if !is_horizon_paged {
+                        self.catalog.search(&self.home);
+                    }
+                }
             }
             Some(Action::Profile) => self.open_chooser(chooser::Kind::Profile),
             Some(Action::Renderer) => self.open_chooser(chooser::Kind::Renderer),

@@ -16,5 +16,5 @@ pub use manifest::{
     API, LightColor, MANIFEST, Manifest, Material, OptionKind, OptionPage, PackOption, PackTexture,
     PageItem, SCHEMA, SpriteTag, Stage,
 };
-pub use package::{EXTENSION, Pack};
+pub use package::{BUILTIN_SHADERS, EXTENSION, Pack, build_builtin_hshader_bytes, builtin_shader_pack};
 pub use stages::{Composed, StageKind, compose};

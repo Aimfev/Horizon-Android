@@ -1529,6 +1529,267 @@ fn mod_command(game: &mut Game<'_>, command: &str, ran: &mut bool) {{
     )
 }
 
+
+/// Complete catalog of 24 official Horizon Native Mods (`.hnmod`) available in `Mods > Horizon`
+/// alongside the 4 `ANDROID_BUNDLED` mods (28 total = 3 pages of 10).
+pub const HORIZON_CATALOG_MODS: [(&str, &str, &str, u64); 24] = [
+    (
+        "wrench",
+        "Wrench",
+        "Right-click blocks with a wrench item (Stick by default) to rotate them; sneak + right-click to dismantle redstone machines.",
+        48_200,
+    ),
+    (
+        "veinminer",
+        "Veinminer",
+        "Hold Sneak (or toggle Always On) while mining an ore block to harvest the entire connected vein at once with full item drops.",
+        94_500,
+    ),
+    (
+        "treefall",
+        "TreeFall",
+        "Break the base log of a tree to fell the entire connected trunk and decay/harvest leaves with full log and sapling drops.",
+        86_100,
+    ),
+    (
+        "chop",
+        "Chop!",
+        "Fells connected tree trunks cleanly when chopping logs, dropping all wood and saplings.",
+        62_400,
+    ),
+    (
+        "appleskin",
+        "AppleSkin",
+        "Shows food hunger & saturation values in item tooltips and renders saturation/exhaustion + held-food restoration on the HUD.",
+        118_900,
+    ),
+    (
+        "lookat",
+        "LookAt",
+        "Displays a top-center HUD tooltip showing the targeted block or entity, its state properties, and harvest info.",
+        74_300,
+    ),
+    (
+        "jade",
+        "Jade",
+        "Shows what block or mob you are looking at with block state properties, coordinates, and outline highlight.",
+        112_000,
+    ),
+    (
+        "blockscope",
+        "BlockScope",
+        "Inspects targeted blocks with detailed state properties, coordinates, and block rim highlighting.",
+        41_800,
+    ),
+    (
+        "fullbright",
+        "Fullbright",
+        "Boosts world brightness and gamma so dark caves, underwater depths, and night scenes are clearly visible.",
+        89_700,
+    ),
+    (
+        "rightclickharvest",
+        "RightClickHarvest",
+        "Right-click mature crops (wheat, carrots, potatoes, beetroots, nether wart, cocoa) to harvest and auto-replant.",
+        68_500,
+    ),
+    (
+        "carryblock",
+        "Carry Block",
+        "Sneak + right-click with an empty hand to pick up, carry, and place blocks and containers.",
+        53_900,
+    ),
+    (
+        "mousetricks",
+        "Mouse Tricks",
+        "Enhances inventory management with quick slot dragging, wheel item transfer, and container sorting.",
+        59_200,
+    ),
+    (
+        "fps_overlay",
+        "FPS Counter",
+        "Displays real-time FPS, 1% low frame rate, and frame time in a configurable screen corner.",
+        79_400,
+    ),
+    (
+        "keystrokes",
+        "Keystrokes",
+        "Shows live WASD movement keys, Jump, LMB/RMB mouse buttons, and CPS counters on screen.",
+        64_800,
+    ),
+    (
+        "coords_hud",
+        "Coordinates HUD",
+        "Shows X/Y/Z block coordinates, cardinal facing direction, chunk coordinates, and 24h world clock on the HUD.",
+        71_600,
+    ),
+    (
+        "armor_status",
+        "Armor Status",
+        "Displays equipped armor pieces and held items with remaining durability and color-coded percentages.",
+        57_100,
+    ),
+    (
+        "held_item_info",
+        "Held Item Info",
+        "Shows the held item's name, durability, and enchantment summary on the HUD.",
+        44_300,
+    ),
+    (
+        "status_effect_hud",
+        "Status Effect HUD",
+        "Renders active potion and status effects with timers on the main HUD without opening inventory.",
+        51_700,
+    ),
+    (
+        "enchantmenthints",
+        "Enchantment Hints",
+        "Appends clear explanations of what each enchantment does to enchanted item and book tooltips.",
+        49_600,
+    ),
+    (
+        "shulkerpeek",
+        "ShulkerPeek",
+        "Shows the contents of Shulker Boxes, Bundles, and containers directly inside their item tooltip.",
+        61_300,
+    ),
+    (
+        "toggle_sprint",
+        "Toggle Sprint",
+        "Lets a single key press toggle continuous sprinting or sneaking with an optional HUD indicator.",
+        55_800,
+    ),
+    (
+        "waypoints",
+        "Waypoints",
+        "Save, list, and track custom world waypoints with live distance and compass direction on the HUD.",
+        67_900,
+    ),
+    (
+        "light_overlay",
+        "Light Overlay",
+        "Highlights nearby blocks where hostile mobs can spawn due to low block/sky light levels.",
+        46_200,
+    ),
+    (
+        "immersivethunder",
+        "ImmersiveThunder",
+        "Adds distance-scaled thunder acoustics, atmospheric storm soundscapes, and camera rumble during storms.",
+        58_400,
+    ),
+];
+
+/// Synthesizes and installs a built-in Horizon `.hnmod` package into `<profile_dir>/horizon-native-mods/<id>.hnmod`
+/// and enables it in `horizon-mods.txt`.
+pub fn install_builtin_horizon_mod(
+    raw_id: &str,
+    profile_dir: &Path,
+) -> Result<TranspiledModInfo, String> {
+    let mod_id = sanitize_mod_id(raw_id);
+    let (title, description) = canonical_horizon_mod_meta(&mod_id)
+        .map(|(t, d)| (t.to_owned(), d.to_owned()))
+        .unwrap_or_else(|| {
+            let t = title_case_id(&mod_id);
+            let d = format!("Horizon Native Mod ({t})");
+            (t, d)
+        });
+    let version = "1.0.0".to_owned();
+    let features: Vec<String> = infer_features_from_id_and_signals(
+        &mod_id,
+        &title,
+        &description,
+        "",
+        &BTreeSet::new(),
+    )
+    .into_iter()
+    .collect();
+
+    let lib_rs = generate_hnmod_rust_source(
+        &mod_id,
+        &title,
+        &version,
+        &description,
+        &[],
+        &[],
+        &features,
+        &[],
+        &[],
+    );
+
+    let manifest_json = serde_json::json!({
+        "id": mod_id,
+        "version": version,
+        "hooks": 22,
+        "permissions": [],
+    });
+    let compiled_json = serde_json::json!({
+        "id": mod_id,
+        "title": title,
+        "version": version,
+        "description": description,
+        "compiled": true,
+        "abi": "horizon-inproc-v2",
+        "hooks_api": 80,
+        "features": features,
+        "custom_buttons": [],
+        "items": [],
+        "blocks": [],
+    });
+
+    let native_mods_dir = profile_dir.join("horizon-native-mods");
+    fs::create_dir_all(&native_mods_dir)
+        .map_err(|e| format!("create horizon-native-mods/: {e}"))?;
+    let hnmod_path = native_mods_dir.join(format!("{mod_id}.hnmod"));
+
+    {
+        let file =
+            File::create(&hnmod_path).map_err(|e| format!("create {}: {e}", hnmod_path.display()))?;
+        let mut out_zip = ZipWriter::new(file);
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+
+        out_zip
+            .start_file("horizon-native.json", opts)
+            .map_err(|e| e.to_string())?;
+        out_zip
+            .write_all(
+                &serde_json::to_vec_pretty(&manifest_json).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+
+        out_zip
+            .start_file("src/lib.rs", opts)
+            .map_err(|e| e.to_string())?;
+        out_zip
+            .write_all(lib_rs.as_bytes())
+            .map_err(|e| e.to_string())?;
+
+        out_zip
+            .start_file("horizon-compiled.json", opts)
+            .map_err(|e| e.to_string())?;
+        out_zip
+            .write_all(
+                &serde_json::to_vec_pretty(&compiled_json).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+
+        out_zip.finish().map_err(|e| e.to_string())?;
+    }
+
+    enable_mod_in_profile(profile_dir, &mod_id);
+    let hmod_path = profile_dir.join("horizon-mods").join(format!("{mod_id}.hmod"));
+    Ok(TranspiledModInfo {
+        id: mod_id,
+        title,
+        version,
+        description,
+        hnmod_path,
+        hmod_path,
+        items: Vec::new(),
+        blocks: Vec::new(),
+        features,
+    })
+}
+
 pub fn title_case_id(id: &str) -> String {
     id.split(['_', '-', '/'])
         .filter(|s| !s.is_empty())

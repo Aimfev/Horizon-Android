@@ -230,20 +230,18 @@ impl Surface for NativeSurface {
                     )
                 }
                 .unwrap_or_default();
-                if mode == vk::PresentModeKHR::IMMEDIATE && !supported.contains(&mode) {
-                    // Android's Vulkan loader only sets ANativeWindow_setSwapInterval(window, 0)
-                    // for VK_PRESENT_MODE_MAILBOX_KHR and never exposes IMMEDIATE natively.
-                    if supported.contains(&vk::PresentModeKHR::MAILBOX) {
-                        mode = vk::PresentModeKHR::MAILBOX;
-                    } else if supported.contains(&vk::PresentModeKHR::FIFO_RELAXED) {
-                        mode = vk::PresentModeKHR::FIFO_RELAXED;
-                    } else {
-                        mode = vk::PresentModeKHR::FIFO;
-                    }
+                // Android's AOSP libvulkan.so (swapchain.cpp) ONLY calls
+                // window->setSwapInterval(window, 0) when presentMode is VK_PRESENT_MODE_MAILBOX_KHR.
+                if supported.contains(&vk::PresentModeKHR::MAILBOX) {
+                    mode = vk::PresentModeKHR::MAILBOX;
+                } else if supported.contains(&vk::PresentModeKHR::IMMEDIATE) {
+                    mode = vk::PresentModeKHR::IMMEDIATE;
+                } else if supported.contains(&vk::PresentModeKHR::FIFO_RELAXED) {
+                    mode = vk::PresentModeKHR::FIFO_RELAXED;
+                } else {
+                    mode = vk::PresentModeKHR::FIFO;
                 }
-                if mode == vk::PresentModeKHR::MAILBOX {
-                    count = count.max(4);
-                }
+                count = count.max(6);
                 if let Ok(caps) = unsafe {
                     self.functor.get_physical_device_surface_capabilities(
                         device.shared.physical_device,

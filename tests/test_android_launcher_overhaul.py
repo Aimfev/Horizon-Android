@@ -695,7 +695,7 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("crate::touch::draw_mcpe_custom_button(", touch_ui)
         self.assertIn("{ if (true) discard; }", rewrite)
         self.assertIn("builtin:", catalog)
-        self.assertIn("query.limit = 100;", catalog)
+        self.assertIn("query.limit = CATALOG_PAGE_SIZE;", catalog)
         self.assertNotIn("Action::WardrobeZoom(false)", wardrobe)
         self.assertIn("fn default_shadow_size() -> f32 {\n    0.0\n}", layout)
         self.assertIn("let sens_card_y = body_y + 148.0;", touch_ui)
@@ -918,7 +918,7 @@ class LauncherOverhaulTests(unittest.TestCase):
 
         catalog = _read_repo_file("crates/horizon-client/src/android/catalog.rs")
         self.assertIn("seen_mod_ids", catalog)
-        self.assertIn("compile_hnmod_bundle_realtime(&p, &game)", catalog)
+        self.assertIn("install_builtin_horizon_mod(&project.id, &game)", catalog)
 
         # 4. In-process live .hnmod execution in android_bundled.rs
         android_bundled = _read_repo_file("crates/horizon-client/src/game/android_bundled.rs")
@@ -1103,13 +1103,29 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("game.inventory.get(game.selected).and_then(Option::as_ref).cloned()", bundled_rs)
 
         catalog_rs = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
-        self.assertIn('Self::Compiler => "Compiler"', catalog_rs)
-        self.assertIn("pub fn start_live_compiler", catalog_rs)
-        self.assertIn("pub vps_compiler_url: String", catalog_rs)
+        self.assertNotIn("Page::Compiler", catalog_rs)
+        self.assertIn("pub const CATALOG_PAGE_SIZE: usize = 10;", catalog_rs)
+        self.assertIn("pub max_fps_unlocked_v2: bool,", catalog_rs)
+        self.assertIn("settings.horizon.battery = self.battery_perf_mode;", catalog_rs)
+        self.assertIn("if !self.page.is_catalog() {", catalog_rs)
 
         lp_rs = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
-        self.assertIn("fn draw_compiler_page", lp_rs)
-        self.assertIn("LIVE COMPILER OUTPUT STREAM (REAL-TIME WATCH)", lp_rs)
+        self.assertNotIn("draw_compiler_page", lp_rs)
+        self.assertNotIn("Action::ModSource", lp_rs)
+        self.assertIn("if page == Page::Shaders {", lp_rs)
+        self.assertIn("Page {page_num} of {total_pages}", lp_rs)
+
+        shader_pkg = (ROOT / "crates/horizon-shader-api/src/package.rs").read_text(encoding="utf-8")
+        self.assertIn("pub const BUILTIN_SHADERS: [(&str, &str, &str, u64); 10]", shader_pkg)
+        self.assertIn("pub fn builtin_shader_pack(id: &str) -> Option<Pack>", shader_pkg)
+
+        jt_rs = (ROOT / "crates/horizon-client/src/jar_transpiler.rs").read_text(encoding="utf-8")
+        self.assertIn("pub const HORIZON_CATALOG_MODS: [(&str, &str, &str, u64); 24]", jt_rs)
+        self.assertIn("pub fn install_builtin_horizon_mod(", jt_rs)
+
+        bcs_rs = (ROOT / "crates/horizon-world/src/block_collision_scan.rs").read_text(encoding="utf-8")
+        self.assertIn("pub fn scan_cells(bounds: Aabb) -> Option<usize>", bcs_rs)
+        self.assertIn("fn section_is_empty(", bcs_rs)
 
 
 if __name__ == "__main__":

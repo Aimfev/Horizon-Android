@@ -494,7 +494,14 @@ impl Game<'_> {
             r.gamma = s.gamma;
             r.fullbright = s.extras.fullbright;
             r.improved_transparency = s.improved_transparency;
-            r.set_present_mode(s.vsync, s.horizon.present_mode);
+            let effective_present = if !s.vsync
+                && s.horizon.present_mode == horizon_client::graphics::PresentMode::Fifo
+            {
+                horizon_client::graphics::PresentMode::Immediate
+            } else {
+                s.horizon.present_mode
+            };
+            r.set_present_mode(s.vsync, effective_present);
             r.animated_textures = s.horizon.animated_textures
                 && !horizon_client::ui_theme::motion::game_animations_disabled();
             r.screenshot_quality = s.horizon.screenshot_quality;
@@ -609,8 +616,8 @@ impl Game<'_> {
             has_overlay: false,
         };
         #[cfg(target_os = "android")]
-        let limit = if self.settings.max_fps >= 260 && !self.settings.vsync && self.focused {
-            self.settings.max_fps as i32
+        let limit = if !self.settings.vsync || self.settings.max_fps >= 260 {
+            self.settings.max_fps.max(260) as i32
         } else {
             framerate_limit(self.settings.max_fps as i32, context)
         };
@@ -625,6 +632,12 @@ impl Game<'_> {
     /// frame's slot ends (not in scripted frame-count runs).
     pub(super) fn limit_frame(&mut self) {
         if self.options.frames.is_some() || self.options.paced_by_split {
+            return;
+        }
+        #[cfg(target_os = "android")]
+        if (!self.settings.vsync || self.settings.max_fps >= 260)
+            && !self.settings.horizon.battery
+        {
             return;
         }
         let limit = self.framerate_limit();

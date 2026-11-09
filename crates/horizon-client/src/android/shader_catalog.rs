@@ -154,6 +154,94 @@ pub fn install(
     result
 }
 
+
+/// Returns all built-in Horizon Native Shader Packs (`.hshader`) matching `query_text`.
+pub fn horizon_builtin_shader_projects(query_text: &str) -> Vec<Project> {
+    let words: Vec<String> = query_text
+        .split_whitespace()
+        .map(|w| w.to_lowercase())
+        .collect();
+    horizon_shader_api::BUILTIN_SHADERS
+        .into_iter()
+        .filter(|(id, title, summary, _)| {
+            let hay = format!("{id} {title} {summary} horizon shader").to_lowercase();
+            words.iter().all(|w| hay.contains(w))
+        })
+        .map(|(id, title, summary, downloads)| Project {
+            source: SourceId::Horizon,
+            id: id.to_owned(),
+            slug: id.to_owned(),
+            title: title.to_owned(),
+            summary: summary.to_owned(),
+            author: "Horizon".into(),
+            downloads,
+            page: format!("https://playhorizon.dev/mods/{id}"),
+            icon: None,
+            license: "MIT".into(),
+            kind: Kind::Shader,
+            game_versions: vec![browser::GAME.into()],
+            loaders: vec!["horizon".into(), "hshader".into()],
+        })
+        .collect()
+}
+
+/// Installs a Horizon Native Shader Pack (`.hshader`) into `<home>/shaderpacks/<id>.hshader`,
+/// validates it with `horizon_shader_api::check`, records it in `mod-browser/installed.json`,
+/// and activates it in `<home>/options.txt`.
+pub fn install_horizon_builtin_shader(
+    project: &Project,
+    home: &Path,
+    progress: &dyn Fn(&str, f32),
+) -> Result<usize, String> {
+    progress(&format!("Building {} (.hshader)...", project.title), 0.25);
+    let pack = horizon_shader_api::builtin_shader_pack(&project.id)
+        .ok_or_else(|| format!("Unknown Horizon shader pack: {}", project.id))?;
+    horizon_shader_api::check(&pack)
+        .map_err(|errs| errs.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))?;
+    let bytes = pack.package()?;
+    let sha = horizon_shader_api::package::sha256_hex(&bytes);
+    progress(&format!("Installing {} into shaderpacks/...", project.title), 0.75);
+
+    let folder = home.join("shaderpacks");
+    if fs::symlink_metadata(&folder).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err("Shader folder cannot be a symbolic link".into());
+    }
+    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let file_name = format!("{}.hshader", project.id);
+    let relative = format!("shaderpacks/{file_name}");
+    let target = home.join(&relative);
+    fs::write(&target, &bytes).map_err(|e| e.to_string())?;
+
+    let mut list = installed::Installed::load(home);
+    let ours = |e: &installed::Entry| e.source == SourceId::Horizon && e.project == project.id;
+    list.entries.retain(|e| !ours(e));
+    list.entries.push(installed::Entry {
+        source: SourceId::Horizon,
+        project: project.id.clone(),
+        slug: project.slug.clone(),
+        title: project.title.clone(),
+        kind: Kind::Shader,
+        version: "1.0.0".into(),
+        number: "1.0.0".into(),
+        file: relative,
+        checksum: format!("SHA-256:{sha}"),
+        page: project.page.clone(),
+        dependency: false,
+        verdict: Some("Verified Horizon Shader (.hshader)".into()),
+        skipped: vec![],
+        namespaces: vec![],
+    });
+    list.save(home)?;
+
+    let options_path = home.join("options.txt");
+    let mut settings = horizon_client::settings::Settings::load(&options_path);
+    settings.horizon.shader_pack = file_name;
+    settings.save(&options_path);
+
+    progress(&format!("Installed & activated {}", project.title), 1.0);
+    Ok(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
