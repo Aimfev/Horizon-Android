@@ -1010,6 +1010,12 @@ impl ApplicationHandler for Launcher {
                     .as_ref()
                     .is_some_and(|m| m.loading)
                 || self.anim.is_active()
+                || ({
+                    let theme = horizon_client::ui_theme::active_theme();
+                    (theme.is_horizon || theme.is_nightly || theme.is_custom)
+                        && !horizon_client::ui_theme::motion::reduced_motion()
+                        && !horizon_client::ui_theme::motion::launcher_animations_disabled()
+                })
                 || (self.catalog.page == Page::Skins && self.wardrobe.is_animating())
                 || self
                     .feedback
