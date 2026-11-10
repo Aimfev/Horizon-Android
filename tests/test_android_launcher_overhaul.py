@@ -126,6 +126,10 @@ class LauncherOverhaulTests(unittest.TestCase):
             "launcher/src/native_mods/dependencies.rs",
             "launcher/src/native_mods/inject.rs",
             "launcher/src/native_mods/inject_cache.rs",
+            "crates/horizon-shaders/src/block_ids.rs",
+            "crates/horizon-client-render/src/gfx/native_material.rs",
+            "crates/horizon-shader-api/src/package.rs",
+            "crates/horizon-client/src/android/updater.rs",
         ]
         for rel in modified_files:
             path = ROOT / rel
@@ -1126,6 +1130,177 @@ class LauncherOverhaulTests(unittest.TestCase):
         bcs_rs = (ROOT / "crates/horizon-world/src/block_collision_scan.rs").read_text(encoding="utf-8")
         self.assertIn("pub fn scan_cells(bounds: Aabb) -> Option<usize>", bcs_rs)
         self.assertIn("fn section_is_empty(", bcs_rs)
+
+    def test_water_reflections_mali_g85_perf_and_anr_fixes(self) -> None:
+        pack_post = _read_repo_file("crates/horizon-client-render/src/gfx/pack_post.rs")
+        # 1. Translucent gbuffers_water depth1 & scratch ping-pong copy + Source::Atlas remap guard
+        self.assertIn("if group == Group::Translucent && src == Source::Depth {", pack_post)
+        self.assertIn("Source::Color(n) => group != Group::Translucent && (in_place & 1 << n != 0),", pack_post)
+        self.assertIn("src == Source::Atlas", pack_post)
+        self.assertIn("pass.depth_linear,", pack_post)
+        self.assertIn("cache_key.ticks = frame.ticks / 2;", pack_post)
+        self.assertIn("static SCOPE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());", pack_post)
+
+        # 2. Native .hshader face normals, water reflections, and sky mirror pass
+        native_mat = _read_repo_file("crates/horizon-client-render/src/gfx/native_material.rs")
+        self.assertIn("let face = min(high & 7u, 5u);", native_mat)
+        shader_pkg = _read_repo_file("crates/horizon-shader-api/src/package.rs")
+        self.assertIn("let depth_absorb = clamp(1.0 - exp(-water_depth * 0.32), 0.0, 1.0);", shader_pkg)
+        self.assertIn("let absorb = clamp(1.0 - exp(-water_depth * 0.26), 0.0, 1.0);", shader_pkg)
+
+        # 3. Mali-G52 / Helio G85 terrain shader, draw coalescing, and renderer pacing
+        terrain_wgsl = _read_repo_file("crates/horizon-client-render/src/terrain.wgsl")
+        self.assertIn("let texel_coords = uv * globals.filtering.y;", terrain_wgsl)
+        self.assertIn("if in.emission > 0u && globals.filtering.w > 0.0 {", terrain_wgsl)
+        sides = _read_repo_file("crates/horizon-client-render/src/mesher/sides.rs")
+        self.assertIn('const COALESCE_GAP_QUADS: u32 = if cfg!(all(target_os = "android", not(test))) {', sides)
+        gfx = _read_repo_file("crates/horizon-client-render/src/gfx.rs")
+        self.assertIn('("TERRAIN_FILTERING", 0.0)', gfx)
+        self.assertIn("animated_layers_state: (u64, usize, usize, usize, SectionKey, u64),", gfx)
+        self.assertIn("let max_in_flight = if self.pack_post.as_ref().is_some_and(|p| p.1.is_some())", gfx)
+
+        # 4. Vulkan swapchain cap, JNI ClassLoader fix, O(1) BlockIds lookup, and ALooper pumping
+        native_vk = _read_repo_file("third_party/wgpu-hal/src/vulkan/swapchain/native.rs")
+        self.assertIn("count = count.max(3);", native_vk)
+        platform_rs = _read_repo_file("crates/horizon-client/src/android/platform.rs")
+        self.assertIn("let cls = env.get_object_class(activity)?;", platform_rs)
+        updater_rs = _read_repo_file("crates/horizon-client/src/android/updater.rs")
+        self.assertIn("let cls = env.get_object_class(activity)?;", updater_rs)
+        block_ids = _read_repo_file("crates/horizon-shaders/src/block_ids.rs")
+        self.assertIn("by_name: std::collections::HashMap<String, Vec<usize>>,", block_ids)
+        self.assertIn("pub fn contains_block(&self, name: &str) -> bool", block_ids)
+        shader_packs = _read_repo_file("crates/horizon-client/src/game/shader_packs.rs")
+        self.assertIn("SHADER_JOB_GENERATION", shader_packs)
+        self.assertIn("SHADER_GPU_BUILD_LOCK", shader_packs)
+        bundled = _read_repo_file("crates/horizon-client/src/game/android_bundled.rs")
+        self.assertIn("file_cache: BTreeMap<PathBuf, (u64, Option<std::time::SystemTime>, DynamicHnmod)>,", bundled)
+        pad = _read_repo_file("crates/horizon-client/src/game/pad.rs")
+        self.assertIn("static LAST_GPU_PROFILE: std::sync::atomic::AtomicU8 =", pad)
+        game = _read_repo_file("crates/horizon-client/src/game.rs")
+        self.assertIn("w.request_redraw();", game)
+
+
+
+    def test_wind_charge_goy_grid_snap_mcpe_editor_and_material3_ui_overhaul(self) -> None:
+        # 1. Wind Charge upward trajectory fix (shoot_from_rotation, throw_wind_charge, macro slot sync, passthrough deadzone)
+        projectiles_rs = _read_repo_file("crates/horizon-client/src/projectiles.rs")
+        self.assertIn("let ignore_upward_source = matches!(", projectiles_rs)
+        self.assertIn("ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge", projectiles_rs)
+        wind_rs = _read_repo_file("crates/horizon-client/src/game/wind.rs")
+        self.assertIn("let on_ground = p.ground.on_ground || velocity.y >= 0.0 || self.pitch <= 35.0;", wind_rs)
+        self.assertIn("if self.pitch > 35.0 && velocity.y < 0.0 {", wind_rs)
+        game_rs = _read_repo_file("crates/horizon-client/src/game.rs")
+        self.assertIn("self.pad.touch.projectile_crosshair = self.touch_projectile_crosshair();", game_rs)
+        touch_rs = _read_repo_file("crates/horizon-client-render/src/touch.rs")
+        self.assertIn("let is_custom_passthrough = self.custom_fingers.contains_key(&id);", touch_rs)
+
+        # 2. MCPE Control Editor bright silver fallback plates (never black) & strict MCPE renderer in editor
+        self.assertIn("let bg = rgba(186, 190, 198, (u16::from(alpha) * 205 / 255) as u8);", touch_rs)
+        self.assertIn("rgba(186, 192, 204, (u16::from(alpha) * 115 / 255) as u8),", touch_rs)
+        touch_ui = _read_repo_file("crates/horizon-client/src/touch_ui.rs")
+        self.assertIn("} else if tc.settings.control_style == ControlStyle::GoyControl {", touch_ui)
+
+        # 3. GoyControl Grid Snap toggle in floating pod & inspector + magnetic neighbor edge-sticking
+        self.assertIn("pub fn snap_button_to_neighbors_and_grid(", touch_ui)
+        self.assertIn("(Some(Icon::Crosshair), grid_lbl, 74.0, true, tc.settings.snap_to_grid)", touch_ui)
+        self.assertIn('"Snap to Grid & Neighbor Buttons: ON"', touch_ui)
+        self.assertIn("let ew = (ww - 24.0 - 20.0) / 3.0;", touch_ui)
+        self.assertIn("let bw = (ww - 24.0 - 30.0) / 4.0;", touch_ui)
+
+        # 4. New Bricolage Grotesque font, toned-down Material 3 radii, animated background & M3 downloading screen
+        theme_lib = _read_repo_file("crates/horizon-theme/src/lib.rs")
+        self.assertIn('pub const FONT: &str = "Bricolage Grotesque";', theme_lib)
+        ui_theme = _read_repo_file("crates/horizon-client/src/ui_theme.rs")
+        self.assertIn("f(horizon_theme::fonts::BRICOLAGE_REGULAR)", ui_theme)
+        self.assertIn("f(horizon_theme::fonts::BRICOLAGE_MEDIUM)", ui_theme)
+        self.assertIn("f(horizon_theme::fonts::BRICOLAGE_SEMIBOLD)", ui_theme)
+        self.assertIn("let t = motion::ambient_time();", ui_theme)
+        lp_rs = _read_repo_file("crates/horizon-client/src/android/launcher_pages.rs")
+        self.assertIn("let radius = (h * 0.22).clamp(6.0, 10.0);", lp_rs)
+        self.assertIn('"Manifest" | "Resolve" => Icon::FileText,', lp_rs)
+        self.assertIn('"Client JAR" | "Download" => Icon::Packs,', lp_rs)
+
+
+
+    def test_full_horizon_mod_loader_library_shader_store_and_fast_icon_loading(self) -> None:
+        # 1. Verify all 223+ native hook fragments and upstream mod crates exist
+        frag_dir = ROOT / "tools/native-hook-fragments"
+        self.assertTrue(frag_dir.is_dir())
+        self.assertGreaterEqual(len(list(frag_dir.glob("*.json"))), 223)
+        for crate in [
+            "horizon-mods",
+            "horizon-hooks",
+            "horizon-mod-api-gen",
+            "horizon-mod-deps",
+            "horizon-mod-registry",
+            "cargo-horizon-mod",
+            "horizon-polytone",
+            "horizon-shader-api",
+            "horizon-shaders",
+        ]:
+            self.assertTrue((ROOT / "crates" / crate / "Cargo.toml").is_file(), crate)
+
+        # 2. Verify crates/horizon-mods 100% upstream parity (Content API 0.2 + Fluids + Registry v2 + Combined .hmod + .hpack)
+        hm_content = _read_repo_file("crates/horizon-mods/src/content.rs")
+        hm_fluid = _read_repo_file("crates/horizon-mods/src/content/fluid.rs")
+        hm_index = _read_repo_file("crates/horizon-mods/src/index.rs")
+        hm_native = _read_repo_file("crates/horizon-mods/src/index/native.rs")
+        hm_page = _read_repo_file("crates/horizon-mods/src/index/page.rs")
+        self.assertIn("pub enum RenderShape", hm_content)
+        self.assertIn("pub enum RandomTicks", hm_content)
+        self.assertIn("pub struct StateValues<T>", hm_content)
+        self.assertIn("pub const LIVING_TEMPLATES:", hm_content)
+        self.assertIn("pub struct Fluid", hm_fluid)
+        self.assertIn("pub const FLUID_TEMPLATES:", hm_fluid)
+        self.assertIn("ShaderPack,", hm_index)
+        self.assertIn("DataPack,", hm_index)
+        self.assertIn("pub fn holds(path: &Path) -> bool", hm_native)
+        self.assertIn("pub fn source_files(&self)", hm_native)
+        self.assertIn("pub fn categories(kind: &Kind)", hm_page)
+
+        # 3. Verify horizon-client Mod Loader & 60-Mod Library + .hpack Modpack & Combined .hmod support
+        mc_rs = _read_repo_file("crates/horizon-client/src/mod_content.rs")
+        mod_api_rs = _read_repo_file("crates/horizon-client/src/mod_api.rs")
+        nh_rs = _read_repo_file("crates/horizon-client/src/game/native_hooks.rs")
+        jt_rs = _read_repo_file("crates/horizon-client/src/jar_transpiler.rs")
+        cf_rs = _read_repo_file("crates/horizon-client/src/content_files.rs")
+        self.assertIn("pub fn drop_dangling_remainders(", mc_rs)
+        self.assertIn("pub fn live_switch(", mc_rs)
+        self.assertIn("pub enum NativeChunkLoad", mod_api_rs)
+        self.assertIn("pub struct NativeFluidStack", mod_api_rs)
+        self.assertIn("pub enum WorldHold", mod_api_rs)
+        self.assertIn("pub struct WorldWarp", mod_api_rs)
+        self.assertTrue("pub const NATIVE_HOOKS_API: u32 = 415;" in nh_rs or "pub(crate) const NATIVE_HOOKS_API: u32 = 415;" in nh_rs)
+        self.assertIn("pub const HORIZON_CATALOG_MODS: [(&str, &str, &str, u64); 24]", jt_rs)
+        self.assertIn("pub const HORIZON_LIBRARY_MODS: [(&str, &str, &str, u64); 36]", jt_rs)
+        self.assertIn("pub fn all_horizon_catalog_mods()", jt_rs)
+        self.assertIn("pub fn install_hpack_modpack(", jt_rs)
+        self.assertIn("combined_content_files", jt_rs)
+        self.assertIn('lower.ends_with(".hpack")', cf_rs)
+
+        # 4. Verify Horizon Shader Store (Shader API 0.1 & 0.2 + 22 Built-in Horizon Shaders + ShaderPack support)
+        sh_manifest = _read_repo_file("crates/horizon-shader-api/src/manifest.rs")
+        sh_pkg = _read_repo_file("crates/horizon-shader-api/src/package.rs")
+        sh_cat = _read_repo_file("crates/horizon-client/src/android/shader_catalog.rs")
+        hz_browser = _read_repo_file("launcher/src/browser/horizon.rs")
+        self.assertIn("pub enum Api", sh_manifest)
+        self.assertIn("pub enum Blend", sh_manifest)
+        self.assertIn("pub const BUILTIN_SHADERS: [(&str, &str, &str, u64); 10]", sh_pkg)
+        self.assertIn("pub const HORIZON_SHADER_STORE_LIBRARY: [(&str, &str, &str, u64); 12]", sh_pkg)
+        self.assertIn("pub fn all_horizon_shader_packs()", sh_pkg)
+        self.assertIn("horizon_shader_api::all_horizon_shader_packs()", sh_cat)
+        self.assertIn("index::Kind::Shader | index::Kind::ShaderPack => Some(Kind::Shader)", hz_browser)
+
+        # 5. Verify Fast 6-Thread Parallel Icon Loading & Disk Caching
+        images_rs = _read_repo_file("launcher/src/browser/images.rs")
+        catalog_rs = _read_repo_file("crates/horizon-client/src/android/catalog.rs")
+        self.assertIn("pub const FAST_ICON: u32 = 48;", images_rs)
+        self.assertIn("pub fn load_cached_rgba_by_id(", images_rs)
+        self.assertIn("pub fn fetch_rgba_fast(", images_rs)
+        self.assertIn("const ICON_WORKER_THREADS: usize = 6;", catalog_rs)
+        self.assertIn("browser::images::load_cached_rgba_by_id(", catalog_rs)
+        self.assertIn("browser::images::fetch_rgba_fast(", catalog_rs)
+        self.assertIn("browser::modrinth::icons(&modrinth_missing)", catalog_rs)
 
 
 if __name__ == "__main__":

@@ -243,10 +243,13 @@ impl Game<'_> {
         }
         #[cfg(target_os = "android")]
         {
-            crate::performance::configure_gpu_profile(
-                crate::device_runtime::preferences().gpu_profile,
-                &crate::backend::game_home(),
-            );
+            static LAST_GPU_PROFILE: std::sync::atomic::AtomicU8 =
+                std::sync::atomic::AtomicU8::new(u8::MAX);
+            let prof = crate::device_runtime::preferences().gpu_profile;
+            let prof_id = prof as u8;
+            if LAST_GPU_PROFILE.swap(prof_id, std::sync::atomic::Ordering::Relaxed) != prof_id {
+                crate::performance::configure_gpu_profile(prof, &crate::backend::game_home());
+            }
             self.pad.touch.in_inventory =
                 matches!(self.screen, Screen::Inventory | Screen::Creative);
             self.pad.touch.inventory_mode = self.android_inventory_controls();

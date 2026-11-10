@@ -252,8 +252,9 @@ pub fn trigger_install(apk_path: &Path) {
         crate::platform::with_context(|env, activity| {
             let path_str = apk_path.to_string_lossy().into_owned();
             let j_path = env.new_string(&path_str)?;
+            let cls = env.get_object_class(activity)?;
             let _ = env.call_static_method(
-                "dev/horizon/android/HorizonActivity",
+                &cls,
                 "installApk",
                 "(Landroid/content/Context;Ljava/lang/String;)V",
                 &[

@@ -670,3 +670,18 @@ pub fn compose(pack: &Pack, kind: StageKind, file: &str) -> Composed {
     push("<entries>", kind.entries());
     composed
 }
+
+pub const DISPLACEMENT_SIGNATURE: &str = "fn displacement(input: DisplacementInput) -> f32";
+
+impl StageKind {
+    pub fn prelude_for(self, _api: crate::Api) -> String {
+        self.prelude()
+    }
+    pub fn entries_for(self, _api: crate::Api) -> &'static str {
+        self.entries()
+    }
+}
+
+pub fn calls_set_surface(source: &str) -> bool {
+    source.contains("set_surface")
+}

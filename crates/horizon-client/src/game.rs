@@ -14911,16 +14911,6 @@ impl Game<'_> {
                 .facts()
                 .get(self.world.block(block[0], block[1], block[2]))
                 .solid_render;
-        // The cave culling search runs on its worker while the frame is prepared.
-        if cave_culling
-            && !skip_world_for_blur
-            && self.title.is_none()
-            && let Some(renderer) = self.renderer.as_mut()
-        {
-            horizon_client::spans::time("occlusion", || {
-                renderer.start_occlusion(camera, (self.streaming.radius * 16) as f32)
-            });
-        }
         let biome = self
             .world
             .chunks
@@ -14935,10 +14925,18 @@ impl Game<'_> {
         let weights = {
             let chunks = &self.world.chunks;
             let plains = biomes.id("minecraft:plains");
+            let mut last_chunk: Option<((i32, i32), Option<&horizon_world::chunk::Chunk>)> = None;
             horizon_client::biome::gaussian_weights(camera.to_array(), |qx, qy, qz| {
-                chunks
-                    .get(&(qx >> 2, qz >> 2))
-                    .map_or(plains, |c| c.biome(qx * 4, qy * 4, qz * 4))
+                let key = (qx >> 2, qz >> 2);
+                let chunk = match last_chunk {
+                    Some((k, c)) if k == key => c,
+                    _ => {
+                        let c = chunks.get(&key);
+                        last_chunk = Some((key, c));
+                        c
+                    }
+                };
+                chunk.map_or(plains, |c| c.biome(qx * 4, qy * 4, qz * 4))
             })
         };
         let blend = |pick: fn(&horizon_client::biome::BiomeInfo) -> Option<u32>, base: [f32; 3]| {
@@ -16814,6 +16812,8 @@ impl Game<'_> {
                 );
                 if self.pad.touch.has_pending_key_events() {
                     self.android_custom_events();
+                    self.pad.touch.projectile_crosshair = self.touch_projectile_crosshair();
+                    self.pad.touch.hold_uses_item = self.touch_item_held_use();
                 }
                 if self.pad.touch_ui.virtual_mouse
                     && (raw_delta[0] != 0.0 || raw_delta[1] != 0.0)

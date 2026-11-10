@@ -376,7 +376,8 @@ impl Chooser {
     pub fn draw(&mut self, ui: &mut Ui, targets: &mut Vec<([f32; 4], Action)>, modal_anim: f32) {
         let (w, h) = (ui.w, ui.h);
         let theme = horizon_client::ui_theme::active_theme();
-        let slide = (1.0 - modal_anim.clamp(0.0, 1.0)) * 16.0;
+        let spring_t = horizon_client::ui_theme::motion::spring_expressive_default(modal_anim.clamp(0.0, 1.0));
+        let slide = (1.0 - spring_t) * 16.0;
         targets.clear();
         ui.draw_theme_background(0.0, 0.0, w, h, &theme);
         ui.text(
@@ -415,7 +416,7 @@ impl Chooser {
                 y,
                 w - 64.0,
                 74.0,
-                14.0,
+                10.0,
                 if *selected {
                     theme.surface_selected
                 } else {
@@ -427,7 +428,7 @@ impl Chooser {
                 y,
                 w - 64.0,
                 74.0,
-                14.0,
+                10.0,
                 if *selected { 1.6 } else { 1.0 },
                 if *selected {
                     theme.accent

@@ -45,7 +45,7 @@ fn horizon_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color
     let flags = u32(round(color.a * 255.0));
     let high = flags >> 4u;
     let fluid = high >= 8u && (high & 7u) < 6u;
-    let face = select(0u, high & 7u, fluid);
+    let face = min(high & 7u, 5u);
     let tier = 15u - (flags & 15u);
     let emission = select(min(f32(tier) * 7.0 / 15.0, 1.0), 0.0, tier == 0u);
     let block = max(f32(light.y), horizon_terrain_dynamic_block_light(position + origin));

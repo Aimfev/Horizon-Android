@@ -17,6 +17,7 @@ struct Rule {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BlockIds {
     rules: Vec<Rule>,
+    by_name: std::collections::HashMap<String, Vec<usize>>,
     /// Lines skipped and why.
     pub notes: Vec<String>,
 }
@@ -66,6 +67,8 @@ impl BlockIds {
                     .filter_map(|f| f.split_once('='))
                     .map(|(k, v)| (k.to_owned(), v.split(',').map(str::to_owned).collect()))
                     .collect();
+                let idx = out.rules.len();
+                out.by_name.entry(name.clone()).or_default().push(idx);
                 out.rules.push(Rule { id, name, filters });
             }
         }
@@ -76,9 +79,10 @@ impl BlockIds {
     /// the most filters that all match wins, then the first in the file (one name belongs to
     /// one id; a filtered entry is the more specific one).
     pub fn id<'a>(&self, name: &str, properties: impl Fn(&str) -> Option<&'a str>) -> Option<i32> {
-        self.rules
+        let indices = self.by_name.get(name)?;
+        indices
             .iter()
-            .filter(|r| r.name == name)
+            .map(|&idx| &self.rules[idx])
             .filter(|r| {
                 r.filters
                     .iter()
@@ -100,6 +104,11 @@ impl BlockIds {
 
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
+    }
+
+    /// Whether `block.properties` has any rule for block `name` (`minecraft:stone`).
+    pub fn contains_block(&self, name: &str) -> bool {
+        self.by_name.contains_key(name)
     }
 }
 

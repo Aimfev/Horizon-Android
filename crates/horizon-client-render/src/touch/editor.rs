@@ -737,6 +737,9 @@ impl TouchControls {
                         if mirror {
                             center[0] = 1.0 - center[0];
                         }
+                        if self.settings.snap_to_grid {
+                            center = center.map(|v| (v * 40.0).round() / 40.0);
+                        }
                         let size = (place.size * scale).min(aspect).min(1.0);
                         place.center = [
                             center[0].clamp(size / aspect / 2.0, 1.0 - size / aspect / 2.0),

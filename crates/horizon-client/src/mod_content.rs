@@ -29,9 +29,63 @@ use std::{
 };
 
 /// A content mod to put in the root: its id and content.
+#[path = "mod_content_fluids.rs"]
+pub mod mod_content_fluids;
+pub use mod_content_fluids::fluids;
+
 pub struct ContentMod {
     pub id: String,
     pub content: Content,
+}
+
+/// Leaves out a mod with an item whose `crafting_remainder` names an item the mod does not have.
+pub fn drop_dangling_remainders(mods: &mut Vec<ContentMod>) -> Vec<String> {
+    let mut dropped = Vec::new();
+    mods.retain(|m| {
+        let ids: BTreeSet<&str> = m
+            .content
+            .items
+            .iter()
+            .map(|i| i.id.as_str())
+            .chain(
+                m.content
+                    .blocks
+                    .iter()
+                    .filter(|b| b.item)
+                    .map(|b| b.id.as_str()),
+            )
+            .collect();
+        let dangling = m.content.items.iter().find(|i| {
+            i.crafting_remainder
+                .as_deref()
+                .is_some_and(|r| !r.starts_with("minecraft:") && !ids.contains(r))
+        });
+        if let Some(item) = dangling {
+            dropped.push(format!(
+                "mod {} content not loaded: {}: crafting_remainder {:?} is not one of its items",
+                m.id,
+                item.id,
+                item.crafting_remainder.as_deref().unwrap_or_default()
+            ));
+        }
+        dangling.is_none()
+    });
+    dropped
+}
+
+/// Whether `content` can be switched on/off while a world is open (assets and data only, no new registries).
+pub fn live_switch(content: &Content) -> std::result::Result<(), &'static str> {
+    if !content.blocks.is_empty()
+        || !content.items.is_empty()
+        || !content.fluids.is_empty()
+        || !content.effects.is_empty()
+        || !content.entity_types.is_empty()
+        || !content.menu_types.is_empty()
+        || !content.creative_tabs.is_empty()
+    {
+        return Err("adds blocks, items, fluids, effects, entities or menus (needs a restart)");
+    }
+    Ok(())
 }
 
 /// The mods' mob effects in registry order: by id, as items are. Their
@@ -2230,6 +2284,8 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         overlay.write(crate::content_identity::MARKER, b"1")?;
     }
     overlay.write(WARNINGS, warnings.join("\n").as_bytes())?;
+    let mod_fluids = mod_content_fluids::fluids(mods);
+    mod_content_fluids::write_table(&overlay, &mod_fluids)?;
     Ok(warnings)
 }
 

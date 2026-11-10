@@ -32,6 +32,142 @@ pub const ICON: u32 = 128;
 pub const GALLERY: u32 = 960;
 /// A list row's icon: 40 points, drawn at twice that on a Retina screen.
 pub const ROW: u32 = 80;
+/// Fast 48x48 icon size matching the mobile HUD atlas shelf so UI upload needs zero rescaling.
+pub const FAST_ICON: u32 = 48;
+
+fn safe_cache_id(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .take(64)
+        .collect()
+}
+
+/// Persistent icon cache path keyed by project `id` and `size`.
+pub fn id_cache_path(home: &Path, id: &str, size: u32) -> PathBuf {
+    dir(home).join(format!("id-{}-{size}.png", safe_cache_id(id)))
+}
+
+/// Persistent summary metadata path keyed by project `id`.
+pub fn meta_cache_path(home: &Path, id: &str) -> PathBuf {
+    dir(home).join(format!("id-{}.meta", safe_cache_id(id)))
+}
+
+/// Synchronously loads a cached RGBA icon (and optional cached summary) from disk by `id` or `url`
+/// in <1ms without any network I/O.
+pub fn load_cached_rgba_by_id(
+    home: &Path,
+    id: &str,
+    url: Option<&str>,
+    size: u32,
+) -> Option<(u32, u32, Vec<u8>, Option<String>)> {
+    let summary = fs::read_to_string(meta_cache_path(home, id))
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty());
+    let candidate = id_cache_path(home, id, size);
+    let file_path = if candidate.is_file() {
+        Some(candidate)
+    } else if let Some(u) = url {
+        cached(home, u, size).or_else(|| cached(home, u, ROW))
+    } else {
+        let row_cand = id_cache_path(home, id, ROW);
+        row_cand.is_file().then_some(row_cand)
+    }?;
+    let decoded = image::open(&file_path).ok()?.into_rgba8();
+    let (w, h) = (decoded.width(), decoded.height());
+    Some((w, h, decoded.into_raw(), summary))
+}
+
+/// Downloads `url` (or reads from disk cache if fresh), decodes once in memory, scales to `size`,
+/// caches on disk under both URL hash and `id_cache_path`, and returns `(w, h, rgba)` directly
+/// without a redundant disk re-decode pass.
+pub fn fetch_rgba_fast(
+    home: &Path,
+    id: &str,
+    url: &str,
+    size: u32,
+    summary: Option<&str>,
+) -> Result<(u32, u32, Vec<u8>), String> {
+    if let Some(s) = summary.filter(|s| !s.trim().is_empty()) {
+        let folder = dir(home);
+        let _ = fs::create_dir_all(&folder);
+        let _ = fs::write(meta_cache_path(home, id), s);
+    }
+    if let Some((w, h, rgba, _)) = load_cached_rgba_by_id(home, id, Some(url), size) {
+        if !stale(home, url, size) {
+            return Ok((w, h, rgba));
+        }
+    }
+    if let Some(why) = refuse(url) {
+        return Err(format!("{url}: {why}"));
+    }
+    let target = path(home, url, size);
+    let is_cached = target.is_file();
+    let mut request = super::download::agent(url).get(url);
+    if is_cached {
+        let tags = fs::read_to_string(validators(&target)).unwrap_or_default();
+        let mut tags = tags.lines();
+        if let Some(etag) = tags.next().filter(|t| !t.is_empty()) {
+            request = request.set("If-None-Match", etag);
+        }
+        if let Some(modified) = tags.next().filter(|t| !t.is_empty()) {
+            request = request.set("If-Modified-Since", modified);
+        }
+    }
+    let response = request.call().map_err(|e| format!("{url}: {e}"))?;
+    if is_cached && response.status() == 304 {
+        let _ = fs::File::options()
+            .write(true)
+            .open(&target)
+            .and_then(|f| f.set_modified(std::time::SystemTime::now()));
+        if let Ok(img) = image::open(&target) {
+            let rgba_img = img.into_rgba8();
+            return Ok((rgba_img.width(), rgba_img.height(), rgba_img.into_raw()));
+        }
+    }
+    let tags = format!(
+        "{}
+{}
+",
+        response.header("ETag").unwrap_or_default(),
+        response.header("Last-Modified").unwrap_or_default()
+    );
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_DOWNLOAD + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("{url}: {e}"))?;
+    if bytes.len() as u64 > MAX_DOWNLOAD {
+        return Err(format!("{url}: larger than {} MB", MAX_DOWNLOAD >> 20));
+    }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(256 << 20);
+    reader.limits(limits);
+    let decoded = reader.decode().map_err(|e| format!("{url}: {e}"))?;
+    let scaled = if decoded.width() > size || decoded.height() > size {
+        decoded.resize(size, size, image::imageops::FilterType::Triangle)
+    } else {
+        decoded
+    };
+    let folder = dir(home);
+    let _ = fs::create_dir_all(&folder);
+    let part = target.with_extension("part");
+    if scaled.save_with_format(&part, image::ImageFormat::Png).is_ok() {
+        let _ = fs::rename(&part, &target);
+        let _ = fs::write(validators(&target), tags);
+        let id_target = id_cache_path(home, id, size);
+        let _ = fs::copy(&target, &id_target);
+    }
+    let rgba_img = scaled.into_rgba8();
+    Ok((rgba_img.width(), rgba_img.height(), rgba_img.into_raw()))
+}
+
 /// How long a cached image is used without asking its server whether it changed.
 pub const FRESH: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
 

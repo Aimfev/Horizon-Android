@@ -5,7 +5,7 @@
 //! manifest), and files the index says were taken down are refused and turned off.
 use super::{
     FileRef, GAME, Kind, Project, Query, Source, SourceId, Version,
-    details::{Details, Link},
+    details::{Details, GitHub, Link},
     download, installed, java,
 };
 use horizon_mods::index::{self, Index, Trust};
@@ -63,6 +63,15 @@ pub fn known_index() -> Option<Arc<Index>> {
 
 /// Whether the registry's project `id` is a native mod, by the index already read (never the
 /// network); false when none was read.
+/// The GitHub stars of the registry's project `id`, by the index already read (never the
+/// network): None when it has none, when its source isn't a GitHub repository, or when no index
+/// was read.
+pub fn github_stars(id: &str) -> Option<u64> {
+    let index = known_index()?;
+    let p = index.project(id)?;
+    (p.stars > 0 && github_repo(&p.source).is_some()).then_some(p.stars)
+}
+
 pub fn is_native_mod(id: &str) -> bool {
     known_index()
         .and_then(|index| Some(index.project(id)?.kind == index::Kind::NativeMod))
@@ -219,11 +228,58 @@ fn kind_of(kind: &index::Kind) -> Option<Kind> {
         index::Kind::Mod => Some(Kind::Mod),
         index::Kind::ResourcePack => Some(Kind::ResourcePack),
         index::Kind::Modpack => Some(Kind::Modpack),
-        index::Kind::Shader => Some(Kind::Shader),
+        // Both go in shaderpacks/: the game reads `.hshader` packs and shaders/-folder zips.
+        index::Kind::Shader | index::Kind::ShaderPack => Some(Kind::Shader),
         // Mixin mods: installed beside the others, compiled into the game by `native_mods`.
         index::Kind::NativeMod => Some(Kind::Mod),
+        index::Kind::DataPack => Some(Kind::DataPack),
         index::Kind::Other(_) => None,
     }
+}
+
+fn categories_of(kind: Kind) -> &'static [&'static str] {
+    index::page::categories(&match kind {
+        Kind::Mod => index::Kind::Mod,
+        Kind::ResourcePack => index::Kind::ResourcePack,
+        Kind::Modpack => index::Kind::Modpack,
+        Kind::Shader => index::Kind::Shader,
+        Kind::DataPack => index::Kind::DataPack,
+    })
+}
+
+const MAX_TAGS_SHOWN: usize = 30;
+
+fn tags_of(index: &Index, kind: Kind) -> Vec<String> {
+    let plain = |t: &str| {
+        t.len() <= index::page::MAX_TAG
+            && t.bytes().next().is_some_and(|b| b != b'-')
+            && t.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    let mut uses: HashMap<&str, usize> = HashMap::new();
+    for p in index
+        .projects
+        .iter()
+        .filter(|p| kind_of(&p.kind) == Some(kind))
+    {
+        let mut own: Vec<&str> = p
+            .tags
+            .iter()
+            .map(String::as_str)
+            .filter(|t| plain(t))
+            .collect();
+        own.sort_unstable();
+        own.dedup();
+        for t in own {
+            *uses.entry(t).or_default() += 1;
+        }
+    }
+    let mut tags: Vec<(&str, usize)> = uses.into_iter().collect();
+    tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    tags.into_iter()
+        .take(MAX_TAGS_SHOWN)
+        .map(|(t, _)| t.to_owned())
+        .collect()
 }
 
 /// Where the registry's mod policy is: who owns and answers for a project, takedowns.
@@ -233,6 +289,10 @@ pub const POLICY: &str = "https://playhorizon.dev/mods/policy";
 /// the horizon-rust organisation).
 pub fn official(p: &index::Project) -> bool {
     p.authors == ["Horizon"] && p.source.starts_with("https://github.com/horizon-rust/")
+}
+
+pub fn is_official(id: &str) -> bool {
+    known_index().and_then(|i| Some(official(i.project(id)?))).unwrap_or(false)
 }
 
 /// What the player reads about a registry project before installing it: who made it, whether its
@@ -353,28 +413,95 @@ fn github_login(login: &str) -> bool {
         && !login.contains("--")
 }
 
-/// The words of a query found in a project's id, name, summary or authors.
+pub fn github_repo(source: &str) -> Option<String> {
+    let path = source.strip_prefix("https://github.com/")?;
+    let mut parts = path.split(['/', '?', '#']);
+    let owner = parts.next().filter(|o| github_login(o))?;
+    let repo = parts.next()?;
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+    let allowed = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.');
+    if repo.is_empty() || repo.len() > 100 || repo.starts_with('.') || !repo.bytes().all(allowed) {
+        return None;
+    }
+    Some(format!("https://github.com/{owner}/{repo}"))
+}
+
+/// The words of a query found in a project's id, name, summary, authors or tags.
 fn matches(p: &index::Project, text: &str) -> bool {
-    let hay = format!("{} {} {} {}", p.id, p.name, p.summary, p.authors.join(" ")).to_lowercase();
+    let hay = format!(
+        "{} {} {} {} {}",
+        p.id,
+        p.name,
+        p.summary,
+        p.authors.join(" "),
+        p.tags.join(" ")
+    )
+    .to_lowercase();
     text.split_whitespace()
         .all(|word| hay.contains(&word.to_lowercase()))
 }
 
-/// The projects of the query's kind whose words match, for this game unless `everything`: the
-/// most downloaded first.
+pub const SORTS: [super::details::Sort; 3] = [
+    super::details::Sort::Downloads,
+    super::details::Sort::Newest,
+    super::details::Sort::Updated,
+];
+
 fn search(index: &Index, query: &Query) -> Vec<Project> {
-    let mut found: Vec<Project> = index
+    use super::details::Sort;
+    let mut found: Vec<&index::Project> = index
         .projects
         .iter()
         .filter(|p| kind_of(&p.kind) == Some(query.kind) && matches(p, &query.text))
+        .filter(|p| {
+            query
+                .filters
+                .categories
+                .iter()
+                .all(|c| p.categories.contains(c))
+                && query.filters.tags.iter().all(|t| p.tags.contains(t))
+        })
         .filter(|p| query.everything || p.versions.iter().any(|v| v.game == GAME))
-        .filter_map(project_of)
         .collect();
-    found.sort_by_key(|p| std::cmp::Reverse(p.downloads));
+    let day = |p: &index::Project, newest: bool| {
+        let days = p.versions.iter().map(|v| v.published.as_str());
+        if newest { days.min() } else { days.max() }
+            .unwrap_or("")
+            .to_string()
+    };
+    match query.filters.sort {
+        Some(Sort::Newest) => found.sort_by_cached_key(|p| {
+            (
+                std::cmp::Reverse(day(p, true)),
+                std::cmp::Reverse(p.downloads),
+            )
+        }),
+        Some(Sort::Updated) => found.sort_by_cached_key(|p| {
+            (
+                std::cmp::Reverse(day(p, false)),
+                std::cmp::Reverse(p.downloads),
+            )
+        }),
+        _ => found.sort_by_key(|p| std::cmp::Reverse(p.downloads)),
+    }
     found
         .into_iter()
+        .filter_map(project_of)
         .skip(query.offset)
         .take(query.limit)
+        .collect()
+}
+
+fn gallery_of(p: &index::Project) -> Vec<super::details::Image> {
+    p.screenshots
+        .iter()
+        .filter(|url| super::images::refuse(url).is_none())
+        .map(|url| super::details::Image {
+            url: url.clone(),
+            title: String::new(),
+            description: String::new(),
+            featured: false,
+        })
         .collect()
 }
 
@@ -480,7 +607,27 @@ impl Source for Registry {
                 .map(|v| v.published.clone())
                 .unwrap_or_default(),
             updated: newest.map(|v| v.published.clone()).unwrap_or_default(),
+            categories: p.categories.clone(),
+            gallery: gallery_of(p),
+            github: github_repo(&p.source).map(|url| GitHub {
+                url,
+                stars: p.stars,
+            }),
             ..Details::default()
+        })
+    }
+
+    fn tags(&self, kind: Kind) -> Result<super::details::Tags, String> {
+        Ok(super::details::Tags {
+            tags: known_index().map(|i| tags_of(&i, kind)).unwrap_or_default(),
+            categories: categories_of(kind)
+                .iter()
+                .map(|name| super::details::Tag {
+                    name: (*name).to_owned(),
+                    header: "categories".into(),
+                })
+                .collect(),
+            ..Default::default()
         })
     }
 

@@ -148,8 +148,18 @@ impl Sides {
 
     /// Calls `draw` for each run of `part`'s quads in the buckets `seen` keeps.
     fn runs(&self, seen: impl Fn(usize) -> bool, part: Part, mut draw: impl FnMut(u32, u32)) {
+        // On Android TBDR GPUs (e.g. Mali-G52), per-draw command & tiler descriptor
+        // overhead far exceeds hardware backface culling of a small gap between two
+        // visible face buckets in the same `Part` (`Opaque` or `Cutout`). Coalesce
+        // adjacent visible runs within the same `Part` when the intervening back-facing
+        // gap is small, while never bridging across `Opaque` <-> `Cutout` boundaries.
+        const COALESCE_GAP_QUADS: u32 = if cfg!(all(target_os = "android", not(test))) {
+            256
+        } else {
+            0
+        };
         let mut start = 0;
-        let mut run: Option<u32> = None;
+        let mut run: Option<(u32, u32)> = None;
         for (n, &end) in self.ends.iter().enumerate() {
             if end == start {
                 continue;
@@ -161,18 +171,28 @@ impl Sides {
                 Part::Opaque => !cutout,
                 Part::Cutout => cutout,
             };
-            match (wanted && seen(bucket), run) {
-                (true, None) => run = Some(start),
-                (false, Some(first)) => {
-                    draw(first, start - first);
-                    run = None;
+            if !wanted {
+                if let Some((first, last_end)) = run.take() {
+                    draw(first, last_end - first);
                 }
-                _ => {}
+            } else if seen(bucket) {
+                match &mut run {
+                    None => run = Some((start, end)),
+                    Some((first, last_end)) => {
+                        if start - *last_end <= COALESCE_GAP_QUADS {
+                            *last_end = end;
+                        } else {
+                            draw(*first, *last_end - *first);
+                            *first = start;
+                            *last_end = end;
+                        }
+                    }
+                }
             }
             start = end;
         }
-        if let Some(first) = run {
-            draw(first, start - first);
+        if let Some((first, last_end)) = run {
+            draw(first, last_end - first);
         }
     }
 }

@@ -8,6 +8,36 @@ pub const SCHEMA: u32 = 1;
 /// The shader API line this build serves: the stages, their signatures and
 /// the inputs a pack's WGSL may read.
 pub const API: &str = "0.1";
+
+/// The shader API version a pack is written for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub enum Api {
+    #[default]
+    #[serde(rename = "0.1")]
+    V0_1,
+    #[serde(rename = "0.2")]
+    V0_2,
+}
+
+impl Api {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V0_1 => "0.1",
+            Self::V0_2 => "0.2",
+        }
+    }
+}
+
+/// How a stage or post pass blends its output over the picture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Blend {
+    #[default]
+    None,
+    Alpha,
+    Add,
+    Multiply,
+}
 /// Full-screen passes a pack may chain.
 pub const MAX_POST_PASSES: usize = 8;
 /// Options a pack may declare.
@@ -299,6 +329,9 @@ pub struct Stage {
     /// chain's last picture.
     #[serde(default)]
     pub output: Option<String>,
+    /// How the stage or post pass blends its output over the picture.
+    #[serde(default)]
+    pub blend: Option<Blend>,
 }
 
 /// The scales a post pass may draw at.

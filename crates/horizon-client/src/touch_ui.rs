@@ -4336,9 +4336,10 @@ fn draw_m3_stepper_cell(
 ) {
     use crate::ui_theme::Face;
     let [rx, ry, cw, ch] = rect;
-    let rad = (ch * 0.22).clamp(10.0, 14.0);
-    // Clean Material 3 Expressive tonal container (no harsh border stroke)
+    let rad = (ch * 0.16).clamp(6.0, 9.0);
+    // Clean Material 3 Expressive tonal container
     ui.rounded(rx, ry, cw, ch, rad, bg_hi);
+    ui.border(rx, ry, cw, ch, rad, _border_c);
 
     let (title_part, val_part) = if let Some((t_str, v_str)) = label.split_once('|') {
         (t_str.trim(), v_str.trim())
@@ -4363,7 +4364,7 @@ fn draw_m3_stepper_cell(
         let pill_w = (ui.measure(Face::SemiBold, 9.4, val_part) + 14.0).clamp(38.0, cw - 20.0);
         let pill_x = rx + cw - pill_w - 10.0;
         let pill_y = ry + 23.0;
-        ui.rounded(pill_x, pill_y, pill_w, 18.0, 9.0, accent_soft);
+        ui.rounded(pill_x, pill_y, pill_w, 18.0, 5.0, accent_soft);
         ui.centered_fit(
             Face::SemiBold,
             9.2,
@@ -4425,7 +4426,7 @@ fn draw_m3_selector_cell(
 ) {
     use crate::ui_theme::Face;
     let [rx, ry, cw, ch] = rect;
-    let rad = (ch * 0.22).clamp(10.0, 14.0);
+    let rad = (ch * 0.16).clamp(6.0, 9.0);
     ui.rounded(rx, ry, cw, ch, rad, bg_hi);
     ui.text_clipped(
         Face::Medium,
@@ -4442,7 +4443,7 @@ fn draw_m3_selector_cell(
         pill_r[1],
         pill_r[2],
         pill_r[3],
-        12.0,
+        6.0,
         accent_soft,
     );
     ui.centered_fit(
@@ -4497,6 +4498,121 @@ fn draw_m3_swatch_chip(
     }
 }
 
+/// Snaps a dragged button's normalized `center` (`[cx, cy]`) to neighboring buttons' edges/centers
+/// (so buttons stick flush right beside each other with zero gap or align cleanly on shared edges)
+/// and falls back to the `0.025` grid per axis when `snap_to_grid` is enabled.
+pub fn snap_button_to_neighbors_and_grid(
+    tc: &crate::touch::TouchControls,
+    ed: &crate::touch::Editor,
+    raw_center: [f32; 2],
+    size: [f32; 2],
+) -> ([f32; 2], Option<f32>, Option<f32>) {
+    use crate::touch::{Control, ControlStyle};
+    if !tc.settings.snap_to_grid {
+        return (raw_center, None, None);
+    }
+    let aspect = tc.aspect();
+    let [mut cx, mut cy] = raw_center;
+    let [rw, rh] = [size[0].max(0.02), size[1].max(0.02)];
+    let (hw, hh) = (rw * 0.5, rh * 0.5);
+
+    let mut neighbors: Vec<[f32; 4]> = Vec::with_capacity(24);
+    for c in Control::ALL {
+        if tc.settings.control_style == ControlStyle::GoyControl && c != Control::Move {
+            continue;
+        }
+        if ed.selected_custom.is_none() && ed.selected == Some(c) {
+            continue;
+        }
+        if !tc.visible(c) && !ed.show_hidden {
+            continue;
+        }
+        neighbors.push(tc.placement(c).rect(aspect));
+    }
+    for (i, _) in tc.settings.custom_buttons.iter().enumerate() {
+        if ed.selected_custom == Some(i) {
+            continue;
+        }
+        neighbors.push(tc.custom_placement(i).rect(aspect));
+    }
+
+    const SNAP_THRESH: f32 = 0.018;
+    let mut best_dx = SNAP_THRESH;
+    let mut snap_x: Option<(f32, f32)> = None;
+    let mut best_dy = SNAP_THRESH;
+    let mut snap_y: Option<(f32, f32)> = None;
+
+    // Screen center alignment
+    if (cx - 0.5).abs() < best_dx {
+        best_dx = (cx - 0.5).abs();
+        snap_x = Some((0.5, 0.5));
+    }
+    if (cy - 0.5).abs() < best_dy {
+        best_dy = (cy - 0.5).abs();
+        snap_y = Some((0.5, 0.5));
+    }
+
+    for [nx, ny, nw, nh] in neighbors {
+        let ncx = nx + nw * 0.5;
+        let ncy = ny + nh * 0.5;
+        let near_y = (cy - ncy).abs() <= (hh + nh * 0.5 + 0.12);
+        let near_x = (cx - ncx).abs() <= (hw + nw * 0.5 + 0.12);
+
+        // Stick flush right beside neighbor (left-to-right or right-to-left) + edge/center alignment
+        let x_candidates: [(f32, f32, bool); 5] = [
+            (nx + nw + hw, nx + nw, near_y), // dragged left edge sticks to neighbor right edge
+            (nx - hw, nx, near_y),           // dragged right edge sticks to neighbor left edge
+            (nx + hw, nx, true),             // left edges aligned
+            (nx + nw - hw, nx + nw, true),   // right edges aligned
+            (ncx, ncx, true),                // horizontal centers aligned
+        ];
+        for (cand_cx, guide_x, allowed) in x_candidates {
+            if allowed {
+                let d = (cx - cand_cx).abs();
+                if d < best_dx {
+                    best_dx = d;
+                    snap_x = Some((cand_cx, guide_x));
+                }
+            }
+        }
+
+        // Stick flush above/below neighbor (top-to-bottom or bottom-to-top) + edge/center alignment
+        let y_candidates: [(f32, f32, bool); 5] = [
+            (ny + nh + hh, ny + nh, near_x), // dragged top edge sticks to neighbor bottom edge
+            (ny - hh, ny, near_x),           // dragged bottom edge sticks to neighbor top edge
+            (ny + hh, ny, true),             // top edges aligned
+            (ny + nh - hh, ny + nh, true),   // bottom edges aligned
+            (ncy, ncy, true),                // vertical centers aligned
+        ];
+        for (cand_cy, guide_y, allowed) in y_candidates {
+            if allowed {
+                let d = (cy - cand_cy).abs();
+                if d < best_dy {
+                    best_dy = d;
+                    snap_y = Some((cand_cy, guide_y));
+                }
+            }
+        }
+    }
+
+    let guide_x = if let Some((scx, gx)) = snap_x {
+        cx = scx;
+        Some(gx)
+    } else {
+        cx = (cx * 40.0).round() / 40.0;
+        None
+    };
+    let guide_y = if let Some((scy, gy)) = snap_y {
+        cy = scy;
+        Some(gy)
+    } else {
+        cy = (cy * 40.0).round() / 40.0;
+        None
+    };
+
+    ([cx, cy], guide_x, guide_y)
+}
+
 pub fn draw_hud_editor(
     tc: &crate::touch::TouchControls,
     b: &mut HudBatch,
@@ -4532,10 +4648,15 @@ pub fn draw_hud_editor(
     } else {
         0.05
     };
+    let grid_line_col = if tc.settings.snap_to_grid {
+        color::with_alpha(accent, 0.16)
+    } else {
+        rgba(255, 255, 255, 11)
+    };
     let mut g = step;
     while g < 1.0 {
-        ui.fill(w * g, 0.0, 1.0, h, rgba(255, 255, 255, 11));
-        ui.fill(0.0, h * g, w, 1.0, rgba(255, 255, 255, 11));
+        ui.fill(w * g, 0.0, 1.0, h, grid_line_col);
+        ui.fill(0.0, h * g, w, 1.0, grid_line_col);
         g += step;
     }
     ui.fill(w * 0.5, 0.0, 1.0, h, rgba(154, 123, 255, 38));
@@ -4602,7 +4723,7 @@ pub fn draw_hud_editor(
             0.35
         };
 
-        if (tc.settings.control_style == ControlStyle::GoyControl || p.use_goy_style)
+        if tc.settings.control_style == ControlStyle::GoyControl
             && c == Control::Move
         {
             // Draw GoyControl Customizable Joystick (Base Area + Inner Stick) identically to in-game
@@ -4630,7 +4751,7 @@ pub fn draw_hud_editor(
             if js.stick_stroke > 0.1 {
                 ui.stroke_rounded(kx, ky, kside, kside, kr, js.stick_stroke, stick_stroke);
             }
-        } else if tc.settings.control_style == ControlStyle::GoyControl || p.use_goy_style {
+        } else if tc.settings.control_style == ControlStyle::GoyControl {
             let fill_c = color::with_alpha(p.button_color, alpha);
             let stroke_c = color::with_alpha(p.stroke_color, alpha);
             let shadow_c = color::with_alpha(p.shadow_color, alpha);
@@ -4694,7 +4815,7 @@ pub fn draw_hud_editor(
         let alpha = p.opacity.clamp(0.0, 1.0);
         let label = custom.label();
 
-        if tc.settings.control_style == ControlStyle::GoyControl || p.use_goy_style {
+        if tc.settings.control_style == ControlStyle::GoyControl {
             let fill_c = color::with_alpha(p.button_color, alpha);
             let stroke_c = color::with_alpha(p.stroke_color, alpha);
             let shadow_c = color::with_alpha(p.shadow_color, alpha);
@@ -4739,8 +4860,19 @@ pub fn draw_hud_editor(
         }
     }
 
-    // 5. Draw 8 Interactive Corner & Edge Resize Handles around Selected Component
+    // 5. Draw Magnetic Snap Guides & 8 Interactive Corner/Edge Resize Handles around Selected Component
     if let Some(([rx, ry, rw, rh], sel_name)) = selected_rect_and_title {
+        if tc.settings.snap_to_grid {
+            let norm_c = [(rx + rw * 0.5) / w.max(1.0), (ry + rh * 0.5) / h.max(1.0)];
+            let norm_s = [rw / w.max(1.0), rh / h.max(1.0)];
+            let (_, gx, gy) = snap_button_to_neighbors_and_grid(tc, ed, norm_c, norm_s);
+            if let Some(sx) = gx {
+                ui.fill(sx * w - 0.75, 0.0, 1.5, h, color::with_alpha(accent, 0.75));
+            }
+            if let Some(sy) = gy {
+                ui.fill(0.0, sy * h - 0.75, w, 1.5, color::with_alpha(accent, 0.75));
+            }
+        }
         ui.stroke_rounded(rx - 2.0, ry - 2.0, rw + 4.0, rh + 4.0, 6.0, 1.5, accent);
         let handles = [
             (rx - 4.5, ry - 4.5, 9.0, 9.0),
@@ -4775,8 +4907,8 @@ pub fn draw_hud_editor(
         );
     }
 
-    // 6. Larger Material You 3 Moveable Floating Menu Pod (`356x48dp`)
-    let pod_w = if ed.pod_expanded { 422.0 } else { 52.0 };
+    // 6. Material 3 Moveable Floating Menu Pod with Direct Grid Snap Toggle (`492x48dp`)
+    let pod_w = if ed.pod_expanded { 492.0 } else { 52.0 };
     let pod_h = 48.0;
     let pod_x = (tc.settings.floating_menu_pos[0] * w).clamp(8.0, (w - pod_w - 8.0).max(8.0));
     let pod_y = (tc.settings.floating_menu_pos[1] * h).clamp(6.0, (h - pod_h - 6.0).max(6.0));
@@ -4786,11 +4918,11 @@ pub fn draw_hud_editor(
         pod_y + 4.0,
         pod_w,
         pod_h,
-        24.0,
+        10.0,
         rgba(0, 0, 0, 145),
     );
-    ui.rounded(pod_x, pod_y, pod_w, pod_h, 24.0, bg_card);
-    ui.stroke_rounded(pod_x, pod_y, pod_w, pod_h, 24.0, 1.8, accent);
+    ui.rounded(pod_x, pod_y, pod_w, pod_h, 10.0, bg_card);
+    ui.stroke_rounded(pod_x, pod_y, pod_w, pod_h, 10.0, 1.5, accent);
 
     // Main draggable M3 hub button on the left of the pod (40x40dp)
     ui.rounded(
@@ -4798,7 +4930,7 @@ pub fn draw_hud_editor(
         pod_y + 4.0,
         40.0,
         40.0,
-        20.0,
+        8.0,
         if ed.menu_open { accent } else { accent_soft },
     );
     ui.icon(
@@ -4816,13 +4948,19 @@ pub fn draw_hud_editor(
     if ed.pod_expanded {
         let can_copy = ed.selected_custom.is_some()
             || (ed.selected.is_some() && ed.selected != Some(Control::Move));
-        let items: [(Option<Icon>, &str, f32, bool, bool); 6] = [
-            (Some(Icon::Undo), "", 42.0, !ed.undo_stack.is_empty(), false),
-            (Some(Icon::Redo), "", 42.0, !ed.redo_stack.is_empty(), false),
-            (Some(Icon::Gear), "Props", 72.0, true, ed.props_open),
-            (Some(Icon::Plus), "Add", 62.0, true, false),
-            (Some(Icon::Plus), "Copy", 64.0, can_copy, false),
-            (Some(Icon::Check), "Save", 68.0, true, true),
+        let grid_lbl = if tc.settings.snap_to_grid {
+            "Grid: ON"
+        } else {
+            "Grid"
+        };
+        let items: [(Option<Icon>, &str, f32, bool, bool); 7] = [
+            (Some(Icon::Undo), "", 38.0, !ed.undo_stack.is_empty(), false),
+            (Some(Icon::Redo), "", 38.0, !ed.redo_stack.is_empty(), false),
+            (Some(Icon::Gear), "Props", 68.0, true, ed.props_open),
+            (Some(Icon::Crosshair), grid_lbl, 74.0, true, tc.settings.snap_to_grid),
+            (Some(Icon::Plus), "Add", 58.0, true, false),
+            (Some(Icon::Plus), "Copy", 60.0, can_copy, false),
+            (Some(Icon::Check), "Save", 64.0, true, true),
         ];
         let mut ix = pod_x + 50.0;
         for (ic, lbl, iw, enabled, hi) in items {
@@ -4834,13 +4972,13 @@ pub fn draw_hud_editor(
             } else {
                 bg_hi
             };
-            ui.rounded(r[0], r[1], r[2], r[3], 19.0, bg);
+            ui.rounded(r[0], r[1], r[2], r[3], 7.0, bg);
             ui.border(
                 r[0],
                 r[1],
                 r[2],
                 r[3],
-                19.0,
+                7.0,
                 if hi || lbl == "Save" {
                     accent
                 } else {
@@ -4860,11 +4998,11 @@ pub fn draw_hud_editor(
                 if lbl.is_empty() {
                     ui.icon(icon, r[0] + (iw - 18.0) * 0.5, r[1] + 10.0, 18.0, fg);
                 } else {
-                    ui.icon(icon, r[0] + 10.0, r[1] + 11.0, 16.0, fg);
-                    ui.text(Face::SemiBold, 11.5, r[0] + 29.0, r[1] + 10.0, fg, lbl);
+                    ui.icon(icon, r[0] + 8.0, r[1] + 11.0, 15.0, fg);
+                    ui.text(Face::SemiBold, 10.8, r[0] + 25.0, r[1] + 10.5, fg, lbl);
                 }
             }
-            ix += iw + 4.0;
+            ix += iw + 5.0;
         }
     }
 
@@ -4969,8 +5107,9 @@ pub fn draw_hud_editor(
         let st_text = theme.text_primary;
         let st_muted = theme.text_muted;
 
-        ui.rounded(dx + 2.0, dy + 6.0, dw, dh, 24.0, rgba(0, 0, 0, 165));
-        ui.rounded(dx, dy, dw, dh, 24.0, st_outer);
+        ui.rounded(dx + 2.0, dy + 6.0, dw, dh, 12.0, rgba(0, 0, 0, 165));
+        ui.rounded(dx, dy, dw, dh, 12.0, st_outer);
+        ui.border(dx, dy, dw, dh, 12.0, st_border);
 
         let is_joystick = ed.selected == Some(Control::Move) && ed.selected_custom.is_none();
         let is_mcpe_mode = tc.settings.control_style == ControlStyle::Mcpe;
@@ -5079,8 +5218,8 @@ pub fn draw_hud_editor(
         // Telemetry Pill + Delete [🗑] Button (for Joystick & Custom Buttons) + Center-Snap [⛶] Button + Cyan [✓ Done] Button
         let pill_w = 122.0;
         let pill_r = [dx + dw - 318.0, dy + 9.0, pill_w, 26.0];
-        ui.rounded(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 13.0, st_inner);
-        ui.border(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 13.0, st_border);
+        ui.rounded(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 7.0, st_inner);
+        ui.border(pill_r[0], pill_r[1], pill_r[2], pill_r[3], 7.0, st_border);
         ui.centered_fit(Face::Mono, 8.5, pill_r, st_text, &telem);
 
         if !is_joystick && (ed.selected_custom.is_some() || ed.selected.is_some()) {
@@ -5090,10 +5229,10 @@ pub fn draw_hud_editor(
                 copy_r[1],
                 copy_r[2],
                 copy_r[3],
-                8.0,
+                6.0,
                 color::with_alpha(st_cyan, 0.20),
             );
-            ui.border(copy_r[0], copy_r[1], copy_r[2], copy_r[3], 8.0, st_cyan);
+            ui.border(copy_r[0], copy_r[1], copy_r[2], copy_r[3], 6.0, st_cyan);
             ui.centered_fit(Face::SemiBold, 9.0, copy_r, st_cyan, "Copy");
         }
 
@@ -5104,16 +5243,16 @@ pub fn draw_hud_editor(
                 del_r[1],
                 del_r[2],
                 del_r[3],
-                8.0,
+                6.0,
                 color::with_alpha(danger_c, 0.24),
             );
-            ui.border(del_r[0], del_r[1], del_r[2], del_r[3], 8.0, danger_c);
+            ui.border(del_r[0], del_r[1], del_r[2], del_r[3], 6.0, danger_c);
             ui.icon(Icon::Trash, del_r[0] + 5.0, del_r[1] + 5.0, 16.0, danger_c);
         }
 
         let snap_r = [dx + dw - 106.0, dy + 9.0, 26.0, 26.0];
-        ui.rounded(snap_r[0], snap_r[1], snap_r[2], snap_r[3], 8.0, st_card);
-        ui.border(snap_r[0], snap_r[1], snap_r[2], snap_r[3], 8.0, st_border);
+        ui.rounded(snap_r[0], snap_r[1], snap_r[2], snap_r[3], 6.0, st_card);
+        ui.border(snap_r[0], snap_r[1], snap_r[2], snap_r[3], 6.0, st_border);
         ui.icon(
             Icon::Crosshair,
             snap_r[0] + 5.0,
@@ -5124,7 +5263,7 @@ pub fn draw_hud_editor(
 
         let close_r = [dx + dw - 74.0, dy + 9.0, 62.0, 26.0];
         ui.rounded(
-            close_r[0], close_r[1], close_r[2], close_r[3], 13.0, st_cyan,
+            close_r[0], close_r[1], close_r[2], close_r[3], 7.0, st_cyan,
         );
         ui.icon(Icon::Check, close_r[0] + 6.0, close_r[1] + (close_r[3] - 11.0) * 0.5, 11.0, st_cyan_fg);
         ui.centered_fit(Face::SemiBold, 10.2, [close_r[0] + 15.0, close_r[1], close_r[2] - 17.0, close_r[3]], st_cyan_fg, "Done");
@@ -5133,11 +5272,11 @@ pub fn draw_hud_editor(
         let wx = dx + 14.0;
         let ww = dw - 28.0;
 
-        // Top 3-Segment Pill Bar synchronized with the Left Navigation Rail
+        // Top 3-Segment Tab Bar with crisp Material 3 architectural corners
         let tab_y = dy + 46.0;
-        let tab_w = (ww - 8.0) / 3.0;
-        ui.rounded(wx, tab_y - 2.0, ww, 28.0, 14.0, st_inner);
-        ui.border(wx, tab_y - 2.0, ww, 28.0, 14.0, st_border);
+        let tab_w = (ww - 16.0) / 3.0;
+        ui.rounded(wx, tab_y - 2.0, ww, 28.0, 8.0, st_inner);
+        ui.border(wx, tab_y - 2.0, ww, 28.0, 8.0, st_border);
         let tab_labels = if is_joystick {
             ["1. Stick & Style", "2. Analog Base", "3. Zone & Visibility"]
         } else {
@@ -5148,10 +5287,10 @@ pub fn draw_hud_editor(
             ]
         };
         for (ti, t_lbl) in tab_labels.into_iter().enumerate() {
-            let tx = wx + 2.0 + ti as f32 * (tab_w + 2.0);
+            let tx = wx + 4.0 + ti as f32 * (tab_w + 4.0);
             let on = ed.props_tab == ti;
             if on {
-                ui.rounded(tx, tab_y, tab_w, 24.0, 12.0, st_cyan);
+                ui.rounded(tx, tab_y, tab_w, 24.0, 6.0, st_cyan);
             }
             ui.centered_fit(
                 Face::SemiBold,
@@ -5165,8 +5304,8 @@ pub fn draw_hud_editor(
         // Main Inner Studio Container Card (`[wx, dy + 80.0, ww, dh - 92.0]`)
         let box_y = dy + 80.0;
         let box_h = dh - 92.0;
-        ui.rounded(wx, box_y, ww, box_h, 16.0, st_inner);
-        ui.border(wx, box_y, ww, box_h, 16.0, st_border);
+        ui.rounded(wx, box_y, ww, box_h, 10.0, st_inner);
+        ui.border(wx, box_y, ww, box_h, 10.0, st_border);
 
         let body_y = box_y + 10.0;
         if is_joystick {
@@ -6082,9 +6221,9 @@ pub fn draw_hud_editor(
                             );
                         }
                     } else {
-                        let ew = (ww - 24.0 - 8.0) / 3.0;
+                        let ew = (ww - 24.0 - 20.0) / 3.0;
                         for slot in 0..3 {
-                            let ex = wx + 12.0 + slot as f32 * (ew + 4.0);
+                            let ex = wx + 12.0 + slot as f32 * (ew + 10.0);
                             let tok_name = if let Some(idx) = ed.selected_custom {
                                 tc.settings
                                     .custom_buttons
@@ -6110,7 +6249,7 @@ pub fn draw_hud_editor(
                                 body_y,
                                 ew,
                                 42.0,
-                                12.0,
+                                8.0,
                                 if has_binding { st_cyan_soft } else { st_card },
                             );
                             ui.border(
@@ -6118,28 +6257,28 @@ pub fn draw_hud_editor(
                                 body_y,
                                 ew,
                                 42.0,
-                                12.0,
+                                8.0,
                                 if has_binding { st_cyan } else { st_border },
                             );
                             ui.centered_fit(
                                 Face::SemiBold,
                                 8.8,
-                                [ex + 4.0, body_y + 4.0, ew - 8.0, 16.0],
+                                [ex + 6.0, body_y + 4.0, ew - 12.0, 16.0],
                                 if has_binding { st_cyan } else { st_muted },
                                 &format!("EVENT SLOT #{}", slot + 1),
                             );
                             ui.centered_fit(
                                 Face::SemiBold,
                                 10.2,
-                                [ex + 4.0, body_y + 20.0, ew - 8.0, 18.0],
+                                [ex + 6.0, body_y + 20.0, ew - 12.0, 18.0],
                                 st_text,
                                 &tok_name,
                             );
                         }
                     }
 
-                    let by = body_y + 52.0;
-                    let bw = (ww - 24.0 - 12.0) / 4.0;
+                    let by = body_y + 54.0;
+                    let bw = (ww - 24.0 - 30.0) / 4.0;
                     let is_vis = if let Some(c) = ed.selected {
                         tc.visible(c)
                     } else {
@@ -6188,13 +6327,13 @@ pub fn draw_hud_editor(
                     .into_iter()
                     .enumerate()
                     {
-                        let rx = wx + 12.0 + i as f32 * (bw + 4.0);
+                        let rx = wx + 12.0 + i as f32 * (bw + 10.0);
                         ui.rounded(
                             rx,
                             by,
                             bw,
                             30.0,
-                            10.0,
+                            7.0,
                             if danger {
                                 color::with_alpha(danger_c, 0.24)
                             } else if on {
@@ -6208,7 +6347,7 @@ pub fn draw_hud_editor(
                             by,
                             bw,
                             30.0,
-                            10.0,
+                            7.0,
                             if danger {
                                 danger_c
                             } else if on {
@@ -6220,7 +6359,7 @@ pub fn draw_hud_editor(
                         ui.centered_fit(
                             Face::SemiBold,
                             9.4,
-                            [rx + 3.0, by, bw - 6.0, 30.0],
+                            [rx + 4.0, by, bw - 8.0, 30.0],
                             if danger {
                                 danger_c
                             } else if on {
@@ -6232,14 +6371,14 @@ pub fn draw_hud_editor(
                         );
                     }
 
-                    let vy = by + 38.0;
-                    let third = (ww - 24.0 - 8.0) / 3.0;
+                    let vy = by + 42.0;
+                    let col4_w = (ww - 24.0 - 30.0) / 4.0;
                     ui.rounded(
                         wx + 12.0,
                         vy,
-                        third,
-                        28.0,
-                        10.0,
+                        col4_w,
+                        30.0,
+                        7.0,
                         if p.visible_in_game {
                             st_cyan_soft
                         } else {
@@ -6249,9 +6388,9 @@ pub fn draw_hud_editor(
                     ui.border(
                         wx + 12.0,
                         vy,
-                        third,
-                        28.0,
-                        10.0,
+                        col4_w,
+                        30.0,
+                        7.0,
                         if p.visible_in_game {
                             st_cyan
                         } else {
@@ -6260,19 +6399,19 @@ pub fn draw_hud_editor(
                     );
                     ui.m3_checkbox(
                         wx + 18.0,
-                        vy + 5.0,
+                        vy + 6.0,
                         18.0,
                         p.visible_in_game,
-                        "Visible in Game",
+                        "In Game",
                     );
 
-                    let vm_x = wx + 12.0 + third + 4.0;
+                    let vm_x = wx + 12.0 + col4_w + 10.0;
                     ui.rounded(
                         vm_x,
                         vy,
-                        third,
-                        28.0,
-                        10.0,
+                        col4_w,
+                        30.0,
+                        7.0,
                         if p.visible_in_menu {
                             st_cyan_soft
                         } else {
@@ -6282,9 +6421,9 @@ pub fn draw_hud_editor(
                     ui.border(
                         vm_x,
                         vy,
-                        third,
-                        28.0,
-                        10.0,
+                        col4_w,
+                        30.0,
+                        7.0,
                         if p.visible_in_menu {
                             st_cyan
                         } else {
@@ -6293,21 +6432,54 @@ pub fn draw_hud_editor(
                     );
                     ui.m3_checkbox(
                         vm_x + 6.0,
-                        vy + 5.0,
+                        vy + 6.0,
                         18.0,
                         p.visible_in_menu,
-                        "Visible in Menu",
+                        "In Menu",
                     );
 
-                    let pv_x = wx + 12.0 + (third + 4.0) * 2.0;
-                    ui.rounded(pv_x, vy, third, 28.0, 10.0, st_cyan_soft);
-                    ui.border(pv_x, vy, third, 28.0, 10.0, st_cyan);
+                    let gs_x = wx + 12.0 + (col4_w + 10.0) * 2.0;
+                    ui.rounded(
+                        gs_x,
+                        vy,
+                        col4_w,
+                        30.0,
+                        7.0,
+                        if tc.settings.snap_to_grid {
+                            st_cyan_soft
+                        } else {
+                            st_card
+                        },
+                    );
+                    ui.border(
+                        gs_x,
+                        vy,
+                        col4_w,
+                        30.0,
+                        7.0,
+                        if tc.settings.snap_to_grid {
+                            st_cyan
+                        } else {
+                            st_border
+                        },
+                    );
+                    ui.m3_checkbox(
+                        gs_x + 6.0,
+                        vy + 6.0,
+                        18.0,
+                        tc.settings.snap_to_grid,
+                        "Snap Grid",
+                    );
+
+                    let pv_x = wx + 12.0 + (col4_w + 10.0) * 3.0;
+                    ui.rounded(pv_x, vy, col4_w, 30.0, 7.0, st_cyan_soft);
+                    ui.border(pv_x, vy, col4_w, 30.0, 7.0, st_cyan);
                     ui.centered_fit(
                         Face::SemiBold,
                         9.2,
-                        [pv_x + 4.0, vy, third - 8.0, 28.0],
+                        [pv_x + 4.0, vy, col4_w - 8.0, 30.0],
                         st_cyan,
-                        "Preset Vis for All",
+                        "Preset Vis All",
                     );
                 }
             }
@@ -6863,7 +7035,7 @@ pub fn touch_hud_editor(
                 if drag_id == id {
                     match kind {
                         EditorDragKind::FloatingPod { offset, mut moved } => {
-                            let pod_w = if ed.pod_expanded { 422.0 } else { 52.0 };
+                            let pod_w = if ed.pod_expanded { 492.0 } else { 52.0 };
                             let cur_x = (tc.settings.floating_menu_pos[0] * w)
                                 .clamp(8.0, (w - pod_w - 8.0).max(8.0));
                             let cur_y = (tc.settings.floating_menu_pos[1] * h)
@@ -6981,10 +7153,23 @@ pub fn touch_hud_editor(
                             if tc.settings.left_handed {
                                 center[0] = 1.0 - center[0];
                             }
-                            if tc.settings.snap_to_grid {
-                                center = center.map(|v| (v * 40.0).round() / 40.0);
-                            }
                             let mode_idx = tc.settings.mode.index();
+                            let [_, _, cur_rw, cur_rh] = if let Some(idx) = ed.selected_custom {
+                                tc.custom_placement(idx).rect(aspect)
+                            } else if let Some(c) = ed.selected {
+                                tc.placement(c).rect(aspect)
+                            } else {
+                                [0.0, 0.0, 0.12, 0.12]
+                            };
+                            if tc.settings.snap_to_grid {
+                                let (snapped, _, _) = snap_button_to_neighbors_and_grid(
+                                    tc,
+                                    &ed,
+                                    center,
+                                    [cur_rw, cur_rh],
+                                );
+                                center = snapped;
+                            }
                             if let Some(idx) = ed.selected_custom {
                                 if let Some(btn) = tc.settings.custom_buttons.get_mut(idx) {
                                     let pl = &mut btn.layouts[mode_idx];
@@ -8020,9 +8205,9 @@ pub fn touch_hud_editor(
                             return false;
                         }
                     } else {
-                        let ew = (ww - 24.0 - 8.0) / 3.0;
+                        let ew = (ww - 24.0 - 20.0) / 3.0;
                         for slot in 0..3 {
-                            let ex = wx + 12.0 + slot as f32 * (ew + 4.0);
+                            let ex = wx + 12.0 + slot as f32 * (ew + 10.0);
                             if inside([ex, body_y, ew, 42.0]) {
                                 if ed.selected_custom.is_none() {
                                     push_undo_snapshot(&mut ed, &tc.settings);
@@ -8054,10 +8239,10 @@ pub fn touch_hud_editor(
                             }
                         }
                     }
-                    let by = body_y + 52.0;
-                    let bw = (ww - 24.0 - 12.0) / 4.0;
+                    let by = body_y + 54.0;
+                    let bw = (ww - 24.0 - 30.0) / 4.0;
                     for i in 0..4 {
-                        let rx = wx + 12.0 + i as f32 * (bw + 4.0);
+                        let rx = wx + 12.0 + i as f32 * (bw + 10.0);
                         if inside([rx, by, bw, 30.0]) {
                             push_undo_snapshot(&mut ed, &tc.settings);
                             match i {
@@ -8088,23 +8273,35 @@ pub fn touch_hud_editor(
                             return false;
                         }
                     }
-                    let vy = by + 38.0;
-                    let third = (ww - 24.0 - 8.0) / 3.0;
-                    if inside([wx + 12.0, vy, third, 28.0]) {
+                    let vy = by + 42.0;
+                    let col4_w = (ww - 24.0 - 30.0) / 4.0;
+                    if inside([wx + 12.0, vy, col4_w, 30.0]) {
                         push_undo_snapshot(&mut ed, &tc.settings);
                         mutate_placement(tc, &ed, &|pl| pl.visible_in_game = !pl.visible_in_game);
                         let _ = tc.settings.save();
                         tc.clicked = true;
                         return false;
                     }
-                    if inside([wx + 12.0 + third + 4.0, vy, third, 28.0]) {
+                    if inside([wx + 12.0 + col4_w + 10.0, vy, col4_w, 30.0]) {
                         push_undo_snapshot(&mut ed, &tc.settings);
                         mutate_placement(tc, &ed, &|pl| pl.visible_in_menu = !pl.visible_in_menu);
                         let _ = tc.settings.save();
                         tc.clicked = true;
                         return false;
                     }
-                    if inside([wx + 12.0 + (third + 4.0) * 2.0, vy, third, 28.0]) {
+                    if inside([wx + 12.0 + (col4_w + 10.0) * 2.0, vy, col4_w, 30.0]) {
+                        push_undo_snapshot(&mut ed, &tc.settings);
+                        tc.settings.snap_to_grid = !tc.settings.snap_to_grid;
+                        let _ = tc.settings.save();
+                        ed.status_msg = Some(if tc.settings.snap_to_grid {
+                            "Snap to Grid & Neighbor Buttons: ON".into()
+                        } else {
+                            "Snap to Grid & Neighbor Buttons: OFF".into()
+                        });
+                        tc.clicked = true;
+                        return false;
+                    }
+                    if inside([wx + 12.0 + (col4_w + 10.0) * 3.0, vy, col4_w, 30.0]) {
                         push_undo_snapshot(&mut ed, &tc.settings);
                         tc.settings.apply_visibility_preset_all();
                         let _ = tc.settings.save();
@@ -8239,8 +8436,8 @@ pub fn touch_hud_editor(
             return false;
         }
 
-        // 5. Check Larger Material You 3 Moveable Floating Menu Pod (356x48dp)
-        let pod_w = if ed.pod_expanded { 422.0 } else { 52.0 };
+        // 5. Check Material 3 Moveable Floating Menu Pod with Direct Grid Snap Toggle (492x48dp)
+        let pod_w = if ed.pod_expanded { 492.0 } else { 52.0 };
         let pod_h = 48.0;
         let pod_x = (tc.settings.floating_menu_pos[0] * w).clamp(8.0, (w - pod_w - 8.0).max(8.0));
         let pod_y = (tc.settings.floating_menu_pos[1] * h).clamp(6.0, (h - pod_h - 6.0).max(6.0));
@@ -8256,7 +8453,7 @@ pub fn touch_hud_editor(
             return false;
         }
         if ed.pod_expanded && inside([pod_x, pod_y, pod_w, pod_h]) {
-            let widths = [42.0, 42.0, 72.0, 62.0, 64.0, 68.0];
+            let widths = [38.0, 38.0, 68.0, 74.0, 58.0, 60.0, 64.0];
             let mut ix = pod_x + 50.0;
             for (btn_i, iw) in widths.into_iter().enumerate() {
                 if inside([ix, pod_y + 5.0, iw, 38.0]) {
@@ -8287,6 +8484,17 @@ pub fn touch_hud_editor(
                             ed.menu_open = false;
                         }
                         3 => {
+                            // Toggle Snap to Grid & Neighbor Edge-Sticking
+                            push_undo_snapshot(&mut ed, &tc.settings);
+                            tc.settings.snap_to_grid = !tc.settings.snap_to_grid;
+                            let _ = tc.settings.save();
+                            ed.status_msg = Some(if tc.settings.snap_to_grid {
+                                "Snap to Grid & Neighbor Buttons: ON".into()
+                            } else {
+                                "Snap to Grid & Neighbor Buttons: OFF".into()
+                            });
+                        }
+                        4 => {
                             // + Add Button (supported in BOTH MCPE and GoyControl modes!)
                             if tc.settings.custom_buttons.len() < 32 {
                                 push_undo_snapshot(&mut ed, &tc.settings);
@@ -8308,7 +8516,7 @@ pub fn touch_hud_editor(
                                 let _ = tc.settings.save();
                             }
                         }
-                        4 => {
+                        5 => {
                             // Copy Selected Button
                             duplicate_selected_editor_button(&mut ed, tc);
                         }
@@ -8329,7 +8537,7 @@ pub fn touch_hud_editor(
                     tc.clicked = true;
                     return false;
                 }
-                ix += iw + 4.0;
+                ix += iw + 5.0;
             }
         }
 

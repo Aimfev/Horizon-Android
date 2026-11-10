@@ -247,6 +247,150 @@ pub fn canonical_horizon_mod_meta(mod_id: &str) -> Option<(&'static str, &'stati
             "Eating Animation",
             "Adds dynamic eating/drinking visual feedback and progress indicators while consuming food.",
         )),
+        "far_view" | "farview" | "bobby" | "distant_horizons" => Some((
+            "Far View (LOD)",
+            "Keeps distant chunks and LOD terrain columns visible beyond server view distance.",
+        )),
+        "dynamic_lights" | "lambdynamiclights" => Some((
+            "Dynamic Lights",
+            "Illuminates surroundings dynamically when holding or dropping torches, lanterns, lava buckets, and glowing items.",
+        )),
+        "sound_physics" | "soundphysics" => Some((
+            "Sound Physics Remastered",
+            "Adds realistic cave reverb, sound occlusion through walls, and underwater acoustic absorption.",
+        )),
+        "freecam" => Some((
+            "Freecam",
+            "Detaches camera locally to inspect builds, caves, and redstone contraptions without moving your player.",
+        )),
+        "auto_totem" | "autototem" => Some((
+            "Auto Totem Helper",
+            "Displays remaining Totems of Undying on the HUD and warns when off-hand totem is depleted.",
+        )),
+        "inventory_hud" | "inventoryhud" => Some((
+            "Inventory HUD+",
+            "Renders a compact translucent mini-inventory grid, potion timers, and armor durability directly on the HUD.",
+        )),
+        "ping_hud" | "pingdisplay" => Some((
+            "Ping & TPS HUD",
+            "Shows live server latency (ms), integrated server MSPT/TPS, and packet health on the HUD.",
+        )),
+        "cps_hud" | "cpsdisplay" => Some((
+            "CPS Counter",
+            "Tracks left and right click/tap speed (Clicks Per Second) with peak CPS indicator on the HUD.",
+        )),
+        "biome_title" | "biometitle" | "travelerstitles" => Some((
+            "Traveler's Biome Titles",
+            "Displays an atmospheric title banner when entering a new biome or dimension.",
+        )),
+        "death_chest" | "gravestone" | "corpse" => Some((
+            "Grave & Death Coordinates",
+            "Records your exact death coordinates and dimension in chat and on the HUD compass so you never lose items.",
+        )),
+        "xp_storage" | "xpbook" | "xp_tome" => Some((
+            "XP Tome & Level Tracker",
+            "Displays exact experience points, progress to next level, and enchantment level thresholds.",
+        )),
+        "fast_leaf_decay" | "fastleafdecay" => Some((
+            "Fast Leaf Decay",
+            "Accelerates leaf decay rapidly after chopping down tree trunks so floating foliage clears in seconds.",
+        )),
+        "villager_trading_plus" | "trade_cycling" => Some((
+            "Villager Trade Helper",
+            "Highlights enchanted book trades, emeralds, and profession workstation status when inspecting villagers.",
+        )),
+        "nether_coords" | "netherportalcoords" => Some((
+            "Nether Portal Calculator",
+            "Shows synchronized Overworld <-> Nether (8x / 0.125x) portal coordinates live on the HUD.",
+        )),
+        "durability_alert" | "durability101" => Some((
+            "Durability Alert",
+            "Triggers a visual and acoustic warning before your pickaxe, sword, elytra, or armor breaks.",
+        )),
+        "chat_heads" | "chatheads" => Some((
+            "Chat Heads & Timestamps",
+            "Prepends clean timestamps and player badges to incoming chat messages.",
+        )),
+        "damage_tilt" | "damagetilt" => Some((
+            "Directional Damage Tilt",
+            "Tilts the camera toward the exact direction of incoming attacks and projectile hits.",
+        )),
+        "trash_slot" | "trashslot" => Some((
+            "Trash Slot Helper",
+            "Adds quick item disposal and inventory slot cleanup controls.",
+        )),
+        "nature_compass" | "naturescompass" => Some((
+            "Nature's Biome Compass",
+            "Displays current biome temperature, humidity, precipitation, and cardinal bearing on the HUD.",
+        )),
+        "elytra_hud" | "elytraphysics" | "flighthud" => Some((
+            "Flight & Elytra HUD",
+            "Shows pitch angle, glide speed (m/s), altitude, and Elytra durability while gliding.",
+        )),
+        "potion_counter" | "itemcounter" => Some((
+            "PvP Potion & Arrow Counter",
+            "Counts total healing potions, golden apples, ender pearls, and arrows remaining in your inventory.",
+        )),
+        "reach_display" | "reachdisplay" => Some((
+            "Reach & Combo Display",
+            "Shows exact attack hit distance (blocks) and consecutive hit combo count during combat.",
+        )),
+        "auto_fish" | "fishing_helper" => Some((
+            "Fishing Bobber Alert",
+            "Displays a clear bite indicator and acoustic cue when a fish hooks your fishing rod.",
+        )),
+        "step_up" | "stepup" => Some((
+            "StepUp Auto-Step",
+            "Smoothly steps up full 1-block ledges without needing to jump repeatedly.",
+        )),
+        "no_fog" | "nofog" | "clearview" => Some((
+            "ClearView Fog Control",
+            "Pushes back terrain, Nether, powder snow, and underwater fog for crystal-clear distant visibility.",
+        )),
+        "clear_lava" | "clearwater" => Some((
+            "Clear Water & Lava",
+            "Improves visibility when submerged in water or lava.",
+        )),
+        "chunk_borders" | "minihud" => Some((
+            "Chunk Borders & MiniHUD",
+            "Displays chunk boundaries (16x16), sub-chunk Y section, and slime chunk indicator.",
+        )),
+        "horse_stats" | "horsestats" => Some((
+            "Horse & Mount Stats",
+            "Shows exact movement speed, jump height (in blocks), and health of horses, camels, and mounts.",
+        )),
+        "bee_info" | "beehive_tooltip" => Some((
+            "Beehive & Honey Inspector",
+            "Shows bee count (0-3) and honey level (0-5) on beehives and bee nests in tooltips and LookAt HUD.",
+        )),
+        "book_editor" | "betterbooks" => Some((
+            "Book & Sign Helper",
+            "Adds character/page counters and formatting shortcuts when reading or editing books and signs.",
+        )),
+        "item_scroller" | "itemscroller" => Some((
+            "Item Scroller",
+            "Fast single-slot and full-stack item transfer gestures across container screens.",
+        )),
+        "crafting_tweaks" | "craftingtweaks" => Some((
+            "Crafting Tweaks",
+            "Adds quick grid balance, rotate, and clear shortcuts for crafting tables.",
+        )),
+        "bed_benefits" | "bedbenefits" => Some((
+            "Bed Benefits",
+            "Restores health and clears negative status effects upon waking up from a bed.",
+        )),
+        "torch_hit" | "torchbow" => Some((
+            "Torch Hit Igniter",
+            "Striking mobs with a torch or soul torch briefly sets them on fire.",
+        )),
+        "double_doors" | "doubledoors" => Some((
+            "Double Doors",
+            "Opening or closing one door or fence gate automatically toggles its matching adjacent double door.",
+        )),
+        "xp_clumps" | "clumps" => Some((
+            "XP Clumps",
+            "Merges nearby experience orbs together to reduce entity lag and speed up XP absorption.",
+        )),
         "immersivethunder" | "immersive_thunder" => Some((
             "ImmersiveThunder",
             "Adds distance-scaled thunder acoustics, atmospheric storm soundscapes, and camera rumble during storms.",
@@ -680,8 +824,10 @@ pub fn compile_hnmod_bundle_realtime(
     }
 
     let manifest_json = serde_json::json!({
+        "schema": 1,
         "id": mod_id,
         "version": version,
+        "game": "26.3",
         "hooks": hooks_ver,
         "permissions": permissions,
     });
@@ -735,6 +881,17 @@ pub fn compile_hnmod_bundle_realtime(
             )
             .map_err(|e| e.to_string())?;
 
+        let has_mixin_toml = existing_files.contains_key(&format!("mixins/{mod_id}/horizon-mixin.toml"));
+        if !has_mixin_toml {
+            let mixin_toml = format!("[mod]\nid = \"{mod_id}\"\nversion = \"{version}\"\n");
+            out_zip
+                .start_file(format!("mixins/{mod_id}/horizon-mixin.toml"), opts)
+                .map_err(|e| e.to_string())?;
+            out_zip
+                .write_all(mixin_toml.as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        let mut combined_content_files = Vec::new();
         for (name, bytes) in existing_files {
             if matches!(
                 name.as_str(),
@@ -742,10 +899,35 @@ pub fn compile_hnmod_bundle_realtime(
             ) {
                 continue;
             }
+            if name == "horizon-mod.toml"
+                || name.starts_with("assets/")
+                || name.starts_with("data/")
+            {
+                combined_content_files.push((name.clone(), bytes.clone()));
+            }
             out_zip.start_file(&name, opts).map_err(|e| e.to_string())?;
             out_zip.write_all(&bytes).map_err(|e| e.to_string())?;
         }
         out_zip.finish().map_err(|e| e.to_string())?;
+
+        // Combined .hmod support (#5865): if the bundle also carries horizon-mod.toml content,
+        // write the validated content .hmod to horizon-mods/<mod_id>.hmod so mod_content loads it!
+        if combined_content_files.iter().any(|(n, _)| n == "horizon-mod.toml") {
+            let mods_dir = profile_dir.join("horizon-mods");
+            let _ = fs::create_dir_all(&mods_dir);
+            let target_hmod = mods_dir.join(format!("{mod_id}.hmod"));
+            if hnmod_path != target_hmod {
+                if let Ok(f) = File::create(&target_hmod) {
+                    let mut czip = ZipWriter::new(f);
+                    for (cname, cbytes) in combined_content_files {
+                        if czip.start_file(&cname, opts).is_ok() {
+                            let _ = czip.write_all(&cbytes);
+                        }
+                    }
+                    let _ = czip.finish();
+                }
+            }
+        }
     }
 
     // Remove duplicate .hnmod inside horizon-mods/ so Content Library does not show duplicate rows
@@ -1338,9 +1520,11 @@ fn build_hnmod_from_jar(
     custom_commands: &[String],
 ) -> Result<(), String> {
     let manifest = serde_json::json!({
+        "schema": 1,
         "id": mod_id,
         "version": version,
-        "hooks": 22,
+        "game": "26.3",
+        "hooks": 80,
         "permissions": []
     });
     let manifest_bytes =
@@ -1383,6 +1567,11 @@ fn build_hnmod_from_jar(
     zip.start_file("horizon-native.json", opts)
         .map_err(|e| e.to_string())?;
     zip.write_all(&manifest_bytes).map_err(|e| e.to_string())?;
+
+    let mixin_toml = format!("[mod]\nid = \"{mod_id}\"\nversion = \"{version}\"\n");
+    zip.start_file(format!("mixins/{mod_id}/horizon-mixin.toml"), opts)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(mixin_toml.as_bytes()).map_err(|e| e.to_string())?;
 
     zip.start_file("src/lib.rs", opts)
         .map_err(|e| e.to_string())?;
@@ -1702,6 +1891,262 @@ pub const HORIZON_CATALOG_MODS: [(&str, &str, &str, u64); 24] = [
     ),
 ];
 
+
+/// Extended Horizon Mod Library (36 additional official & curated Horizon mods, bringing the store to 60 mods).
+pub const HORIZON_LIBRARY_MODS: [(&str, &str, &str, u64); 36] = [
+    (
+        "far_view",
+        "Far View (LOD)",
+        "Keeps distant chunks and LOD terrain columns visible beyond server view distance.",
+        92_400,
+    ),
+    (
+        "dynamic_lights",
+        "Dynamic Lights",
+        "Illuminates surroundings dynamically when holding or dropping torches, lanterns, lava buckets, and glowing items.",
+        114_200,
+    ),
+    (
+        "sound_physics",
+        "Sound Physics Remastered",
+        "Adds realistic cave reverb, sound occlusion through walls, and underwater acoustic absorption.",
+        83_600,
+    ),
+    (
+        "freecam",
+        "Freecam",
+        "Detaches camera locally to inspect builds, caves, and redstone contraptions without moving your player.",
+        76_900,
+    ),
+    (
+        "auto_totem",
+        "Auto Totem Helper",
+        "Displays remaining Totems of Undying on the HUD and warns when off-hand totem is depleted.",
+        69_400,
+    ),
+    (
+        "inventory_hud",
+        "Inventory HUD+",
+        "Renders a compact translucent mini-inventory grid, potion timers, and armor durability directly on the HUD.",
+        88_100,
+    ),
+    (
+        "ping_hud",
+        "Ping & TPS HUD",
+        "Shows live server latency (ms), integrated server MSPT/TPS, and packet health on the HUD.",
+        64_500,
+    ),
+    (
+        "cps_hud",
+        "CPS Counter",
+        "Tracks left and right click/tap speed (Clicks Per Second) with peak CPS indicator on the HUD.",
+        72_300,
+    ),
+    (
+        "biome_title",
+        "Traveler's Biome Titles",
+        "Displays an atmospheric title banner when entering a new biome or dimension.",
+        59_800,
+    ),
+    (
+        "death_chest",
+        "Grave & Death Coordinates",
+        "Records your exact death coordinates and dimension in chat and on the HUD compass so you never lose items.",
+        91_200,
+    ),
+    (
+        "xp_storage",
+        "XP Tome & Level Tracker",
+        "Displays exact experience points, progress to next level, and enchantment level thresholds.",
+        54_600,
+    ),
+    (
+        "fast_leaf_decay",
+        "Fast Leaf Decay",
+        "Accelerates leaf decay rapidly after chopping down tree trunks so floating foliage clears in seconds.",
+        84_900,
+    ),
+    (
+        "villager_trading_plus",
+        "Villager Trade Helper",
+        "Highlights enchanted book trades, emeralds, and profession workstation status when inspecting villagers.",
+        77_500,
+    ),
+    (
+        "nether_coords",
+        "Nether Portal Calculator",
+        "Shows synchronized Overworld <-> Nether (8x / 0.125x) portal coordinates live on the HUD.",
+        48_900,
+    ),
+    (
+        "durability_alert",
+        "Durability Alert",
+        "Triggers a visual and acoustic warning before your pickaxe, sword, elytra, or armor breaks.",
+        63_200,
+    ),
+    (
+        "chat_heads",
+        "Chat Heads & Timestamps",
+        "Prepends clean timestamps and player badges to incoming chat messages.",
+        66_700,
+    ),
+    (
+        "damage_tilt",
+        "Directional Damage Tilt",
+        "Tilts the camera toward the exact direction of incoming attacks and projectile hits.",
+        52_100,
+    ),
+    (
+        "trash_slot",
+        "Trash Slot Helper",
+        "Adds quick item disposal and inventory slot cleanup controls.",
+        57_400,
+    ),
+    (
+        "nature_compass",
+        "Nature's Biome Compass",
+        "Displays current biome temperature, humidity, precipitation, and cardinal bearing on the HUD.",
+        68_300,
+    ),
+    (
+        "elytra_hud",
+        "Flight & Elytra HUD",
+        "Shows pitch angle, glide speed (m/s), altitude, and Elytra durability while gliding.",
+        73_800,
+    ),
+    (
+        "potion_counter",
+        "PvP Potion & Arrow Counter",
+        "Counts total healing potions, golden apples, ender pearls, and arrows remaining in your inventory.",
+        61_900,
+    ),
+    (
+        "reach_display",
+        "Reach & Combo Display",
+        "Shows exact attack hit distance (blocks) and consecutive hit combo count during combat.",
+        58_600,
+    ),
+    (
+        "auto_fish",
+        "Fishing Bobber Alert",
+        "Displays a clear bite indicator and acoustic cue when a fish hooks your fishing rod.",
+        47_200,
+    ),
+    (
+        "step_up",
+        "StepUp Auto-Step",
+        "Smoothly steps up full 1-block ledges without needing to jump repeatedly.",
+        65_400,
+    ),
+    (
+        "no_fog",
+        "ClearView Fog Control",
+        "Pushes back terrain, Nether, powder snow, and underwater fog for crystal-clear distant visibility.",
+        79_100,
+    ),
+    (
+        "clear_lava",
+        "Clear Water & Lava",
+        "Improves visibility when submerged in water or lava.",
+        53_700,
+    ),
+    (
+        "chunk_borders",
+        "Chunk Borders & MiniHUD",
+        "Displays chunk boundaries (16x16), sub-chunk Y section, and slime chunk indicator.",
+        70_400,
+    ),
+    (
+        "horse_stats",
+        "Horse & Mount Stats",
+        "Shows exact movement speed, jump height (in blocks), and health of horses, camels, and mounts.",
+        55_900,
+    ),
+    (
+        "bee_info",
+        "Beehive & Honey Inspector",
+        "Shows bee count (0-3) and honey level (0-5) on beehives and bee nests in tooltips and LookAt HUD.",
+        49_100,
+    ),
+    (
+        "book_editor",
+        "Book & Sign Helper",
+        "Adds character/page counters and formatting shortcuts when reading or editing books and signs.",
+        43_800,
+    ),
+    (
+        "item_scroller",
+        "Item Scroller",
+        "Fast single-slot and full-stack item transfer gestures across container screens.",
+        62_500,
+    ),
+    (
+        "crafting_tweaks",
+        "Crafting Tweaks",
+        "Adds quick grid balance, rotate, and clear shortcuts for crafting tables.",
+        67_200,
+    ),
+    (
+        "bed_benefits",
+        "Bed Benefits",
+        "Restores health and clears negative status effects upon waking up from a bed.",
+        51_300,
+    ),
+    (
+        "torch_hit",
+        "Torch Hit Igniter",
+        "Striking mobs with a torch or soul torch briefly sets them on fire.",
+        45_600,
+    ),
+    (
+        "double_doors",
+        "Double Doors",
+        "Opening or closing one door or fence gate automatically toggles its matching adjacent double door.",
+        82_700,
+    ),
+    (
+        "xp_clumps",
+        "XP Clumps",
+        "Merges nearby experience orbs together to reduce entity lag and speed up XP absorption.",
+        96_300,
+    ),
+];
+
+/// Returns all 60 Horizon Mod Store entries (`HORIZON_CATALOG_MODS` + `HORIZON_LIBRARY_MODS`).
+pub fn all_horizon_catalog_mods() -> Vec<(&'static str, &'static str, &'static str, u64)> {
+    let mut out = Vec::with_capacity(HORIZON_CATALOG_MODS.len() + HORIZON_LIBRARY_MODS.len());
+    out.extend_from_slice(&HORIZON_CATALOG_MODS);
+    out.extend_from_slice(&HORIZON_LIBRARY_MODS);
+    out
+}
+
+/// Unpacks and installs a `.hpack` Horizon Modpack (`horizon-modpack.toml` + `overrides/`) into `profile_dir`.
+pub fn install_hpack_modpack(hpack_path: &Path, profile_dir: &Path) -> Result<usize, String> {
+    let pack = horizon_mods::modpack::Modpack::read(hpack_path)?;
+    for (rel, bytes) in &pack.overrides {
+        let dest = profile_dir.join(rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&dest, bytes).map_err(|e| e.to_string())?;
+    }
+    let mut installed_count = 0usize;
+    let mut on = crate::mod_list::ModList::load(profile_dir);
+    for pm in &pack.manifest.mods {
+        let _ = install_builtin_horizon_mod(&pm.id, profile_dir);
+        if pm.on {
+            on.disabled.remove(&pm.id);
+            on.enabled.insert(pm.id.clone());
+        } else {
+            on.enabled.remove(&pm.id);
+            on.disabled.insert(pm.id.clone());
+        }
+        installed_count += 1;
+    }
+    on.save(profile_dir);
+    Ok(installed_count.max(1))
+}
+
 /// Synthesizes and installs a built-in Horizon `.hnmod` package into `<profile_dir>/horizon-native-mods/<id>.hnmod`
 /// and enables it in `horizon-mods.txt`.
 pub fn install_builtin_horizon_mod(
@@ -1740,9 +2185,11 @@ pub fn install_builtin_horizon_mod(
     );
 
     let manifest_json = serde_json::json!({
+        "schema": 1,
         "id": mod_id,
         "version": version,
-        "hooks": 22,
+        "game": "26.3",
+        "hooks": 80,
         "permissions": [],
     });
     let compiled_json = serde_json::json!({

@@ -10,7 +10,7 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
-pub const FONT: &str = "Geist";
+pub const FONT: &str = "Bricolage Grotesque";
 pub const MONO: &str = "Geist Mono";
 pub mod night;
 
@@ -191,7 +191,7 @@ pub const MEASURE: f32 = 56.;
 /// Corner radii: fields and small controls; plates (hover rows, console, dialogs); pills
 /// (buttons, segmented controls, switches).
 pub const RADIUS: f32 = 8.;
-pub const RADIUS_PLATE: f32 = 12.;
+pub const RADIUS_PLATE: f32 = 10.;
 pub const RADIUS_PILL: f32 = 999.;
 /// Rules between rows are one pixel; there are no other borders.
 pub const RULE: f32 = 1.;

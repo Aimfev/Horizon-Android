@@ -139,6 +139,7 @@ struct DynamicHnmod {
 #[derive(Default)]
 struct DynamicRuntimeState {
     mods: BTreeMap<String, DynamicHnmod>,
+    file_cache: BTreeMap<PathBuf, (u64, Option<std::time::SystemTime>, DynamicHnmod)>,
     last_scan: Option<Instant>,
     thunder_rumble_ticks: u32,
     last_thunder_sound_tick: i64,
@@ -402,7 +403,7 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
     let now = Instant::now();
     if !force {
         if let Some(last) = guard.last_scan {
-            if now.duration_since(last) < Duration::from_secs(3) {
+            if now.duration_since(last) < Duration::from_secs(30) {
                 return;
             }
         }
@@ -463,15 +464,36 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
 
     let mut discovered = BTreeMap::new();
     for (root, path) in hnmod_paths {
-        if let Ok(bytes) = fs::read(&path) {
-            if let Ok(mut z) = zip::ZipArchive::new(Cursor::new(&bytes)) {
-                if z.by_name("horizon-compiled.json").is_err() {
-                    let _ =
-                        horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&path, &root);
+        let meta = fs::metadata(&path).ok();
+        let file_len = meta.as_ref().map_or(0, std::fs::Metadata::len);
+        let file_mtime = meta.as_ref().and_then(|m| m.modified().ok());
+        let cached = guard
+            .file_cache
+            .get(&path)
+            .filter(|(len, mtime, _)| *len == file_len && *mtime == file_mtime)
+            .map(|(_, _, parsed)| parsed.clone());
+        let parsed_opt = match cached {
+            Some(c) => Some(c),
+            None => {
+                if let Ok(bytes) = fs::read(&path) {
+                    if let Ok(mut z) = zip::ZipArchive::new(Cursor::new(&bytes)) {
+                        if z.by_name("horizon-compiled.json").is_err() {
+                            let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(
+                                &path, &root,
+                            );
+                        }
+                    }
                 }
+                let parsed = parse_dynamic_hnmod(&path);
+                if let Some(p) = &parsed {
+                    guard
+                        .file_cache
+                        .insert(path.clone(), (file_len, file_mtime, p.clone()));
+                }
+                parsed
             }
-        }
-        if let Some(mut parsed) = parse_dynamic_hnmod(&path) {
+        };
+        if let Some(mut parsed) = parsed_opt {
             if matches!(
                 parsed.id.as_str(),
                 "zoom" | "minimap" | "recipes" | "smartf3"

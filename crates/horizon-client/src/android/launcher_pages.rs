@@ -86,9 +86,12 @@ pub(crate) struct AnimState {
     pub last_category: SettingsCategory,
     pub last_has_modal: bool,
     pub nav_pill_y: f32,
+    pub nav_pill_vel: f32,
     pub target_nav_y: f32,
     pub page_fade: f32,
     pub page_slide: f32,
+    pub sub_tab_t: f32,
+    pub toast_anim: f32,
     pub progress_smooth: f32,
     pub modal_anim: f32,
     pub shimmer_phase: f32,
@@ -107,9 +110,12 @@ impl Default for AnimState {
             last_category: SettingsCategory::Overview,
             last_has_modal: false,
             nav_pill_y: 62.0,
+            nav_pill_vel: 0.0,
             target_nav_y: 62.0,
             page_fade: 1.0,
             page_slide: 0.0,
+            sub_tab_t: 1.0,
+            toast_anim: 1.0,
             progress_smooth: 0.0,
             modal_anim: 0.0,
             shimmer_phase: 0.0,
@@ -181,9 +187,18 @@ impl AnimState {
         };
 
         let speed = (dt * 14.0).min(1.0);
-        self.nav_pill_y += (target_nav_y - self.nav_pill_y) * (dt * 18.0).min(1.0);
+        horizon_client::ui_theme::motion::step_spring_damper(
+            &mut self.nav_pill_y,
+            &mut self.nav_pill_vel,
+            target_nav_y,
+            380.0,
+            26.0,
+            dt,
+        );
         self.page_fade = (self.page_fade + dt * 7.5).min(1.0);
         self.page_slide *= (1.0 - speed).max(0.0);
+        self.sub_tab_t = (self.sub_tab_t + dt * 7.0).min(1.0);
+        self.toast_anim = (self.toast_anim + dt * 6.5).min(1.0);
         let modal_target = if has_modal { 1.0 } else { 0.0 };
         self.modal_anim += (modal_target - self.modal_anim) * (dt * 14.0).min(1.0);
         self.theme_pulse = (self.theme_pulse + dt * 6.5).min(1.0);
@@ -218,7 +233,10 @@ impl AnimState {
         }
         self.page_fade < 0.99
             || self.page_slide.abs() > 0.35
-            || (self.nav_pill_y - self.target_nav_y).abs() > 0.5
+            || (self.nav_pill_y - self.target_nav_y).abs() > 0.25
+            || self.nav_pill_vel.abs() > 0.5
+            || self.sub_tab_t < 0.99
+            || self.toast_anim < 0.99
             || (self.modal_anim > 0.01 && self.modal_anim < 0.99)
             || self.theme_pulse < 0.99
             || self.section_expand.iter().any(|v| *v > 0.01 && *v < 0.99)
@@ -427,7 +445,7 @@ pub(super) fn button(
     accent: bool,
 ) {
     let [x, y, w, h] = rect;
-    let radius = (h * 0.42).clamp(10.0, 22.0);
+    let radius = (h * 0.22).clamp(6.0, 10.0);
     ui.rounded(
         x,
         y,
@@ -494,23 +512,8 @@ fn toggle(
         if on { "Enabled" } else { "Off" },
     );
     let track_x = x + w - 52.0;
-    let track_y = y + (h - 26.0) * 0.5;
-    ui.rounded(
-        track_x,
-        track_y,
-        50.0,
-        26.0,
-        13.0,
-        if on { my3_accent() } else { my3_track() },
-    );
-    ui.rounded(
-        track_x + if on { 26.0 } else { 4.0 },
-        track_y + 3.0,
-        20.0,
-        20.0,
-        10.0,
-        if on { my3_on_accent() } else { my3_muted() },
-    );
+    let track_y = y + (h - 28.0) * 0.5;
+    ui.m3_switch_animated(track_x, track_y, if on { 1.0 } else { 0.0 });
     if let Some(c) = ui.clip_rect([x, y, w, h]) {
         targets.push((c, action));
     }
@@ -530,9 +533,9 @@ fn draw_setting_card(
     right_control: SettingControl<'_>,
 ) {
     if let SettingControl::SectionHeader(badge, icon) = right_control {
-        ui.rounded(x, y + 6.0, w, h - 10.0, 16.0, my3_surface());
-        ui.border(x, y + 6.0, w, h - 10.0, 16.0, my3_border());
-        ui.rounded(x + 12.0, y + 13.0, 34.0, 34.0, 11.0, my3_accent_soft());
+        ui.rounded(x, y + 6.0, w, h - 10.0, 10.0, my3_surface());
+        ui.border(x, y + 6.0, w, h - 10.0, 10.0, my3_border());
+        ui.rounded(x + 12.0, y + 13.0, 34.0, 34.0, 8.0, my3_accent_soft());
         ui.icon(icon, x + 20.0, y + 21.0, 18.0, my3_accent());
         let text_max = (w - 170.0).max(90.0);
         let fitted_title = ui.fit_text(Face::SemiBold, 13.5, title, text_max);
@@ -556,8 +559,8 @@ fn draw_setting_card(
         let chip_w = (ui.measure(Face::SemiBold, 10.5, badge) + 22.0).clamp(64.0, 124.0);
         let chip_x = x + w - chip_w - 14.0;
         let chip_y = y + (h - 24.0) * 0.5 + 1.0;
-        ui.rounded(chip_x, chip_y, chip_w, 24.0, 12.0, my3_accent_soft());
-        ui.border(chip_x, chip_y, chip_w, 24.0, 12.0, my3_accent());
+        ui.rounded(chip_x, chip_y, chip_w, 24.0, 6.0, my3_accent_soft());
+        ui.border(chip_x, chip_y, chip_w, 24.0, 6.0, my3_accent());
         ui.centered_fit(
             Face::SemiBold,
             10.0,
@@ -576,10 +579,10 @@ fn draw_setting_card(
     );
     ui.rounded(
         x,
-        y,
+        y + 1.0,
         w,
-        h,
-        18.0,
+        (h - 2.0).max(24.0),
+        10.0,
         if is_active_card {
             my3_surface_high()
         } else {
@@ -588,10 +591,10 @@ fn draw_setting_card(
     );
     ui.border(
         x,
-        y,
+        y + 1.0,
         w,
-        h,
-        18.0,
+        (h - 2.0).max(24.0),
+        10.0,
         if is_active_card {
             my3_accent()
         } else {
@@ -727,13 +730,12 @@ fn draw_setting_card(
 
             let bar_x = track_x + 10.0;
             let bar_w = (track_w - 20.0).max(24.0);
-            let bar_y = pill_y + 24.0;
+            let bar_y = pill_y + 23.0;
             let t = fraction.clamp(0.0, 1.0);
-            ui.rounded(bar_x, bar_y, bar_w, 6.0, 3.0, my3_surface_high());
-            let fill_w = (bar_w * t).max(6.0);
-            ui.rounded(bar_x, bar_y, fill_w, 6.0, 3.0, my3_accent());
-            let thumb_x = (bar_x + bar_w * t - 2.0).clamp(bar_x, bar_x + bar_w - 4.0);
-            ui.rounded(thumb_x, bar_y - 2.0, 4.0, 10.0, 2.0, my3_text());
+            let is_dragging = ACTIVE_SLIDER_DRAG.with(|c| {
+                c.get().is_some_and(|(_, bx, _)| (bx - bar_x).abs() < 1.0)
+            });
+            ui.m3_expressive_slider(bar_x, bar_y, bar_w, 6.0, t, is_dragging);
 
             let left_half = [track_x, pill_y, track_w * 0.5, 36.0];
             let right_half = [track_x + track_w * 0.5, pill_y, track_w * 0.5, 36.0];
@@ -797,7 +799,8 @@ fn icon_action_button(
     action: Action,
 ) {
     let [x, y, w, h] = rect;
-    ui.rounded(x, y, w, h, 15.0, bg);
+    ui.rounded(x, y, w, h, 8.0, bg);
+    ui.border(x, y, w, h, 8.0, my3_border());
     let icon_size = 18.0;
     ui.icon(
         icon,
@@ -830,119 +833,180 @@ fn draw_my3_progress_view(
     pause_action: Action,
     cancel_action: Action,
 ) {
-    let center_y = (h * 0.44).clamp(168.0, h - 135.0);
-    let title_fitted = ui.fit_text(Face::SemiBold, 23.0, title, content_w);
+    let clamped = fraction.clamp(0.0, 1.0);
+    let pulse = (shimmer_phase * std::f32::consts::TAU).sin() * 0.5 + 0.5;
+
+    // Material 3 Expressive Elevated Surface Container
+    let card_y = (h * 0.14).clamp(58.0, 88.0);
+    let card_h = (h - card_y - 20.0).clamp(218.0, 326.0);
+    ui.rounded(content_x, card_y, content_w, card_h, 12.0, my3_surface());
+    ui.border(content_x, card_y, content_w, card_h, 12.0, my3_border());
+
+    let inner_x = content_x + 18.0;
+    let inner_w = (content_w - 36.0).max(120.0);
+    let head_y = card_y + 16.0;
+
+    // 1. Animated Header Icon Badge + Title & Live Percentage Pill
+    let badge_sz = 44.0;
+    if !paused {
+        let halo_pad = 2.0 + pulse * 2.5;
+        ui.rounded(
+            inner_x - halo_pad,
+            head_y - halo_pad,
+            badge_sz + halo_pad * 2.0,
+            badge_sz + halo_pad * 2.0,
+            10.0,
+            color::with_alpha(my3_accent(), 0.12 + 0.10 * pulse),
+        );
+    }
+    ui.rounded(inner_x, head_y, badge_sz, badge_sz, 9.0, my3_accent_soft());
+    ui.border(inner_x, head_y, badge_sz, badge_sz, 9.0, my3_accent());
+    let header_icon = if paused {
+        Icon::Pause
+    } else if clamped >= 0.99 {
+        Icon::Check
+    } else {
+        Icon::Packs
+    };
+    ui.icon(
+        header_icon,
+        inner_x + 11.0,
+        head_y + 11.0,
+        22.0,
+        my3_accent(),
+    );
+
+    let pct_str = format!("{:.0}%", clamped * 100.0);
+    let pct_pill_w = (ui.measure(Face::SemiBold, 13.0, &pct_str) + 20.0).max(54.0);
+    let pct_pill_x = inner_x + inner_w - pct_pill_w;
+    ui.rounded(pct_pill_x, head_y, pct_pill_w, 26.0, 7.0, my3_accent());
+    ui.centered_fit(
+        Face::SemiBold,
+        12.5,
+        [pct_pill_x + 4.0, head_y, pct_pill_w - 8.0, 26.0],
+        my3_on_accent(),
+        &pct_str,
+    );
+
+    let right_w = ui.measure(Face::Medium, 12.0, subtitle_right);
+    ui.text(
+        Face::Medium,
+        12.0,
+        inner_x + inner_w - right_w,
+        head_y + 30.0,
+        my3_muted(),
+        subtitle_right,
+    );
+
+    let title_x = inner_x + badge_sz + 14.0;
+    let title_max = (pct_pill_x - title_x - 12.0).max(80.0);
+    let title_fitted = ui.fit_text(Face::SemiBold, 19.0, title, title_max);
     ui.text(
         Face::SemiBold,
-        23.0,
-        content_x,
-        center_y - 68.0,
+        19.0,
+        title_x,
+        head_y - 1.0,
         my3_text(),
         &title_fitted,
     );
 
-    // Step indicator pill badge next to subtitle
     let step_badge = format!(
         "Step {} of {}",
-        (step_index + 1).min(steps.len()),
+        (step_index + 1).min(steps.len().max(1)),
         steps.len().max(1)
     );
-    let badge_w = (ui.measure(Face::SemiBold, 12.0, &step_badge) + 18.0).max(76.0);
+    let step_badge_w = (ui.measure(Face::SemiBold, 10.5, &step_badge) + 14.0).max(68.0);
     ui.rounded(
-        content_x,
-        center_y - 34.0,
-        badge_w,
-        22.0,
-        11.0,
-        my3_accent_soft(),
+        title_x,
+        head_y + 25.0,
+        step_badge_w,
+        20.0,
+        6.0,
+        my3_surface_high(),
     );
-    ui.text(
+    ui.border(
+        title_x,
+        head_y + 25.0,
+        step_badge_w,
+        20.0,
+        6.0,
+        my3_accent(),
+    );
+    ui.centered_fit(
         Face::SemiBold,
-        12.0,
-        content_x + 9.0,
-        center_y - 31.0,
+        10.5,
+        [title_x + 4.0, head_y + 25.0, step_badge_w - 8.0, 20.0],
         my3_accent(),
         &step_badge,
     );
 
-    let right_w = ui.measure(Face::Medium, 13.5, subtitle_right);
-    let left_x = content_x + badge_w + 10.0;
-    let left_max = (content_w - badge_w - right_w - 24.0).max(60.0);
-    let left_fitted = ui.fit_text(Face::Regular, 13.5, subtitle_left, left_max);
+    let left_x = title_x + step_badge_w + 10.0;
+    let left_max = (inner_x + inner_w - right_w - left_x - 12.0).max(50.0);
+    let left_fitted = ui.fit_text(Face::Regular, 12.0, subtitle_left, left_max);
     ui.text(
         Face::Regular,
-        13.5,
+        12.0,
         left_x,
-        center_y - 32.0,
+        head_y + 27.0,
         my3_muted(),
         &left_fitted,
     );
-    ui.text(
-        Face::Medium,
-        13.5,
-        content_x + content_w - right_w,
-        center_y - 32.0,
-        my3_text(),
-        subtitle_right,
-    );
 
-    // Thick Material You 3 rounded progress bar (#9A7BFF on #2B2937) with animated shimmer.
-    let bar_y = center_y + 2.0;
-    let bar_h = 12.0;
-    ui.rounded(content_x, bar_y, content_w, bar_h, 6.0, my3_track());
-    let clamped = fraction.clamp(0.0, 1.0);
-    if clamped > 0.0 {
-        let fill_w = (content_w * clamped).max(bar_h).min(content_w);
-        ui.rounded(content_x, bar_y, fill_w, bar_h, 6.0, my3_accent());
-        if !paused && fill_w > 36.0 {
-            let sw = (fill_w * 0.25).clamp(24.0, 72.0);
-            let sx = content_x + (fill_w - sw) * shimmer_phase.clamp(0.0, 1.0);
-            ui.rounded(
-                sx,
-                bar_y + 2.0,
-                sw,
-                bar_h - 4.0,
-                4.0,
-                color::hex(0xC9B8FF, 165),
-            );
-        }
+    // 2. Material 2026 (M3 Expressive) Wavy Linear Progress Indicator & Morphing Spinner
+    let bar_y = head_y + 56.0;
+    let bar_h = 14.0;
+    ui.m3_wavy_progress(inner_x, bar_y, inner_w, bar_h, clamped, shimmer_phase, paused);
+    if !paused {
+        ui.m3_wavy_circular_spinner(pct_pill_x - 16.0, head_y + 13.0, 8.5, shimmer_phase);
     }
 
-    // Stage description on left + Download Speed & ETA on right
+    // 3. Telemetry Sub-Card (Active Stage + Transfer Speed & ETA)
+    let telem_y = bar_y + 22.0;
+    let telem_h = 30.0;
+    ui.rounded(inner_x, telem_y, inner_w, telem_h, 8.0, my3_card_bg());
+    ui.border(inner_x, telem_y, inner_w, telem_h, 8.0, my3_card_border());
+    ui.icon(
+        if paused { Icon::Pause } else { Icon::Terminal },
+        inner_x + 10.0,
+        telem_y + 8.0,
+        14.0,
+        my3_accent(),
+    );
     let metrics_line = format!("{speed_label}  •  {eta_label}");
-    let metrics_w = ui.measure(Face::Medium, 13.0, &metrics_line);
+    let metrics_w = ui.measure(Face::Medium, 12.0, &metrics_line);
     let stage_line = if paused {
         format!("Paused • {stage_text}")
     } else {
         stage_text.to_owned()
     };
-    let stage_max = (content_w - metrics_w - 16.0).max(80.0);
-    let stage_fitted = ui.fit_text(Face::Regular, 13.0, &stage_line, stage_max);
+    let stage_max = (inner_w - metrics_w - 44.0).max(70.0);
+    let stage_fitted = ui.fit_text(Face::Regular, 12.0, &stage_line, stage_max);
     ui.text(
         Face::Regular,
-        13.0,
-        content_x,
-        bar_y + 20.0,
-        my3_muted(),
+        12.0,
+        inner_x + 30.0,
+        telem_y + 6.0,
+        my3_text(),
         &stage_fitted,
     );
     ui.text(
         Face::Medium,
-        13.0,
-        content_x + content_w - metrics_w,
-        bar_y + 20.0,
+        12.0,
+        inner_x + inner_w - metrics_w - 10.0,
+        telem_y + 6.0,
         my3_accent(),
         &metrics_line,
     );
 
-    // Multi-step visual progress pills row
+    // 4. Multi-Step Pipeline Cards with Dedicated Vector Icons
+    let step_y = telem_y + 40.0;
     if !steps.is_empty() {
-        let step_y = bar_y + 48.0;
-        let gap = 6.0;
+        let gap = 8.0;
         let n = steps.len() as f32;
-        let pill_w = ((content_w - gap * (n - 1.0)) / n).max(36.0);
+        let pill_w = ((inner_w - gap * (n - 1.0)) / n).max(40.0);
+        let pill_h = 32.0;
         for (idx, name) in steps.iter().enumerate() {
-            let px = content_x + idx as f32 * (pill_w + gap);
+            let px = inner_x + idx as f32 * (pill_w + gap);
             let done = idx < step_index;
             let active = idx == step_index;
             let bg = if active {
@@ -950,54 +1014,110 @@ fn draw_my3_progress_view(
             } else if done {
                 my3_surface_high()
             } else {
-                my3_surface()
+                my3_card_bg()
             };
             let border_col = if active || done {
                 my3_accent()
             } else {
-                my3_border()
+                my3_card_border()
             };
-            ui.rounded(px, step_y, pill_w, 26.0, 8.0, bg);
-            ui.border(px, step_y, pill_w, 26.0, 8.0, border_col);
-            let prefix = if done { "• " } else { "" };
-            let step_txt = format!("{prefix}{name}");
-            let fitted = ui.fit_text(Face::Medium, 11.5, &step_txt, pill_w - 10.0);
-            let tw = ui.measure(Face::Medium, 11.5, &fitted);
-            ui.text(
-                Face::Medium,
-                11.5,
-                px + (pill_w - tw) * 0.5,
-                step_y + 5.0,
-                if active || done {
-                    my3_text()
-                } else {
-                    my3_muted()
-                },
-                &fitted,
-            );
+            ui.rounded(px, step_y, pill_w, pill_h, 8.0, bg);
+            ui.border(px, step_y, pill_w, pill_h, 8.0, border_col);
+
+            let step_icon = if done {
+                Icon::Check
+            } else {
+                match *name {
+                    "Manifest" | "Resolve" => Icon::FileText,
+                    "Metadata" => Icon::Terminal,
+                    "Client JAR" | "Download" => Icon::Packs,
+                    "Verify" => Icon::Search,
+                    "Extract" => Icon::Folder,
+                    _ => Icon::Play,
+                }
+            };
+            let fg = if active || done {
+                my3_text()
+            } else {
+                my3_muted()
+            };
+            let ic_col = if active || done {
+                my3_accent()
+            } else {
+                my3_muted()
+            };
+            ui.icon(step_icon, px + 7.0, step_y + 9.0, 14.0, ic_col);
+            let fitted = ui.fit_text(Face::Medium, 11.0, name, (pill_w - 26.0).max(16.0));
+            ui.text(Face::Medium, 11.0, px + 24.0, step_y + 8.0, fg, &fitted);
+
+            if active && !paused {
+                let sub_w = ((pill_w - 12.0) * (0.25 + 0.75 * pulse)).max(8.0);
+                ui.rounded(
+                    px + 6.0,
+                    step_y + pill_h - 3.5,
+                    sub_w,
+                    2.0,
+                    1.0,
+                    my3_accent(),
+                );
+            }
         }
     }
 
-    // Bottom-right MY3 Pause (||) and Cancel (X) rounded square buttons.
-    let btn_y = (h - 62.0).max(bar_y + 82.0);
-    let cancel_x = content_x + content_w - 46.0;
-    let pause_x = cancel_x - 56.0;
-    icon_action_button(
-        ui,
-        targets,
-        [pause_x, btn_y, 46.0, 46.0],
-        my3_pause_bg(),
+    // 5. Bottom-Right Material 3 Action Buttons (Pause/Resume & Cancel with Vector Icons)
+    let btn_y = (card_y + card_h - 48.0).max(step_y + 40.0);
+    let btn_h = 36.0;
+    let cancel_w = 96.0;
+    let pause_w = 104.0;
+    let cancel_x = inner_x + inner_w - cancel_w;
+    let pause_x = cancel_x - pause_w - 10.0;
+
+    let pause_rect = [pause_x, btn_y, pause_w, btn_h];
+    ui.rounded(pause_rect[0], pause_rect[1], pause_rect[2], pause_rect[3], 8.0, my3_pause_bg());
+    ui.border(pause_rect[0], pause_rect[1], pause_rect[2], pause_rect[3], 8.0, my3_accent());
+    ui.icon(
         if paused { Icon::Play } else { Icon::Pause },
-        pause_action,
+        pause_rect[0] + 12.0,
+        pause_rect[1] + 10.0,
+        16.0,
+        my3_accent(),
     );
-    icon_action_button(
-        ui,
-        targets,
-        [cancel_x, btn_y, 46.0, 46.0],
-        my3_cancel_bg(),
+    ui.text(
+        Face::SemiBold,
+        12.5,
+        pause_rect[0] + 34.0,
+        pause_rect[1] + 9.0,
+        my3_text(),
+        if paused { "Resume" } else { "Pause" },
+    );
+    targets.push((pause_rect, pause_action));
+
+    let cancel_rect = [cancel_x, btn_y, cancel_w, btn_h];
+    ui.rounded(cancel_rect[0], cancel_rect[1], cancel_rect[2], cancel_rect[3], 8.0, my3_cancel_bg());
+    ui.border(
+        cancel_rect[0],
+        cancel_rect[1],
+        cancel_rect[2],
+        cancel_rect[3],
+        8.0,
+        horizon_client::ui_theme::active_theme().danger,
+    );
+    ui.icon(
         Icon::Close,
-        cancel_action,
+        cancel_rect[0] + 12.0,
+        cancel_rect[1] + 10.0,
+        16.0,
+        my3_text(),
     );
+    ui.text(
+        Face::SemiBold,
+        12.5,
+        cancel_rect[0] + 34.0,
+        cancel_rect[1] + 9.0,
+        my3_text(),
+        "Cancel",
+    );
+    targets.push((cancel_rect, cancel_action));
 }
 
 impl Launcher {
@@ -1142,7 +1262,7 @@ impl Launcher {
             eq_btn_rect[1],
             eq_btn_rect[2],
             eq_btn_rect[3],
-            pill_h * 0.5,
+            8.0,
             my3_surface(),
         );
         ui.border(
@@ -1150,7 +1270,7 @@ impl Launcher {
             eq_btn_rect[1],
             eq_btn_rect[2],
             eq_btn_rect[3],
-            pill_h * 0.5,
+            8.0,
             my3_border(),
         );
         ui.icon(
@@ -1175,9 +1295,9 @@ impl Launcher {
             &fitted_version,
         );
 
-        // Top-right Account Selector Pill with circular avatar head, username, and chevron.
-        ui.rounded(pill_x, pill_y, pill_w, pill_h, pill_h * 0.5, my3_surface());
-        ui.border(pill_x, pill_y, pill_w, pill_h, pill_h * 0.5, my3_border());
+        // Top-right Account Selector with avatar head, username, and chevron.
+        ui.rounded(pill_x, pill_y, pill_w, pill_h, 9.0, my3_surface());
+        ui.border(pill_x, pill_y, pill_w, pill_h, 9.0, my3_border());
         ui.avatar_head_2d(pill_x + 6.0, pill_y + 4.0, 28.0, &account_name);
         if self.login.signed_in {
             ui.rounded(pill_x + 26.0, pill_y + 24.0, 9.0, 9.0, 4.5, my3_bg());
@@ -1212,8 +1332,8 @@ impl Launcher {
         // ---- Left Vertical Frosted Glass Navigation Rail + Smooth Gliding Active Pill ----
         let sidebar_w = if w < 560.0 { 136.0 } else { 184.0 };
         let rail_h = (h - 64.0).max(40.0);
-        ui.rounded(6.0, 54.0, sidebar_w - 8.0, rail_h, 20.0, active_th.sidebar_bg);
-        ui.border(6.0, 54.0, sidebar_w - 8.0, rail_h, 20.0, my3_border());
+        ui.rounded(6.0, 54.0, sidebar_w - 8.0, rail_h, 12.0, active_th.sidebar_bg);
+        ui.border(6.0, 54.0, sidebar_w - 8.0, rail_h, 12.0, my3_border());
         let nav_start_y = 60.0;
         let nav_step = ((h - nav_start_y - 12.0) / Page::ALL.len() as f32).clamp(31.0, 43.0);
         let nav_h = (nav_step - 4.0).clamp(27.0, 38.0);
@@ -1235,28 +1355,38 @@ impl Launcher {
             self.catalog.sections,
         );
 
-        // Draw gliding Frosted Glass active indicator pill + luminous left accent bar
+        // Draw gliding Material 2026 spring-physics active indicator with velocity stretch
+        let vel_stretch = (self.anim.nav_pill_vel.abs() * 0.012).clamp(0.0, 4.5);
+        let pill_draw_y = self.anim.nav_pill_y - vel_stretch * 0.5;
+        let pill_draw_h = nav_h + vel_stretch;
+        let pill_rad = horizon_client::ui_theme::motion::morph_radius(
+            8.0,
+            6.5,
+            5.5,
+            (vel_stretch / 4.5).clamp(0.0, 1.0),
+            0.0,
+        );
         ui.rounded(
             11.0,
-            self.anim.nav_pill_y,
+            pill_draw_y,
             sidebar_w - 22.0,
-            nav_h,
-            nav_h * 0.5,
+            pill_draw_h,
+            pill_rad,
             my3_nav_active(),
         );
         ui.border(
             11.0,
-            self.anim.nav_pill_y,
+            pill_draw_y,
             sidebar_w - 22.0,
-            nav_h,
-            nav_h * 0.5,
+            pill_draw_h,
+            pill_rad,
             my3_accent(),
         );
         ui.rounded(
             15.0,
-            self.anim.nav_pill_y + 8.0,
+            pill_draw_y + 7.0,
             3.5,
-            (nav_h - 16.0).max(10.0),
+            (pill_draw_h - 14.0).max(10.0),
             1.8,
             my3_accent(),
         );
@@ -1432,8 +1562,8 @@ impl Launcher {
                 let log_h = (total_avail_h - hero_h - 10.0).max(84.0);
 
                 // 1. Hero Launch & Active Configuration Card (Renderer Mode, FPS Mode, Control System)
-                ui.rounded(content_x, card_y, content_w, hero_h, 20.0, my3_surface());
-                ui.border(content_x, card_y, content_w, hero_h, 20.0, my3_border());
+                ui.rounded(content_x, card_y, content_w, hero_h, 12.0, my3_surface());
+                ui.border(content_x, card_y, content_w, hero_h, 12.0, my3_border());
                 ui.rounded(
                     content_x + 16.0,
                     card_y + 14.0,
@@ -1501,59 +1631,35 @@ impl Launcher {
                     touch_cfg.preset_name
                 );
                 let mut chip_x = content_x + 16.0;
-                for (lbl, act, hi) in [
-                    (renderer_tag.as_str(), Action::Renderer, true),
-                    (fps_tag.as_str(), Action::ToggleMaxFpsMode, self.catalog.config.max_fps_mode),
+                for (lbl, act, hi, ic) in [
+                    (renderer_tag.as_str(), Action::Renderer, true, Icon::Monitor),
+                    (
+                        fps_tag.as_str(),
+                        Action::ToggleMaxFpsMode,
+                        self.catalog.config.max_fps_mode,
+                        Icon::Play,
+                    ),
                     (
                         ctrl_tag.as_str(),
                         Action::SettingsCat(SettingsCategory::Controls),
                         false,
+                        Icon::Gamepad,
                     ),
                 ] {
-                    let cw_chip = (ui.measure(Face::SemiBold, 10.5, lbl) + 20.0)
-                        .clamp(84.0, (content_w - 32.0) * 0.46);
+                    let cw_chip = (ui.measure(Face::SemiBold, 10.5, lbl) + 34.0)
+                        .clamp(92.0, (content_w - 32.0) * 0.46);
                     if chip_x + cw_chip > content_x + content_w - 12.0 {
                         break;
                     }
                     let cr = [chip_x, chip_y, cw_chip, 24.0];
                     self.targets.push((cr, act));
-                    ui.rounded(
-                        cr[0],
-                        cr[1],
-                        cr[2],
-                        cr[3],
-                        8.0,
-                        if hi {
-                            my3_accent_soft()
-                        } else {
-                            my3_card_bg()
-                        },
-                    );
-                    ui.border(
-                        cr[0],
-                        cr[1],
-                        cr[2],
-                        cr[3],
-                        8.0,
-                        if hi {
-                            my3_accent()
-                        } else {
-                            my3_card_border()
-                        },
-                    );
-                    ui.centered_fit(
-                        Face::SemiBold,
-                        10.2,
-                        [cr[0] + 6.0, cr[1], cr[2] - 12.0, cr[3]],
-                        if hi { my3_accent() } else { my3_text() },
-                        lbl,
-                    );
+                    ui.m3_filter_chip(cr, lbl, hi, Some(ic));
                     chip_x += cw_chip + 8.0;
                 }
 
                 // 2. Downloaded Version Changelog Card
-                ui.rounded(content_x, log_y, content_w, log_h, 18.0, my3_card_bg());
-                ui.border(content_x, log_y, content_w, log_h, 18.0, my3_card_border());
+                ui.rounded(content_x, log_y, content_w, log_h, 10.0, my3_card_bg());
+                ui.border(content_x, log_y, content_w, log_h, 10.0, my3_card_border());
                 let ver_header = if let Some(ref info) = self.catalog.update_info {
                     format!(
                         "CHANGELOG — MINECRAFT 26.3 • HORIZON ANDROID v{} (DOWNLOADED)",
@@ -1623,23 +1729,65 @@ impl Launcher {
                 let play_w = content_w.min(256.0);
                 let is_launching = self.launching || self.session_worker.is_some();
                 if is_launching && installed {
-                    let radius = 19.0;
+                    let radius = 10.0;
                     ui.rounded(content_x, btn_y, play_w, 46.0, radius, my3_accent_soft());
                     ui.stroke_rounded(content_x, btn_y, play_w, 46.0, radius, 1.6, my3_accent());
+                    ui.m3_wavy_circular_spinner(
+                        content_x + 24.0,
+                        btn_y + 17.0,
+                        7.5,
+                        self.anim.shimmer_phase,
+                    );
                     let bar_w = (play_w - 28.0).max(40.0);
                     let bar_x = content_x + 14.0;
-                    let bar_y = btn_y + 34.0;
-                    ui.rounded(bar_x, bar_y, bar_w, 5.0, 2.5, my3_track());
-                    let sw = (bar_w * 0.36).clamp(24.0, bar_w);
-                    let sx = bar_x + (bar_w - sw) * self.anim.shimmer_phase.clamp(0.0, 1.0);
-                    ui.rounded(sx, bar_y, sw, 5.0, 2.5, my3_accent());
+                    let bar_y = btn_y + 33.0;
+                    ui.m3_wavy_progress(
+                        bar_x,
+                        bar_y,
+                        bar_w,
+                        6.0,
+                        0.68,
+                        self.anim.shimmer_phase,
+                        false,
+                    );
                     ui.centered_fit(
                         Face::SemiBold,
                         15.0,
-                        [content_x + 12.0, btn_y + 4.0, play_w - 24.0, 26.0],
+                        [content_x + 36.0, btn_y + 4.0, play_w - 48.0, 26.0],
                         my3_text(),
                         "Launching...",
                     );
+                } else if content_w > 390.0 {
+                    let play_label = if installed {
+                        "Play Minecraft 26.3"
+                    } else if self.error.is_some() {
+                        "Retry installation"
+                    } else {
+                        "Download Minecraft 26.3"
+                    };
+                    let prof_label = format!("Profile {} v", self.catalog.config.profile + 1);
+                    let (lead_r, trail_r) = ui.m3_split_button(
+                        content_x,
+                        btn_y,
+                        play_w + 138.0,
+                        46.0,
+                        Some(Icon::Play),
+                        play_label,
+                        &prof_label,
+                        true,
+                    );
+                    self.targets.push((lead_r, Action::Play));
+                    self.targets.push((trail_r, Action::Profile));
+                    if content_w > 530.0 {
+                        button(
+                            &mut ui,
+                            &mut self.targets,
+                            [content_x + play_w + 150.0, btn_y, 110.0, 46.0],
+                            "Discord",
+                            Action::Discord,
+                            false,
+                        );
+                    }
                 } else {
                     button(
                         &mut ui,
@@ -1655,26 +1803,6 @@ impl Launcher {
                         Action::Play,
                         true,
                     );
-                }
-                if content_w > 390.0 && !is_launching {
-                    button(
-                        &mut ui,
-                        &mut self.targets,
-                        [content_x + play_w + 12.0, btn_y, 134.0, 46.0],
-                        &format!("Profile {} v", self.catalog.config.profile + 1),
-                        Action::Profile,
-                        false,
-                    );
-                    if content_w > 530.0 {
-                        button(
-                            &mut ui,
-                            &mut self.targets,
-                            [content_x + play_w + 154.0, btn_y, 110.0, 46.0],
-                            "Discord",
-                            Action::Discord,
-                            false,
-                        );
-                    }
                 }
             }
         } else if page == Page::Skins {
@@ -1706,19 +1834,21 @@ impl Launcher {
             );
             if page == Page::Shaders {
                 use crate::shader_catalog::Origin;
-                let seg_w = 100.0;
+                let seg_w = 104.0;
+                let group_x = content_x + content_w - seg_w * 2.0 - 3.0;
                 for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
-                    let rx = content_x + content_w - (2 - i) as f32 * (seg_w + 6.0) + 6.0;
+                    let rx = group_x + i as f32 * (seg_w + 3.0);
                     let rect = [rx, header_y - 2.0, seg_w, 30.0];
                     let active = self.catalog.config.shader_source == origin;
-                    button(
-                        &mut ui,
-                        &mut self.targets,
+                    ui.m3_connected_segment(
                         rect,
+                        i,
+                        2,
                         origin.source().label(),
-                        Action::ShaderSource(origin),
                         active,
+                        Some(Icon::Shaders),
                     );
+                    self.targets.push((rect, Action::ShaderSource(origin)));
                 }
             }
 
@@ -2164,15 +2294,13 @@ impl Launcher {
         if !in_progress_dialog {
             let status = self.error.as_deref().unwrap_or(&self.catalog.status);
             if !status.is_empty() && !page.is_catalog() {
-                let fitted =
-                    ui.fit_text(Face::Regular, 12.5, status, (content_w - 116.0).max(60.0));
-                ui.text(
-                    Face::Regular,
-                    12.5,
+                ui.m3_snackbar_toast(
                     content_x,
-                    h - 32.0,
-                    my3_muted(),
-                    &fitted,
+                    h - 38.0,
+                    (content_w - 224.0).max(120.0),
+                    status,
+                    self.error.is_some(),
+                    self.anim.toast_anim,
                 );
             }
             if page == Page::Play
@@ -2377,42 +2505,61 @@ impl Launcher {
                     && point[1] >= rect[1]
                     && point[1] <= rect[1] + rect[3]
             }) {
-                ui.rounded(
-                    *x,
-                    *y,
-                    *w,
-                    *h,
-                    (*h * 0.42).clamp(10.0, 22.0),
-                    horizon_client::hud::rgba(255, 255, 255, 36),
+                let sc = horizon_client::ui_theme::motion::press_scale(true, 0.0);
+                let sw = *w * sc;
+                let sh = *h * sc;
+                let sx = *x + (*w - sw) * 0.5;
+                let sy = *y + (*h - sh) * 0.5;
+                let rad = horizon_client::ui_theme::motion::morph_radius(
+                    (*h * 0.22).clamp(6.0, 10.0),
+                    6.0,
+                    4.5,
+                    0.0,
+                    1.0,
                 );
+                ui.rounded(
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    rad,
+                    horizon_client::hud::rgba(255, 255, 255, 38),
+                );
+                ui.border(sx, sy, sw, sh, rad, my3_accent());
             }
         }
         if !self.mouse_down
             && self.drag.is_none()
             && let Some((action, time)) = self.feedback
-            && time.elapsed() < std::time::Duration::from_millis(240)
+            && time.elapsed() < std::time::Duration::from_millis(260)
             && let Some(([x, y, w, h], _)) = self.targets.iter().find(|(_, a)| *a == action)
         {
-            let p = (time.elapsed().as_secs_f32() / 0.24).clamp(0.0, 1.0);
-            let ease = horizon_client::ui_theme::motion::ease_out_cubic(p);
-            let fade = (1.0 - p).clamp(0.0, 1.0);
-            let rad = (*h * 0.42).clamp(10.0, 22.0);
-            let expand = ease * 3.5;
+            let p = (time.elapsed().as_secs_f32() / 0.26).clamp(0.0, 1.0);
+            let spring = horizon_client::ui_theme::motion::spring_expressive_spatial(p);
+            let fade = (1.0 - horizon_client::ui_theme::motion::spring_expressive_effects(p)).clamp(0.0, 1.0);
+            let rad = horizon_client::ui_theme::motion::morph_radius(
+                (*h * 0.22).clamp(6.0, 10.0),
+                7.0,
+                5.0,
+                spring,
+                1.0 - p,
+            );
+            let expand = spring * 3.2;
             ui.rounded(
                 *x,
                 *y,
                 *w,
                 *h,
                 rad,
-                horizon_client::hud::rgba(255, 255, 255, (44.0 * fade) as u8),
+                horizon_client::hud::rgba(255, 255, 255, (42.0 * fade) as u8),
             );
             ui.border(
                 *x - expand,
                 *y - expand,
                 *w + expand * 2.0,
                 *h + expand * 2.0,
-                rad + expand,
-                color::with_alpha(my3_accent(), 0.72 * fade),
+                rad + expand * 0.6,
+                color::with_alpha(my3_accent(), 0.78 * fade),
             );
         }
         crate::documents::draw_ui(&mut ui);
@@ -2481,31 +2628,35 @@ impl Launcher {
             },
         );
 
-        // Top right segmented sub-tab switcher (Library vs File Manager)
-        let tab_w = if compact { 104.0 } else { 126.0 };
+        // Top right Material 2026 Connected Button Group (Library vs File Manager)
+        let tab_w = if compact { 106.0 } else { 128.0 };
         let lib_rect = [
-            content_x + content_w - tab_w * 2.0 - 6.0,
+            content_x + content_w - tab_w * 2.0 - 3.0,
             header_y - 1.0,
             tab_w,
             32.0,
         ];
         let fm_rect = [content_x + content_w - tab_w, header_y - 1.0, tab_w, 32.0];
-        button(
-            ui,
-            &mut self.targets,
+        ui.m3_connected_segment(
             lib_rect,
+            0,
+            2,
             "Library",
-            Action::SetInstalledSubTab(InstalledSubTab::Library),
             self.catalog.installed_sub_tab == InstalledSubTab::Library,
+            Some(Icon::Installed),
         );
-        button(
-            ui,
-            &mut self.targets,
+        self.targets
+            .push((lib_rect, Action::SetInstalledSubTab(InstalledSubTab::Library)));
+        ui.m3_connected_segment(
             fm_rect,
+            1,
+            2,
             "File Manager",
-            Action::SetInstalledSubTab(InstalledSubTab::FileManager),
             self.catalog.installed_sub_tab == InstalledSubTab::FileManager,
+            Some(Icon::Folder),
         );
+        self.targets
+            .push((fm_rect, Action::SetInstalledSubTab(InstalledSubTab::FileManager)));
 
         if self.catalog.installed_sub_tab == InstalledSubTab::Library {
             // Row 1: Search filter input + Sort selector + Quick Import CTA
@@ -2573,14 +2724,19 @@ impl Launcher {
                     pill_w,
                     28.0,
                 ];
-                button(
-                    ui,
-                    &mut self.targets,
+                let f_icon = match filter {
+                    InstalledFilter::All => Some(Icon::Installed),
+                    InstalledFilter::Mods => Some(Icon::Mods),
+                    InstalledFilter::Packs => Some(Icon::Packs),
+                    InstalledFilter::Shaders => Some(Icon::Shaders),
+                };
+                ui.m3_filter_chip(
                     pr,
                     &lbl,
-                    Action::SetInstalledFilter(filter),
                     self.catalog.installed_filter == filter,
+                    f_icon,
                 );
+                self.targets.push((pr, Action::SetInstalledFilter(filter)));
             }
 
             // Filtered items list
@@ -3301,8 +3457,8 @@ impl Launcher {
                 let mh = 190.0;
                 let mx = (w - mw) * 0.5;
                 let my = (h - mh) * 0.5;
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
+                ui.rounded(mx, my, mw, mh, 12.0, my3_surface());
+                ui.border(mx, my, mw, mh, 12.0, my3_border());
                 ui.icon(Icon::Trash, mx + 20.0, my + 20.0, 22.0, my3_accent());
                 let title = if paths.len() == 1 {
                     "Delete selected item?".to_owned()
@@ -3360,8 +3516,8 @@ impl Launcher {
                 if let Some(ime_y) = ime_top_dp {
                     my = my.min((ime_y - mh - 8.0).max(6.0));
                 }
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
+                ui.rounded(mx, my, mw, mh, 12.0, my3_surface());
+                ui.border(mx, my, mw, mh, 12.0, my3_border());
                 ui.text(
                     Face::SemiBold,
                     18.0,
@@ -3414,8 +3570,8 @@ impl Launcher {
                 if let Some(ime_y) = ime_top_dp {
                     my = my.min((ime_y - mh - 8.0).max(6.0));
                 }
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
+                ui.rounded(mx, my, mw, mh, 12.0, my3_surface());
+                ui.border(mx, my, mw, mh, 12.0, my3_border());
                 ui.text(
                     Face::SemiBold,
                     18.0,
@@ -3470,8 +3626,8 @@ impl Launcher {
                 let mh = (h - 32.0).min(340.0);
                 let mx = (w - mw) * 0.5;
                 let my = (h - mh) * 0.5;
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
+                ui.rounded(mx, my, mw, mh, 12.0, my3_surface());
+                ui.border(mx, my, mw, mh, 12.0, my3_border());
                 ui.text_clipped(
                     Face::SemiBold,
                     17.5,
@@ -3630,8 +3786,8 @@ impl Launcher {
         let mx = (w - mw) * 0.5;
         let my = (h - mh) * 0.5 + slide_y;
 
-        ui.rounded(mx, my, mw, mh, 24.0, my3_surface());
-        ui.border(mx, my, mw, mh, 24.0, my3_border());
+        ui.rounded(mx, my, mw, mh, 12.0, my3_surface());
+        ui.border(mx, my, mw, mh, 12.0, my3_border());
 
         // Header with Material Icon & Accent Glow
         let head_y = my + 18.0;
@@ -3885,8 +4041,8 @@ impl Launcher {
         let mx = (w - mw) * 0.5;
         let my = (h - mh) * 0.5;
 
-        ui.rounded(mx, my, mw, mh, 22.0, my3_surface());
-        ui.border(mx, my, mw, mh, 22.0, my3_border());
+        ui.rounded(mx, my, mw, mh, 12.0, my3_surface());
+        ui.border(mx, my, mw, mh, 12.0, my3_border());
 
         // Modal Top Header (PFP + Title + Author/Downloads + Close Button)
         let icon_drawn = if let Some((iw, ih, rgba)) = self.catalog.icons.get(&modal.project.id) {
@@ -4173,8 +4329,8 @@ impl Launcher {
             22.0,
             horizon_client::hud::rgba(0, 0, 0, 175),
         );
-        ui.rounded(mx, my, mw, mh, 22.0, my3_surface());
-        ui.border(mx, my, mw, mh, 22.0, my3_accent());
+        ui.rounded(mx, my, mw, mh, 12.0, my3_surface());
+        ui.border(mx, my, mw, mh, 12.0, my3_accent());
 
         // Header icon & title
         ui.rounded(mx + 18.0, my + 14.0, 36.0, 36.0, 11.0, my3_accent_soft());

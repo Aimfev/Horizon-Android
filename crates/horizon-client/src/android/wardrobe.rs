@@ -507,8 +507,8 @@ impl Wardrobe {
         use horizon_client::ui_theme::{Icon, active_theme, motion};
         let theme = active_theme();
         let now = std::time::Instant::now();
-        let tab_t = motion::ease_out_cubic(motion::progress(self.tab_changed_at, now, 0.20));
-        let sel_t = motion::spring_spatial(motion::progress(self.selection_changed_at, now, 0.22));
+        let tab_t = motion::spring_expressive_default(motion::progress(self.tab_changed_at, now, 0.24));
+        let sel_t = motion::spring_expressive_spatial(motion::progress(self.selection_changed_at, now, 0.26));
         let slide_y = (1.0 - tab_t) * 8.0;
 
         let h = ui.h;
@@ -561,8 +561,8 @@ impl Wardrobe {
             };
 
         let tabs_y = top + 46.0;
-        ui.rounded(x, tabs_y, w, 38.0, 12.0, theme.surface_dim);
-        ui.border(x, tabs_y, w, 38.0, 12.0, theme.border);
+        ui.rounded(x, tabs_y, w, 38.0, 8.0, theme.surface_dim);
+        ui.border(x, tabs_y, w, 38.0, 8.0, theme.border);
         let tw = (w - 8.0) * 0.5;
         for (i, (lbl, is_cape, active)) in [
             (format!("Skins ({skin_count})"), false, !self.capes),
@@ -574,7 +574,7 @@ impl Wardrobe {
             let tx = x + 3.0 + i as f32 * (tw + 2.0);
             let tr = [tx, tabs_y + 3.0, tw, 32.0];
             if active {
-                ui.rounded(tr[0], tr[1], tr[2], tr[3], 9.0, theme.accent);
+                ui.rounded(tr[0], tr[1], tr[2], tr[3], 6.0, theme.accent);
                 ui.centered_fit(Face::SemiBold, 12.0, tr, theme.on_accent, &lbl);
             } else {
                 ui.centered_fit(Face::Medium, 12.0, tr, theme.text_muted, &lbl);
@@ -607,7 +607,7 @@ impl Wardrobe {
         self.rect = [px, preview_y, preview_w, preview_h];
 
         // Studio stage background with subtle inner rim and pedestal
-        ui.rounded(px, preview_y, preview_w, preview_h, 16.0, theme.surface);
+        ui.rounded(px, preview_y, preview_w, preview_h, 10.0, theme.surface);
         ui.rounded(
             px + 4.0,
             preview_y + 4.0,
@@ -616,7 +616,7 @@ impl Wardrobe {
             13.0,
             theme.surface_dim,
         );
-        ui.stroke_rounded(px, preview_y, preview_w, preview_h, 16.0, 1.2, theme.border);
+        ui.stroke_rounded(px, preview_y, preview_w, preview_h, 10.0, 1.2, theme.border);
 
         // Studio floor pedestal oval beneath the character
         let ped_w = (preview_w * 0.46).clamp(72.0, 124.0);

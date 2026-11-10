@@ -1127,6 +1127,7 @@ impl TouchControls {
                 .is_some_and(|c| self.placement(c).passthrough);
         let attack_look =
             self.settings.attack_button_look && self.crosshair() && !self.inventory_mode;
+        let is_custom_passthrough = self.custom_fingers.contains_key(&id);
         if let Some((role, previous)) = self.fingers.get_mut(&id) {
             let delta = if let Role::Look {
                 start,
@@ -1136,7 +1137,9 @@ impl TouchControls {
                 ..
             } = role
             {
-                let drag_thresh = if self.settings.zero_latency_touch {
+                let drag_thresh = if is_custom_passthrough {
+                    0.012
+                } else if self.settings.zero_latency_touch {
                     0.002
                 } else {
                     0.010
@@ -1151,6 +1154,9 @@ impl TouchControls {
                     *previous = point;
                     d
                 } else {
+                    if is_custom_passthrough {
+                        *previous = point;
+                    }
                     [0.0; 2]
                 }
             } else if (matches!(role, Role::Button(_) | Role::Shield)
@@ -1660,7 +1666,7 @@ pub fn draw_single_mcpe_control(
                     color,
                 );
             }
-        } else {
+        } else if a.sprites.contains_key("gui/bedrock/ui/joystick_frame") {
             sprite(b, a, "ui/joystick_frame", [cx, cy, size, size], color);
             sprite(
                 b,
@@ -1669,6 +1675,34 @@ pub fn draw_single_mcpe_control(
                 [cx + size * 0.33, cy + size * 0.33, size * 0.34, size * 0.34],
                 color,
             );
+        } else {
+            // Classic MCPE bright translucent silver joystick ring + inner circular knob
+            let alpha = (color >> 24) as u8;
+            let center = [cx + size * 0.5, cy + size * 0.5];
+            let outer_r = size * 0.48;
+            let inner_r = size * 0.19;
+            disc(
+                b,
+                a,
+                center,
+                outer_r,
+                rgba(186, 192, 204, (u16::from(alpha) * 115 / 255) as u8),
+            );
+            ring(
+                b,
+                a,
+                center,
+                outer_r,
+                rgba(242, 245, 252, (u16::from(alpha) * 215 / 255) as u8),
+            );
+            disc(
+                b,
+                a,
+                center,
+                inner_r,
+                rgba(224, 228, 238, (u16::from(alpha) * 225 / 255) as u8),
+            );
+            ring(b, a, center, inner_r, rgba(255, 255, 255, alpha));
         }
         return;
     }
@@ -1980,27 +2014,31 @@ fn fitted_sprite(b: &mut HudBatch, a: &HudAtlas, name: &str, [x, y, w, h]: [f32;
             color,
         );
     } else {
-        // Authentic MCPE classic double-bevel stone plate + pixel-art icon when bedrock atlas is unloaded.
+        // Authentic MCPE classic bright light-stone silver double-bevel plate + crisp white pixel icon
+        // when bedrock atlas sprites are not yet loaded in the Launcher Control Editor.
         let alpha = (color >> 24) as u8;
-        let bg = rgba(58, 58, 62, (u16::from(alpha) * 185 / 255) as u8);
-        let hi = rgba(215, 215, 222, (u16::from(alpha) * 210 / 255) as u8);
-        let lo = rgba(28, 28, 32, (u16::from(alpha) * 220 / 255) as u8);
-        let fg = rgba(242, 242, 246, alpha);
-        let bw = (w.min(h) * 0.065).clamp(1.2, 3.0);
-        b.fill(a, x, y, w, h, lo);
-        b.fill(
-            a,
-            x + bw,
-            y + bw,
-            (w - bw * 2.0).max(1.0),
-            (h - bw * 2.0).max(1.0),
-            bg,
-        );
-        b.fill(a, x + bw, y + bw, (w - bw * 2.0).max(1.0), bw, hi);
-        b.fill(a, x + bw, y + bw, bw, (h - bw * 2.0).max(1.0), hi);
+        let bg = rgba(186, 190, 198, (u16::from(alpha) * 205 / 255) as u8);
+        let hi = rgba(244, 246, 252, (u16::from(alpha) * 235 / 255) as u8);
+        let lo = rgba(108, 112, 122, (u16::from(alpha) * 225 / 255) as u8);
+        let fg = rgba(255, 255, 255, alpha);
+        let is_inner_glyph = name.contains("pause_icon") || name.contains("gear");
+        if !is_inner_glyph {
+            let bw = (w.min(h) * 0.065).clamp(1.4, 3.0);
+            b.fill(a, x, y, w, h, lo);
+            b.fill(
+                a,
+                x + bw,
+                y + bw,
+                (w - bw * 2.0).max(1.0),
+                (h - bw * 2.0).max(1.0),
+                bg,
+            );
+            b.fill(a, x + bw, y + bw, (w - bw * 2.0).max(1.0), bw, hi);
+            b.fill(a, x + bw, y + bw, bw, (h - bw * 2.0).max(1.0), hi);
+        }
         let cx = x + w * 0.5;
         let cy = y + h * 0.5;
-        let u = w.min(h) * 0.08;
+        let u = w.min(h) * if is_inner_glyph { 0.12 } else { 0.08 };
         if name.contains("up") || name.contains("jump") || name.contains("ascend") {
             // Pixel-art upward chevron / arrow
             b.fill(a, cx - u, cy - u * 2.5, u * 2.0, u, fg);

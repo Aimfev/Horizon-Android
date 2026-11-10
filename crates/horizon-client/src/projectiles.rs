@@ -466,10 +466,14 @@ impl Projectile {
             f64::from(y.cos() * p.cos()),
         ];
         self.shoot(random, dir, speed, uncertainty);
+        let ignore_upward_source = matches!(
+            self.kind,
+            ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge
+        ) && source_velocity.y > 0.0;
         self.velocity = Vec3::new(
             self.velocity.x + source_velocity.x,
             self.velocity.y
-                + if source_on_ground {
+                + if source_on_ground || ignore_upward_source {
                     0.0
                 } else {
                     source_velocity.y

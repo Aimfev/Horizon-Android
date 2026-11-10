@@ -161,9 +161,9 @@ impl Fonts {
         let f = |b: &'static [u8]| FontRef::try_from_slice(b).expect("bundled font");
         Self {
             faces: [
-                f(horizon_theme::fonts::GEIST_REGULAR),
-                f(horizon_theme::fonts::GEIST_MEDIUM),
-                f(horizon_theme::fonts::GEIST_SEMIBOLD),
+                f(horizon_theme::fonts::BRICOLAGE_REGULAR),
+                f(horizon_theme::fonts::BRICOLAGE_MEDIUM),
+                f(horizon_theme::fonts::BRICOLAGE_SEMIBOLD),
                 f(horizon_theme::fonts::GEIST_MONO),
             ],
         }
@@ -902,19 +902,23 @@ impl<'a> Ui<'a> {
     #[inline]
     fn stagger_transform(&self, x: f32, y: f32, w: f32, h: f32) -> (f32, f32) {
         if self.page_anim >= 0.999
-            || motion::reduced_motion()
             || (x <= 1.0 && w >= self.w - 2.0 && h >= self.h - 2.0)
             || x < self.stagger_origin[0] - 4.0
             || y < self.stagger_origin[1] - 4.0
         {
             return (0.0, 1.0);
         }
+        if motion::reduced_motion() {
+            // Tier 2 Accessible Reduced Motion: strip spatial displacement, keep fast opacity fade
+            let alpha = (0.35 + 0.65 * motion::spring_expressive_effects(self.page_anim)).clamp(0.0, 1.0);
+            return (0.0, alpha);
+        }
         let rel_y = (y - self.stagger_origin[1]).max(0.0);
         let rel_x = (x - self.stagger_origin[0]).max(0.0);
-        let delay = ((rel_y / 540.0) * 0.36 + (rel_x / 960.0) * 0.10).clamp(0.0, 0.44);
+        let delay = ((rel_y / 520.0) * 0.34 + (rel_x / 920.0) * 0.10).clamp(0.0, 0.42);
         let local_t = ((self.page_anim - delay) / (1.0 - delay).max(0.25)).clamp(0.0, 1.0);
-        let dy = (1.0 - motion::spring_spatial(local_t)) * 14.0;
-        let alpha = (0.18 + 0.82 * motion::ease_out_cubic(local_t)).clamp(0.0, 1.0);
+        let dy = (1.0 - motion::spring_expressive_default(local_t)) * 14.0;
+        let alpha = (0.16 + 0.84 * motion::spring_expressive_effects(local_t)).clamp(0.0, 1.0);
         (dy, alpha)
     }
     /// Native phone DPI-adaptive launcher density; game HUD scale is untouched.
@@ -1284,20 +1288,21 @@ impl<'a> Ui<'a> {
         let theme = active_theme();
         let track_w = 52.0;
         let track_h = 28.0;
+        let track_r = 9.0;
         if on {
-            self.rounded(x, y, track_w, track_h, 14.0, theme.accent);
-            let thumb_d = 22.0;
-            let tx = x + track_w - thumb_d - 3.0;
+            self.rounded(x, y, track_w, track_h, track_r, theme.accent);
+            let thumb_d = 20.0;
+            let tx = x + track_w - thumb_d - 4.0;
             let ty = y + (track_h - thumb_d) * 0.5;
-            self.rounded(tx, ty, thumb_d, thumb_d, 11.0, theme.on_accent);
-            self.icon(Icon::Check, tx + 4.0, ty + 4.0, 14.0, theme.accent);
+            self.rounded(tx, ty, thumb_d, thumb_d, 6.5, theme.on_accent);
+            self.icon(Icon::Check, tx + 3.0, ty + 3.0, 14.0, theme.accent);
         } else {
-            self.rounded(x, y, track_w, track_h, 14.0, theme.surface_dim);
-            self.stroke_rounded(x, y, track_w, track_h, 14.0, 1.6, theme.border_strong);
+            self.rounded(x, y, track_w, track_h, track_r, theme.surface_dim);
+            self.stroke_rounded(x, y, track_w, track_h, track_r, 1.5, theme.border_strong);
             let thumb_d = 16.0;
             let tx = x + 6.0;
             let ty = y + (track_h - thumb_d) * 0.5;
-            self.rounded(tx, ty, thumb_d, thumb_d, 8.0, theme.text_muted);
+            self.rounded(tx, ty, thumb_d, thumb_d, 5.5, theme.text_muted);
         }
     }
 
@@ -1336,6 +1341,572 @@ impl<'a> Ui<'a> {
         } else {
             size
         }
+    }
+
+    /// Material 2026 (M3 Expressive) Animated Switch (`m3_switch_animated`):
+    /// Smoothly interpolates thumb position, thumb diameter (`16dp -> 20dp`), corner radius morphing,
+    /// track color, and checkmark icon reveal using `progress` (`0.0 = off`, `1.0 = on`).
+    pub fn m3_switch_animated(&mut self, x: f32, y: f32, progress: f32) {
+        let theme = active_theme();
+        let t = progress.clamp(0.0, 1.0);
+        let spring_t = motion::spring_expressive_spatial(t);
+        let eff_t = motion::spring_expressive_effects(t);
+        let track_w = 52.0;
+        let track_h = 28.0;
+        let track_r = motion::morph_radius(9.0, 8.0, 6.0, eff_t, 0.0);
+        let track_col = lerp_color(theme.surface_dim, theme.accent, eff_t);
+        self.rounded(x, y, track_w, track_h, track_r, track_col);
+        if eff_t < 0.96 {
+            self.stroke_rounded(
+                x,
+                y,
+                track_w,
+                track_h,
+                track_r,
+                1.5 * (1.0 - eff_t * 0.7),
+                lerp_color(theme.border_strong, theme.accent, eff_t),
+            );
+        }
+        let thumb_d = (16.0 + 4.0 * spring_t).clamp(14.0, 22.0);
+        let tx = x + 6.0 + (track_w - thumb_d - 10.0) * spring_t;
+        let ty = y + (track_h - thumb_d) * 0.5;
+        let thumb_r = motion::morph_radius(5.5, 6.5, 4.5, eff_t, 0.0);
+        let thumb_col = lerp_color(theme.text_muted, theme.on_accent, eff_t);
+        self.rounded(tx, ty, thumb_d, thumb_d, thumb_r, thumb_col);
+        if eff_t > 0.35 {
+            let ic_s = (14.0 * ((eff_t - 0.35) / 0.65).clamp(0.4, 1.0)).max(8.0);
+            self.icon(
+                Icon::Check,
+                tx + (thumb_d - ic_s) * 0.5,
+                ty + (thumb_d - ic_s) * 0.5,
+                ic_s,
+                color::with_alpha(theme.accent, ((eff_t - 0.35) / 0.65).clamp(0.0, 1.0)),
+            );
+        }
+    }
+
+    /// Material 2026 (M3 Expressive) Split Button:
+    /// Combines a primary leading action button with a connected trailing selector/menu segment,
+    /// using asymmetric architectural corner radii (`10dp` outer corners, `4dp` inner split seam).
+    /// Returns `(leading_rect, trailing_rect)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn m3_split_button(
+        &mut self,
+        x: f32,
+        y: f32,
+        total_w: f32,
+        h: f32,
+        lead_icon: Option<Icon>,
+        lead_label: &str,
+        trail_label: &str,
+        accent: bool,
+    ) -> ([f32; 4], [f32; 4]) {
+        let theme = active_theme();
+        let gap = 3.0;
+        let trail_w = (ui.measure_or_estimate(self, Face::SemiBold, 12.5, trail_label) + 34.0)
+            .clamp(84.0, (total_w * 0.40).max(88.0));
+        let lead_w = (total_w - trail_w - gap).max(96.0);
+        let lead_r = [x, y, lead_w, h];
+        let trail_r = [x + lead_w + gap, y, trail_w, h];
+
+        let bg_lead = if accent {
+            theme.accent
+        } else {
+            theme.surface_bright
+        };
+        let fg_lead = if accent {
+            theme.on_accent
+        } else {
+            theme.text_primary
+        };
+
+        // Leading primary segment: outer-left 10dp, inner-right 4dp
+        self.rounded(lead_r[0], lead_r[1], lead_r[2], lead_r[3], 9.0, bg_lead);
+        self.rounded(
+            lead_r[0] + lead_r[2] - 10.0,
+            lead_r[1],
+            10.0,
+            lead_r[3],
+            4.0,
+            bg_lead,
+        );
+        if !accent {
+            self.border(lead_r[0], lead_r[1], lead_r[2], lead_r[3], 9.0, theme.border);
+        }
+
+        let font = if h <= 36.0 { 13.5 } else { 14.5 };
+        if let Some(ic) = lead_icon {
+            let ic_s = (h * 0.40).clamp(15.0, 19.0);
+            let fitted = self.fit_text(Face::SemiBold, font, lead_label, (lead_w - ic_s - 28.0).max(32.0));
+            let tw = self.measure(Face::SemiBold, font, &fitted);
+            let group_w = ic_s + 8.0 + tw;
+            let gx = lead_r[0] + ((lead_w - group_w) * 0.5).max(10.0);
+            self.icon(ic, gx, lead_r[1] + (h - ic_s) * 0.5, ic_s, fg_lead);
+            self.text(
+                Face::SemiBold,
+                font,
+                gx + ic_s + 8.0,
+                lead_r[1] + ((h - font * 1.45) * 0.5).max(2.0),
+                fg_lead,
+                &fitted,
+            );
+        } else {
+            self.centered_fit(
+                Face::SemiBold,
+                font,
+                [lead_r[0] + 10.0, lead_r[1], lead_w - 20.0, h],
+                fg_lead,
+                lead_label,
+            );
+        }
+
+        // Trailing menu/profile segment: inner-left 4dp, outer-right 9dp
+        let bg_trail = if accent {
+            theme.surface_selected
+        } else {
+            theme.surface
+        };
+        self.rounded(trail_r[0], trail_r[1], trail_r[2], trail_r[3], 9.0, bg_trail);
+        self.rounded(trail_r[0], trail_r[1], 10.0, trail_r[3], 4.0, bg_trail);
+        self.border(
+            trail_r[0],
+            trail_r[1],
+            trail_r[2],
+            trail_r[3],
+            8.0,
+            if accent { theme.accent } else { theme.border },
+        );
+        let clean_trail = trail_label.trim_end_matches(" v").trim();
+        let fit_tr = self.fit_text(Face::SemiBold, 12.5, clean_trail, (trail_w - 28.0).max(24.0));
+        self.text(
+            Face::SemiBold,
+            12.5,
+            trail_r[0] + 10.0,
+            trail_r[1] + ((h - 12.5 * 1.45) * 0.5).max(2.0),
+            if accent { theme.accent } else { theme.text_primary },
+            &fit_tr,
+        );
+        self.icon(
+            Icon::ChevronDown,
+            trail_r[0] + trail_w - 20.0,
+            trail_r[1] + (h - 12.0) * 0.5,
+            12.0,
+            if accent { theme.accent } else { theme.text_muted },
+        );
+
+        (lead_r, trail_r)
+    }
+
+    #[inline]
+    fn measure_or_estimate(ui: &Self, face: Face, size: f32, text: &str) -> f32 {
+        ui.measure(face, size, text)
+    }
+
+    /// Material 2026 (M3 Expressive) Connected Button Group Segment:
+    /// Renders segment `index` of `count` inside a connected button group with shape-morphing
+    /// inner/outer corners and a checkmark icon on the active segment.
+    #[allow(clippy::too_many_arguments)]
+    pub fn m3_connected_segment(
+        &mut self,
+        rect: [f32; 4],
+        index: usize,
+        count: usize,
+        label: &str,
+        active: bool,
+        icon: Option<Icon>,
+    ) {
+        let theme = active_theme();
+        let [x, y, w, h] = rect;
+        let outer_r = (h * 0.24).clamp(7.0, 9.0);
+        let inner_r = if active { 6.0 } else { 4.0 };
+        let bg = if active {
+            theme.accent
+        } else {
+            theme.surface_bright
+        };
+        let fg = if active {
+            theme.on_accent
+        } else {
+            theme.text_primary
+        };
+        self.rounded(x, y, w, h, inner_r, bg);
+        if index == 0 {
+            self.rounded(x, y, (w * 0.45).max(outer_r * 2.0), h, outer_r, bg);
+        }
+        if index + 1 == count {
+            let cap_w = (w * 0.45).max(outer_r * 2.0);
+            self.rounded(x + w - cap_w, y, cap_w, h, outer_r, bg);
+        }
+        self.border(
+            x,
+            y,
+            w,
+            h,
+            if index == 0 || index + 1 == count {
+                outer_r
+            } else {
+                inner_r
+            },
+            if active { theme.accent } else { theme.border },
+        );
+
+        let lead_ic = if active {
+            Some(icon.unwrap_or(Icon::Check))
+        } else {
+            icon
+        };
+        let font = if h <= 30.0 { 11.8 } else { 12.8 };
+        if let Some(ic) = lead_ic {
+            let ic_s = (h * 0.40).clamp(11.0, 14.0);
+            let avail = (w - ic_s - 18.0).max(16.0);
+            let fitted = self.fit_text(
+                if active { Face::SemiBold } else { Face::Medium },
+                font,
+                label,
+                avail,
+            );
+            let tw = self.measure(
+                if active { Face::SemiBold } else { Face::Medium },
+                font,
+                &fitted,
+            );
+            let tot = ic_s + 5.0 + tw;
+            let sx = x + ((w - tot) * 0.5).max(6.0);
+            self.icon(ic, sx, y + (h - ic_s) * 0.5, ic_s, fg);
+            self.text(
+                if active { Face::SemiBold } else { Face::Medium },
+                font,
+                sx + ic_s + 5.0,
+                y + ((h - font * 1.45) * 0.5).max(1.5),
+                fg,
+                &fitted,
+            );
+        } else {
+            self.centered_fit(
+                if active { Face::SemiBold } else { Face::Medium },
+                font,
+                [x + 6.0, y, (w - 12.0).max(8.0), h],
+                fg,
+                label,
+            );
+        }
+    }
+
+    /// Material 2026 (M3 Expressive) Filter / Assist Chip:
+    /// Morphs corner radius between unselected (`8dp`) and selected (`6dp`) states, with optional
+    /// leading icon / selection checkmark and active tonal elevation.
+    pub fn m3_filter_chip(
+        &mut self,
+        rect: [f32; 4],
+        label: &str,
+        selected: bool,
+        icon: Option<Icon>,
+    ) {
+        let theme = active_theme();
+        let [x, y, w, h] = rect;
+        let rad = if selected { 6.0 } else { 8.0 };
+        let bg = if selected {
+            theme.surface_selected
+        } else {
+            theme.surface_dim
+        };
+        let border_col = if selected {
+            theme.accent
+        } else {
+            theme.border
+        };
+        self.rounded(x, y, w, h, rad, bg);
+        self.border(x, y, w, h, rad, border_col);
+
+        let show_ic = if selected {
+            Some(icon.unwrap_or(Icon::Check))
+        } else {
+            icon
+        };
+        let font = if h <= 26.0 { 10.5 } else { 11.5 };
+        let fg = if selected {
+            theme.accent
+        } else {
+            theme.text_primary
+        };
+        if let Some(ic) = show_ic {
+            let ic_s = (h * 0.42).clamp(10.0, 13.0);
+            let avail = (w - ic_s - 15.0).max(14.0);
+            let fitted = self.fit_text(Face::SemiBold, font, label, avail);
+            let tw = self.measure(Face::SemiBold, font, &fitted);
+            let tot = ic_s + 4.5 + tw;
+            let sx = x + ((w - tot) * 0.5).max(5.0);
+            self.icon(ic, sx, y + (h - ic_s) * 0.5, ic_s, theme.accent);
+            self.text(
+                Face::SemiBold,
+                font,
+                sx + ic_s + 4.5,
+                y + ((h - font * 1.45) * 0.5).max(1.0),
+                if selected { theme.text_primary } else { fg },
+                &fitted,
+            );
+        } else {
+            self.centered_fit(
+                Face::SemiBold,
+                font,
+                [x + 5.0, y, (w - 10.0).max(8.0), h],
+                fg,
+                label,
+            );
+        }
+    }
+
+    /// Material 2026 (M3 Expressive) Split-Track Slider with Vertical Handle Bar & End-Stop Dot:
+    /// Draws a split active/inactive track separated by a `4dp` gap around a vertical bar handle (`4x14dp`).
+    pub fn m3_expressive_slider(
+        &mut self,
+        bar_x: f32,
+        bar_y: f32,
+        bar_w: f32,
+        bar_h: f32,
+        fraction: f32,
+        dragging: bool,
+    ) {
+        let theme = active_theme();
+        let t = fraction.clamp(0.0, 1.0);
+        let handle_w = if dragging { 5.0 } else { 3.5 };
+        let handle_h = (bar_h + if dragging { 8.0 } else { 6.0 }).max(12.0);
+        let handle_x = (bar_x + (bar_w - handle_w) * t).clamp(bar_x, bar_x + bar_w - handle_w);
+        let gap = 3.5;
+
+        // Active left track segment
+        let active_w = (handle_x - bar_x - gap).max(0.0);
+        if active_w > 1.5 {
+            self.rounded(
+                bar_x,
+                bar_y,
+                active_w,
+                bar_h,
+                bar_h * 0.5,
+                theme.accent,
+            );
+        }
+
+        // Inactive right track segment + M3 terminal stop dot
+        let rem_x = handle_x + handle_w + gap;
+        let rem_w = (bar_x + bar_w - rem_x).max(0.0);
+        if rem_w > 1.5 {
+            self.rounded(
+                rem_x,
+                bar_y,
+                rem_w,
+                bar_h,
+                bar_h * 0.5,
+                theme.surface_bright,
+            );
+            if rem_w > 8.0 {
+                let dot_d = (bar_h * 0.55).clamp(3.0, 4.5);
+                self.rounded(
+                    bar_x + bar_w - dot_d - 1.5,
+                    bar_y + (bar_h - dot_d) * 0.5,
+                    dot_d,
+                    dot_d,
+                    dot_d * 0.5,
+                    theme.accent,
+                );
+            }
+        }
+
+        // Vertical handle bar with subtle halo when actively dragged
+        if dragging {
+            self.rounded(
+                handle_x - 3.0,
+                bar_y + (bar_h - handle_h) * 0.5 - 2.0,
+                handle_w + 6.0,
+                handle_h + 4.0,
+                3.5,
+                color::with_alpha(theme.accent, 0.28),
+            );
+        }
+        self.rounded(
+            handle_x,
+            bar_y + (bar_h - handle_h) * 0.5,
+            handle_w,
+            handle_h,
+            handle_w * 0.45,
+            if dragging { theme.accent } else { theme.text_primary },
+        );
+    }
+
+    /// Material 2026 (M3 Expressive) Wavy Linear Progress Indicator:
+    /// Renders an animated sinusoidal wave along the active progress segment, a `4dp` stop gap,
+    /// the remaining track segment, and a terminal stop dot. Respects `motion::reduced_motion()`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn m3_wavy_progress(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        fraction: f32,
+        phase: f32,
+        paused: bool,
+    ) {
+        let theme = active_theme();
+        let clamped = fraction.clamp(0.0, 1.0);
+        let fill_w = (w * clamped).clamp(if clamped > 0.0 { h } else { 0.0 }, w);
+        let gap_w = if fill_w > 0.0 && fill_w < w - 8.0 {
+            4.5
+        } else {
+            0.0
+        };
+        let rem_x = x + fill_w + gap_w;
+        let rem_w = (w - fill_w - gap_w).max(0.0);
+
+        if rem_w > 2.0 {
+            self.rounded(rem_x, y, rem_w, h, h * 0.45, theme.surface_dim);
+            self.border(rem_x, y, rem_w, h, h * 0.45, theme.border);
+            if rem_w > 12.0 {
+                let dot_d = (h * 0.44).clamp(4.0, 6.0);
+                self.rounded(
+                    x + w - dot_d - 3.0,
+                    y + (h - dot_d) * 0.5,
+                    dot_d,
+                    dot_d,
+                    dot_d * 0.5,
+                    theme.accent,
+                );
+            }
+        }
+
+        if fill_w > 0.0 {
+            self.rounded(x, y, fill_w, h, h * 0.45, theme.accent);
+            if !paused && !motion::reduced_motion() && fill_w > 20.0 {
+                // Material 2026 sinusoidal wave crest overlay along active progress bar
+                let wave_t = phase * std::f32::consts::TAU;
+                let seg_w = 10.0f32;
+                let count = ((fill_w - 8.0) / seg_w).floor().clamp(1.0, 48.0) as usize;
+                let wave_amp = (h * 0.22).clamp(1.2, 3.0);
+                for i in 0..count {
+                    let sx = x + 4.0 + i as f32 * seg_w;
+                    let theta = wave_t + i as f32 * 0.65;
+                    let wy = y + (h - 3.0) * 0.5 + theta.sin() * wave_amp;
+                    self.rounded(
+                        sx,
+                        wy,
+                        (seg_w - 1.5).max(4.0),
+                        3.0,
+                        1.5,
+                        color::with_alpha(theme.on_accent, 0.30),
+                    );
+                }
+                // Expressive leading-edge vertical indicator bar
+                self.rounded(
+                    (x + fill_w - 5.0).max(x),
+                    y + 2.0,
+                    3.5,
+                    (h - 4.0).max(2.0),
+                    1.75,
+                    theme.on_accent,
+                );
+            }
+        }
+    }
+
+    /// Material 2026 (M3 Expressive) Morphing Loading Indicator (`m3_wavy_circular_spinner`):
+    /// Renders an orbiting 6-node expressive harmonic ring that morphs between a rounded polygon
+    /// and a star-flower constellation at `(cx, cy)` with `radius` dp.
+    pub fn m3_wavy_circular_spinner(&mut self, cx: f32, cy: f32, radius: f32, phase: f32) {
+        let theme = active_theme();
+        let t = if motion::reduced_motion() {
+            0.25
+        } else {
+            phase * std::f32::consts::TAU
+        };
+        let nodes = 6usize;
+        for i in 0..nodes {
+            let base_angle = t + (i as f32 / nodes as f32) * std::f32::consts::TAU;
+            let wave = (t * 2.0 + i as f32 * 1.047).sin();
+            let r = radius * (0.78 + 0.22 * wave);
+            let dot_d = (radius * (0.28 + 0.08 * wave)).clamp(3.0, 7.5);
+            let px = cx + base_angle.cos() * r - dot_d * 0.5;
+            let py = cy + base_angle.sin() * r - dot_d * 0.5;
+            let alpha = (0.45 + 0.55 * ((i as f32 / nodes as f32 + phase) % 1.0)).clamp(0.3, 1.0);
+            self.rounded(
+                px,
+                py,
+                dot_d,
+                dot_d,
+                dot_d * 0.42,
+                color::with_alpha(theme.accent, alpha),
+            );
+        }
+    }
+
+    /// Material 2026 (M3 Expressive) Floating Snackbar / Status Banner:
+    /// Renders an elevated tonal floating status bar with a leading status icon and spring entrance.
+    pub fn m3_snackbar_toast(
+        &mut self,
+        x: f32,
+        y: f32,
+        max_w: f32,
+        text: &str,
+        is_error: bool,
+        anim_t: f32,
+    ) {
+        if text.trim().is_empty() || max_w <= 40.0 {
+            return;
+        }
+        let theme = active_theme();
+        let t = anim_t.clamp(0.0, 1.0);
+        let spring = motion::spring_expressive_default(t);
+        let alpha = motion::spring_expressive_effects(t);
+        let slide = if motion::reduced_motion() {
+            0.0
+        } else {
+            (1.0 - spring) * 10.0
+        };
+        let h = 30.0;
+        let fitted = self.fit_text(Face::Medium, 12.0, text, (max_w - 42.0).max(48.0));
+        let tw = self.measure(Face::Medium, 12.0, &fitted);
+        let bar_w = (tw + 40.0).clamp(110.0, max_w);
+        let by = y + slide;
+
+        let accent_c = if is_error { theme.danger } else { theme.accent };
+        self.rounded(
+            x,
+            by,
+            bar_w,
+            h,
+            8.0,
+            color::with_alpha(theme.surface_bright, 0.96 * alpha),
+        );
+        self.border(
+            x,
+            by,
+            bar_w,
+            h,
+            8.0,
+            color::with_alpha(accent_c, 0.78 * alpha),
+        );
+        self.rounded(
+            x + 4.0,
+            by + 6.0,
+            3.0,
+            h - 12.0,
+            1.5,
+            color::with_alpha(accent_c, alpha),
+        );
+        self.icon(
+            if is_error { Icon::Close } else { Icon::Check },
+            x + 12.0,
+            by + 8.0,
+            14.0,
+            color::with_alpha(accent_c, alpha),
+        );
+        self.text(
+            Face::Medium,
+            12.0,
+            x + 30.0,
+            by + 6.0,
+            color::with_alpha(theme.text_primary, alpha),
+            &fitted,
+        );
     }
 
     /// Draw a cached RGBA project icon (`w x h`) into `(x, y, dw, dh)` dp.
@@ -1427,7 +1998,7 @@ impl<'a> Ui<'a> {
     ) -> [f32; 4] {
         let theme = active_theme();
         let accent = theme.accent;
-        let radius = (h * 0.24).clamp(8.0, 14.0);
+        let radius = (h * 0.18).clamp(6.0, 9.0);
         self.rounded(
             x,
             y,
@@ -2021,26 +2592,43 @@ impl<'a> Ui<'a> {
         }
     }
 
-    /// Paints the active theme background with a living Liquid Glass Aurora backdrop over `[x, y, w, h]` dp.
+    /// Paints the active Material 3 Expressive theme background with a smooth 60fps animating
+    /// ambient tonal aurora & architectural horizon backdrop over `[x, y, w, h]` dp.
     pub fn draw_theme_background(&mut self, x: f32, y: f32, w: f32, h: f32, theme: &ResolvedTheme) {
+        let t = motion::ambient_time();
+        let wave_a = (t * 0.65).sin() * 0.5 + 0.5;
+        let wave_b = (t * 0.42 + 1.35).cos() * 0.5 + 0.5;
+        let shift = (t * 0.52).sin() * 0.08;
+
         if theme.is_gradient {
-            let mid = theme
-                .use_three_stops
-                .then_some((theme.gradient_mid_pos, theme.gradient_mid));
+            let start_c = lerp_color(theme.gradient_start, theme.accent, 0.08 * wave_a);
+            let end_c = lerp_color(theme.gradient_end, theme.gradient_mid, 0.14 * wave_b);
+            let mid_c = lerp_color(theme.gradient_mid, theme.accent, 0.06 * (1.0 - wave_a));
+            let mid_pos = (theme.gradient_mid_pos + shift).clamp(0.20, 0.80);
+            let mid = theme.use_three_stops.then_some((mid_pos, mid_c));
             self.fill_gradient(
                 x,
                 y,
                 w,
                 h,
                 theme.gradient_direction,
-                theme.gradient_start,
-                theme.gradient_end,
+                start_c,
+                end_c,
                 mid,
                 20,
             );
         } else {
-            let top_tint = lerp_color(theme.bg_solid, theme.gradient_start, 0.45);
-            let bot_tint = lerp_color(theme.bg_solid, theme.gradient_end, 0.55);
+            let top_tint = lerp_color(
+                theme.bg_solid,
+                lerp_color(theme.gradient_start, theme.accent, 0.12 * wave_a),
+                0.48,
+            );
+            let bot_tint = lerp_color(
+                theme.bg_solid,
+                lerp_color(theme.gradient_end, theme.gradient_mid, 0.16 * wave_b),
+                0.56,
+            );
+            let mid_pos = (0.48 + shift).clamp(0.25, 0.75);
             self.fill_gradient(
                 x,
                 y,
@@ -2049,11 +2637,41 @@ impl<'a> Ui<'a> {
                 GradientDirection::Vertical,
                 top_tint,
                 bot_tint,
-                Some((0.48, theme.bg_solid)),
-                14,
+                Some((mid_pos, theme.bg_solid)),
+                16,
             );
         }
-        // Clean, artifact-free ambient background (no block/bubble overlays)
+
+        // Material 3 Expressive animated tonal aurora ribbons (zero texture overhead, 60fps smooth)
+        let ribbon_alpha_1 = if theme.is_light { 0.055 } else { 0.045 };
+        let ribbon_alpha_2 = if theme.is_light { 0.040 } else { 0.032 };
+        let band1_h = (h * 0.28).max(48.0);
+        let band1_y = y + (h - band1_h) * (0.18 + 0.14 * wave_a);
+        self.fill_gradient(
+            x,
+            band1_y,
+            w,
+            band1_h,
+            GradientDirection::Horizontal,
+            color::with_alpha(theme.accent, ribbon_alpha_1 * (0.6 + 0.4 * wave_b)),
+            color::with_alpha(theme.gradient_mid, ribbon_alpha_2),
+            Some((0.5 + shift * 0.8, color::with_alpha(theme.accent, ribbon_alpha_1))),
+            8,
+        );
+
+        let band2_h = (h * 0.24).max(40.0);
+        let band2_y = y + (h - band2_h) * (0.72 - 0.12 * wave_b);
+        self.fill_gradient(
+            x,
+            band2_y,
+            w,
+            band2_h,
+            GradientDirection::Horizontal,
+            color::with_alpha(theme.gradient_start, ribbon_alpha_2),
+            color::with_alpha(theme.accent, ribbon_alpha_1 * (0.6 + 0.4 * wave_a)),
+            None,
+            6,
+        );
     }
 
     // ---- the launcher's components & animated Horizon intro ----
@@ -3033,6 +3651,94 @@ pub mod motion {
         };
         let dt = now.duration_since(start).as_secs_f32();
         (dt / duration_secs).clamp(0.0, 1.0)
+    }
+
+    /// Material 2026 (M3 Expressive) Fast Spatial Spring (`stiffness: 380, damping: 22`):
+    /// Underdamped second-order physical spring with ~6% expressive overshoot for switches,
+    /// active nav indicators, filter chips, and button morphs.
+    pub fn spring_expressive_spatial(t: f32) -> f32 {
+        let x = t.clamp(0.0, 1.0);
+        if x <= 0.0 || x >= 1.0 || reduced_motion() {
+            return x;
+        }
+        let decay = (-7.2 * x).exp();
+        1.0 - decay * ((8.4 * x).cos() + 0.55 * (8.4 * x).sin())
+    }
+
+    /// Material 2026 (M3 Expressive) Default Spatial Spring (`stiffness: 300, damping: 26`):
+    /// Smooth spatial settle with gentle ~2.5% follow-through for cards, sheets, and dialogs.
+    pub fn spring_expressive_default(t: f32) -> f32 {
+        let x = t.clamp(0.0, 1.0);
+        if x <= 0.0 || x >= 1.0 || reduced_motion() {
+            return x;
+        }
+        let decay = (-7.8 * x).exp();
+        1.0 - decay * ((5.6 * x).cos() + 0.85 * (5.6 * x).sin())
+    }
+
+    /// Material 2026 (M3 Expressive) Effects Spring (critically/over-damped, 0% bounce):
+    /// Used exclusively for opacity, color, and elevation transitions so colors never overshoot.
+    pub fn spring_expressive_effects(t: f32) -> f32 {
+        let x = t.clamp(0.0, 1.0);
+        if x <= 0.0 || x >= 1.0 {
+            return x;
+        }
+        1.0 - (-8.5 * x).exp() * (1.0 + 8.5 * x * 0.35)
+    }
+
+    /// Material 2026 Dynamic Shape-Morphing Corner Radius:
+    /// Morphs a component's corner radius across resting (`base_r`), selected (`active_r`),
+    /// and pressed (`press_r`) states.
+    pub fn morph_radius(
+        base_r: f32,
+        active_r: f32,
+        press_r: f32,
+        active_t: f32,
+        press_t: f32,
+    ) -> f32 {
+        let a = active_t.clamp(0.0, 1.0);
+        let p = press_t.clamp(0.0, 1.0);
+        let r_sel = base_r + (active_r - base_r) * a;
+        (r_sel + (press_r - r_sel) * p).max(2.0)
+    }
+
+    /// Micro-interaction tactile press scale (`0.965` squash on press, expressive spring rebound on release).
+    pub fn press_scale(pressed: bool, release_progress: f32) -> f32 {
+        if reduced_motion() {
+            return 1.0;
+        }
+        if pressed {
+            0.968
+        } else if release_progress < 1.0 {
+            let s = spring_expressive_spatial(release_progress.clamp(0.0, 1.0));
+            0.968 + (1.0 - 0.968) * s
+        } else {
+            1.0
+        }
+    }
+
+    /// Advances a continuous 1D second-order Hooke spring-damper state `(pos, vel)` toward `target` over `dt`.
+    pub fn step_spring_damper(
+        pos: &mut f32,
+        vel: &mut f32,
+        target: f32,
+        stiffness: f32,
+        damping: f32,
+        dt: f32,
+    ) {
+        if reduced_motion() {
+            *pos = target;
+            *vel = 0.0;
+            return;
+        }
+        let step_dt = dt.clamp(0.001, 0.033);
+        let force = (target - *pos) * stiffness - *vel * damping;
+        *vel += force * step_dt;
+        *pos += *vel * step_dt;
+        if (*pos - target).abs() < 0.05 && vel.abs() < 0.5 {
+            *pos = target;
+            *vel = 0.0;
+        }
     }
 }
 

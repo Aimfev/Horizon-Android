@@ -268,13 +268,13 @@ impl Login {
         action: Action,
     ) {
         let [x, y, w, h] = rect;
-        ui.rounded(x, y, w, h, 14.0, login_surface());
+        ui.rounded(x, y, w, h, 9.0, login_surface());
         ui.border(
             x,
             y,
             w,
             h,
-            14.0,
+            9.0,
             if current {
                 login_accent()
             } else {
@@ -351,11 +351,11 @@ impl Login {
             y + 8.0,
             w,
             h,
-            26.0,
+            12.0,
             color::hex(0x000000, (90.0 * modal_t) as u8),
         );
-        ui.rounded(x, y, w, h, 26.0, theme.bg_solid);
-        ui.border(x, y, w, h, 26.0, login_border());
+        ui.rounded(x, y, w, h, 12.0, theme.bg_solid);
+        ui.border(x, y, w, h, 12.0, login_border());
 
         let (title, subtitle): (&str, String) = if self.providers {
             ("Accounts", "Choose how you want to play".into())
@@ -482,8 +482,8 @@ impl Login {
             {
                 let cx = x + 20.0 + (i % 2) as f32 * (cw + gap);
                 let cy = content_y + (i / 2) as f32 * (ch + gap);
-                ui.rounded(cx, cy, cw, ch, 16.0, login_surface());
-                ui.border(cx, cy, cw, ch, 16.0, login_border());
+                ui.rounded(cx, cy, cw, ch, 10.0, login_surface());
+                ui.border(cx, cy, cw, ch, 10.0, login_border());
                 ui.rounded(cx + 14.0, cy + 14.0, 34.0, 34.0, 11.0, login_accent_soft());
                 ui.text(
                     Face::SemiBold,

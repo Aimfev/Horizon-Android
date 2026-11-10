@@ -756,8 +756,9 @@ pub fn display_rotation() -> i32 {
 /// Requests the highest supported hardware Display.Mode (90Hz / 120Hz / 144Hz / 165Hz) on the Activity window.
 pub fn apply_high_refresh_rate(preferred_hz: u16) {
     let _ = with_context(|env, activity| {
+        let cls = env.get_object_class(activity)?;
         env.call_static_method(
-            "dev/horizon/android/HorizonActivity",
+            &cls,
             "applyHighRefreshRate",
             "(Landroid/app/Activity;I)V",
             &[JValue::Object(activity), JValue::Int(i32::from(preferred_hz))],

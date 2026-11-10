@@ -31,7 +31,7 @@ impl Kind {
         let lower = name.to_ascii_lowercase();
         match self {
             Self::Mods => {
-                lower.ends_with(".hmod") || lower.ends_with(".hnmod") || lower.ends_with(".jar")
+                lower.ends_with(".hmod") || lower.ends_with(".hnmod") || lower.ends_with(".jar") || lower.ends_with(".hpack")
             }
             Self::Packs => lower.ends_with(".zip"),
             Self::Shaders => lower.ends_with(".zip") || lower.ends_with(".hshader"),
@@ -115,6 +115,7 @@ pub fn validate(
                     .any(|ext| raw.ends_with(&format!(".{ext}")));
         manifest |= raw == "horizon-mod.toml"
             || raw == "horizon-native.json"
+            || raw == "horizon-modpack.toml"
             || raw == "fabric.mod.json"
             || raw == "quilt.mod.json"
             || raw == "META-INF/neoforge.mods.toml"
@@ -181,8 +182,15 @@ pub fn read_mod_archive_id(path: &Path, original_name: &str) -> crate::Result<(S
     let mut zip = zip::ZipArchive::new(file)?;
     let has_native_json = zip.by_name("horizon-native.json").is_ok();
     let has_hmod_toml = zip.by_name("horizon-mod.toml").is_ok();
+    let has_hpack_toml = zip.by_name("horizon-modpack.toml").is_ok();
 
-    if lower.ends_with(".hnmod") || (has_native_json && !has_hmod_toml) {
+    if lower.ends_with(".hpack") || has_hpack_toml {
+        let pack = horizon_mods::modpack::Modpack::read(path)
+            .map_err(|e| format!("Invalid Horizon modpack (.hpack): {e}"))?;
+        return Ok((pack.manifest.id, "hpack"));
+    }
+
+    if lower.ends_with(".hnmod") || has_native_json {
         if let Ok(bundle) = horizon_mods::index::native::Bundle::read(path) {
             return Ok((bundle.manifest.id, "hnmod"));
         }

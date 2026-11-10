@@ -722,3 +722,48 @@ mod generated;
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+
+/// How far a chunk a mod asked for with `native_chunk_load_request` is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeChunkLoad {
+    Pending,
+    Loaded,
+    Failed,
+}
+
+/// An owned fluid payload (amount in millibuckets).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeFluidStack {
+    pub fluid: String,
+    pub amount: i32,
+    pub components: Compound,
+}
+
+/// A tank exposed by a block's fluid capability, in provider order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeFluidTankView {
+    pub tank: usize,
+    pub stack: Option<NativeFluidStack>,
+    pub capacity: i32,
+}
+
+/// What a mod asks of the terrain's picture each frame (`native_world_hold`). API 414.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorldHold {
+    #[default]
+    None,
+    Hold,
+    Release,
+}
+
+/// World-space vertex and fragment warp shader hook (`native_world_warp`). API 415.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WorldWarp {
+    pub vertex_wgsl: String,
+    pub fragment_wgsl: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct WorldWarpEvent<'a> {
+    pub warp: &'a mut Option<WorldWarp>,
+}

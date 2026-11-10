@@ -58,12 +58,28 @@ impl Game<'_> {
         };
         let pos = p.position;
         let velocity = self.known_player_movement();
-        // When jumping and throwing a Wind Charge downward on the same tick, controlled_simulation_tick
-        // has already cleared on_ground and set velocity.y = +0.42 before tick_local_hand runs.
-        // Treat downward throws while rising as grounded so upward jump velocity does not slow down
-        // the downward Wind Charge projectile and delay ground impact by 1 tick.
-        let on_ground = p.ground.on_ground || (self.pitch > 35.0 && velocity.y > 0.0);
-        let start = Vec3::new(pos.x, eye[1], pos.z);
+        // WindCharge has zero gravity and 1.0 inertia, so inheriting positive upward player
+        // velocity (such as +0.42 when jumping on the same tick via a GoyControl macro button
+        // or while rising from a wind burst) would permanently deflect the WindCharge upward
+        // into the sky. Only inherit downward velocity when aiming steeply downward while falling.
+        let on_ground = p.ground.on_ground || velocity.y >= 0.0 || self.pitch <= 35.0;
+        let inherited_velocity = Vec3::new(
+            velocity.x,
+            if self.pitch > 35.0 && velocity.y < 0.0 {
+                velocity.y
+            } else {
+                0.0
+            },
+            velocity.z,
+        );
+        // When controlled_simulation_tick already applied a jump on this tick before tick_local_hand,
+        // subtract the same-tick jump displacement so the WindCharge spawns from the pre-jump eye height.
+        let start_y = if !p.ground.on_ground && velocity.y > 0.0 && velocity.y <= 0.5 {
+            eye[1] - velocity.y
+        } else {
+            eye[1]
+        };
+        let start = Vec3::new(pos.x, start_y, pos.z);
         let mut proj = Projectile::new(ProjectileKind::WindCharge, start, Some(Who::Player));
         proj.shoot_from_rotation(
             &mut self.world.random,
@@ -72,7 +88,7 @@ impl Game<'_> {
             0.0,
             1.5,
             1.0,
-            velocity,
+            inherited_velocity,
             on_ground,
         );
         self.add_projectile(proj);

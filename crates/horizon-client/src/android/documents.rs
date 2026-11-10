@@ -840,6 +840,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             if in_mods
                 && (lower_name.ends_with(".hnmod")
                     || lower_name.ends_with(".hmod")
+                    || lower_name.ends_with(".hpack")
                     || lower_name.ends_with(".jar"))
             {
                 set_progress(
@@ -860,6 +861,15 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 let mut on = horizon_client::mod_list::ModList::load(profile_root);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id.clone());
+                if ext == "hpack" {
+                    if let Ok(count) = horizon_client::jar_transpiler::install_hpack_modpack(&dest, profile_root) {
+                        imported(
+                            format!("Installed Horizon Modpack '{mod_id}' ({count} mods enabled)!"),
+                            Kind::Mods,
+                        );
+                        return Ok(());
+                    }
+                }
                 if ext == "hnmod" {
                     if let Ok(compiled) = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&dest, profile_root) {
                         on.disabled.remove(&compiled.id);
@@ -1033,7 +1043,13 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 let mut on = horizon_client::mod_list::ModList::load(&request.home);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id);
-                if ext == "hnmod"
+                if ext == "hpack"
+                    && let Ok(count) = horizon_client::jar_transpiler::install_hpack_modpack(&target, &request.home)
+                {
+                    transpiled_msg = Some(format!(
+                        "Installed Horizon Modpack '{mod_id}' ({count} mods enabled) — ready in game!"
+                    ));
+                } else if ext == "hnmod"
                     && let Ok(compiled) = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&target, &request.home)
                 {
                     on.disabled.remove(&compiled.id);
@@ -1297,28 +1313,25 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             &detail_fitted,
         );
 
-        // Progress bar (Track + Fill)
+        // Material 2026 Wavy Progress Indicator + Morphing Spinner
         let pb_x = x + 18.0;
         let pb_y = y + 80.0;
         let pb_w = w - 36.0;
-        ui.rounded(pb_x, pb_y, pb_w, 8.0, 4.0, rgba(255, 255, 255, 24));
-
-        let elapsed = s
-            .toast
-            .as_ref()
-            .map(|t| t.1.elapsed().as_secs_f32())
-            .unwrap_or(0.0);
+        let elapsed = horizon_client::ui_theme::motion::ambient_time();
         let fill_ratio = s
             .progress
             .unwrap_or_else(|| ((elapsed * 0.45).sin().abs() * 0.55 + 0.35).clamp(0.15, 0.95));
-        ui.rounded(
+        let _fill_w = (pb_w * fill_ratio).clamp(8.0, pb_w);
+        ui.m3_wavy_progress(
             pb_x,
             pb_y,
-            pb_w * fill_ratio.clamp(0.04, 1.0),
-            8.0,
-            4.0,
-            rgba(145, 120, 255, 255),
+            pb_w,
+            10.0,
+            fill_ratio.clamp(0.06, 1.0),
+            (elapsed * 0.85) % 1.0,
+            false,
         );
+        ui.m3_wavy_circular_spinner(x + w - 28.0, y + 28.0, 8.0, (elapsed * 0.75) % 1.0);
 
         // Cancel button
         let btn_w = 104.0;

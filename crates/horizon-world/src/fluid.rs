@@ -320,3 +320,38 @@ impl FluidBlockBindings {
         }
     }
 }
+
+pub const MOD_FLUIDS_FILE: &str = "horizon-mod-fluids.json";
+
+/// A mod fluid as [`MOD_FLUIDS_FILE`] lists it: its source and flowing ids,
+/// template, numbers (none: the template's) and liquid block.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ModFluid {
+    pub id: String,
+    pub flowing: String,
+    pub template: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tick_delay: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drop_off: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slope_find_distance: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convert_to_source: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_scale: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_push_entity: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_swim: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_drown: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_extinguish: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fall_distance_modifier: Option<f32>,
+}

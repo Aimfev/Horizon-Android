@@ -243,7 +243,7 @@ impl Surface for NativeSurface {
                 } else {
                     mode = vk::PresentModeKHR::FIFO;
                 }
-                count = count.max(6);
+                count = count.max(3);
                 if let Ok(caps) = unsafe {
                     self.functor.get_physical_device_surface_capabilities(
                         device.shared.physical_device,

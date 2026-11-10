@@ -161,7 +161,7 @@ pub fn horizon_builtin_shader_projects(query_text: &str) -> Vec<Project> {
         .split_whitespace()
         .map(|w| w.to_lowercase())
         .collect();
-    horizon_shader_api::BUILTIN_SHADERS
+    horizon_shader_api::all_horizon_shader_packs()
         .into_iter()
         .filter(|(id, title, summary, _)| {
             let hay = format!("{id} {title} {summary} horizon shader").to_lowercase();
@@ -176,7 +176,7 @@ pub fn horizon_builtin_shader_projects(query_text: &str) -> Vec<Project> {
             author: "Horizon".into(),
             downloads,
             page: format!("https://playhorizon.dev/mods/{id}"),
-            icon: None,
+            icon: Some(format!("https://horizon-rust.github.io/horizon-mods/icons/{id}.png")),
             license: "MIT".into(),
             kind: Kind::Shader,
             game_versions: vec![browser::GAME.into()],

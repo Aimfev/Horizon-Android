@@ -811,6 +811,7 @@ pub struct Renderer {
     lightmap_sampler: wgpu::Sampler,
     animations: animate::SpriteAnimator,
     active_animated_layers: Vec<u64>,
+    animated_layers_state: (u64, usize, usize, usize, SectionKey, u64),
     uploads: upload::Uploads,
     /// Section meshes are staged through their own belt into
     /// `section_copies`, which the next frame records its commands after:
@@ -2096,6 +2097,8 @@ impl Renderer {
             let mut constants = sprite_constants.to_vec();
             if settled {
                 constants.extend([("TERRAIN_FILTERING", 0.0), ("TERRAIN_FULLY_VISIBLE", 1.0)]);
+            } else if cfg!(target_os = "android") {
+                constants.push(("TERRAIN_FILTERING", 0.0));
             }
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -3829,6 +3832,7 @@ impl Renderer {
             lightmap_sampler,
             animations,
             active_animated_layers: vec![0; active_layer_words],
+            animated_layers_state: (u64::MAX, 0, 0, 0, (0, 0, 0), 0),
             uploads,
             section_uploads,
             section_copies: None,
@@ -4025,6 +4029,8 @@ impl Renderer {
     #[cfg(target_os = "android")]
     pub fn suspend_surface(&mut self) {
         self.suspended = true;
+        self.in_flight.clear();
+        let _ = self.device.poll(wgpu::PollType::Poll);
         self.surface = None;
         self.spare_surface
             .get_mut()
@@ -4490,6 +4496,7 @@ impl Renderer {
         self.sprite_split = split;
         self.animations = animations;
         self.active_animated_layers = vec![0; active_layer_words];
+        self.animated_layers_state = (u64::MAX, 0, 0, 0, (0, 0, 0), 0);
         self.sprite_minimum_size = sprite_minimum_size;
         self.emission_stats = emission_stats;
         self.arena.prewarm(&self.device);
@@ -5964,6 +5971,24 @@ impl Renderer {
         if self.suspended {
             return Ok(false);
         }
+        #[cfg(target_os = "android")]
+        {
+            let _ = self.device.poll(wgpu::PollType::Poll);
+            let max_in_flight = if self.pack_post.as_ref().is_some_and(|p| p.1.is_some())
+                || self.native.is_some()
+            {
+                1
+            } else {
+                2
+            };
+            while self.in_flight.len() > max_in_flight {
+                let index = self.in_flight.pop_front();
+                let _ = self.device.poll(wgpu::PollType::Wait {
+                    submission_index: index,
+                    timeout: Some(std::time::Duration::from_millis(8)),
+                });
+            }
+        }
         let started = Instant::now();
         if self.first_frame == FirstFrame::Acquire {
             // Once: a minimized window acquires nothing for a while.
@@ -6154,6 +6179,8 @@ impl Renderer {
             let submission = crate::spans::time("submit", || self.queue.submit([commands]));
             let present = Instant::now();
             if let Some(surface_frame) = surface_frame {
+                #[cfg(target_os = "android")]
+                self.in_flight.push_back(submission);
                 if self.config.present_mode == wgpu::PresentMode::Fifo {
                     self.window.pre_present_notify();
                 }
@@ -6324,8 +6351,8 @@ impl Renderer {
             filtering: [
                 self.texture_filtering as f32,
                 self.sprite_textures[0].width() as f32,
-                0.0,
-                0.0,
+                1.0 / self.sprite_textures[0].width().max(1) as f32,
+                if self.hdr.is_some() { 1.0 } else { 0.0 },
             ],
         };
         self.uploads
@@ -6494,41 +6521,52 @@ impl Renderer {
             });
         }
         if self.animated_textures {
-            self.active_animated_layers.fill(0);
-            for v in &visible {
-                let s = self.sections.get(v.slot);
-                for &layer in &*s.animated_layers {
-                    let layer = layer as usize;
-                    self.active_animated_layers[layer / u64::BITS as usize] |=
-                        1_u64 << (layer % u64::BITS as usize);
-                }
-            }
-            for v in &visible_lods {
-                if let Some(tile) = self.lods.get(&v.key) {
-                    for &layer in &*tile.drawn().animated_layers {
+            let anim_state = (
+                frame.ticks,
+                visible.len(),
+                visible_lods.len(),
+                shadow_visible.len(),
+                camera_section,
+                self.uploaded_bytes,
+            );
+            if self.animated_layers_state != anim_state {
+                self.animated_layers_state = anim_state;
+                self.active_animated_layers.fill(0);
+                for v in &visible {
+                    let s = self.sections.get(v.slot);
+                    for &layer in &*s.animated_layers {
                         let layer = layer as usize;
                         self.active_animated_layers[layer / u64::BITS as usize] |=
                             1_u64 << (layer % u64::BITS as usize);
                     }
-                    for &layer in &*tile.mesh.animated_layers {
+                }
+                for v in &visible_lods {
+                    if let Some(tile) = self.lods.get(&v.key) {
+                        for &layer in &*tile.drawn().animated_layers {
+                            let layer = layer as usize;
+                            self.active_animated_layers[layer / u64::BITS as usize] |=
+                                1_u64 << (layer % u64::BITS as usize);
+                        }
+                        for &layer in &*tile.mesh.animated_layers {
+                            let layer = layer as usize;
+                            self.active_animated_layers[layer / u64::BITS as usize] |=
+                                1_u64 << (layer % u64::BITS as usize);
+                        }
+                    }
+                }
+                for v in &shadow_visible {
+                    let s = self.sections.get(v.slot);
+                    for &layer in &*s.animated_layers {
                         let layer = layer as usize;
                         self.active_animated_layers[layer / u64::BITS as usize] |=
                             1_u64 << (layer % u64::BITS as usize);
                     }
                 }
+                // Visibility is collected before terrain draw commands are recorded,
+                // so upload the current mask here and keep animation updates ahead
+                // of every draw in this command buffer.
+                self.animate(&mut encoder, frame.ticks, !frame.title);
             }
-            for v in &shadow_visible {
-                let s = self.sections.get(v.slot);
-                for &layer in &*s.animated_layers {
-                    let layer = layer as usize;
-                    self.active_animated_layers[layer / u64::BITS as usize] |=
-                        1_u64 << (layer % u64::BITS as usize);
-                }
-            }
-            // Visibility is collected before terrain draw commands are recorded,
-            // so upload the current mask here and keep animation updates ahead
-            // of every draw in this command buffer.
-            self.animate(&mut encoder, frame.ticks, !frame.title);
         }
         self.drawn_sections = visible.len() + visible_lods.len();
         let instances = self.drawn_sections + shadow_visible.len();
@@ -7345,7 +7383,9 @@ impl Renderer {
                 .then(|| pack_timing::PassTiming::new(&self.device, &self.queue))
                 .flatten();
         }
-        let pack_reads_world = pack_post || native_post;
+        let native_material =
+            !frame.title && self.native.as_ref().is_some_and(|n| n.material.is_some());
+        let pack_reads_world = pack_post || native_post || native_material;
         // Phase 2 of occlusion culling draws over the depth, and a shader pack or TAA reads it.
         let keep_depth = pack_reads_world
             || (taa && self.world_post.taa)
@@ -7690,8 +7730,17 @@ impl Renderer {
                 });
                 pass.set_bind_group(0, &self.mirror_group, &[]);
                 if sky_visible && frame.skybox {
-                    pass.set_pipeline(&self.sky);
-                    pass.draw(0..3, 0..1);
+                    match self
+                        .native
+                        .as_ref()
+                        .and_then(|n| Some((n.sky.as_ref()?, &n.frame)))
+                    {
+                        Some((sky, native)) => sky.draw(&mut pass, native),
+                        None => {
+                            pass.set_pipeline(&self.sky);
+                            pass.draw(0..3, 0..1);
+                        }
+                    }
                 }
                 // The solid terrain: occlusion culling is off with a mirror, so every draw
                 // is phase 1's.
@@ -8874,6 +8923,8 @@ impl Renderer {
             if first_frame {
                 startup_step(format_args!("presenting the first frame"));
             }
+            #[cfg(target_os = "android")]
+            self.in_flight.push_back(submission);
             self.queue.present(surface_frame);
             if self.hdr.is_some()
                 && let Some(marker) = self.hdr_marker.take()

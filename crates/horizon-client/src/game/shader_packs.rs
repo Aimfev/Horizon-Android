@@ -157,6 +157,8 @@ struct PendingShaderJob {
 }
 
 static PENDING_SHADER_JOB: std::sync::Mutex<Option<PendingShaderJob>> = std::sync::Mutex::new(None);
+static SHADER_JOB_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SHADER_GPU_BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn pending_shader_pack_status() -> Option<String> {
     let slot = PENDING_SHADER_JOB.lock().ok()?;
@@ -174,6 +176,7 @@ pub fn pending_shader_pack_status() -> Option<String> {
 }
 
 fn clear_pending_shader_job() {
+    SHADER_JOB_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if let Ok(mut slot) = PENDING_SHADER_JOB.lock() {
         *slot = None;
     }
@@ -450,10 +453,22 @@ impl Game<'_> {
                             );
                             if let Some(renderer) = &self.renderer {
                                 let ctx = renderer.shader_pack_build_context();
+                                let gen = SHADER_JOB_GENERATION
+                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                                    + 1;
                                 let (tx, rx) = std::sync::mpsc::channel();
                                 let _ = std::thread::Builder::new()
                                     .name("shader-pack-gpu".into())
                                     .spawn(move || {
+                                        let _build_guard = SHADER_GPU_BUILD_LOCK
+                                            .lock()
+                                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                                        if SHADER_JOB_GENERATION
+                                            .load(std::sync::atomic::Ordering::SeqCst)
+                                            != gen
+                                        {
+                                            return;
+                                        }
                                         let res = horizon_client::crash::contain(move || {
                                             let built = ctx.build(prepared.post, &table);
                                             BuiltShaderPack {
@@ -830,6 +845,9 @@ fn block_id_table(pack: &super::PackResources, ids: &BlockIds) -> Vec<i32> {
         let Some(state) = registry.state(state_id) else {
             continue;
         };
+        if !ids.contains_block(&state.name) {
+            continue;
+        }
         let Some(id) = ids.id(&state.name, |k| state.properties.get(k).map(String::as_str)) else {
             continue;
         };

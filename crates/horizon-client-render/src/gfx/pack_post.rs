@@ -938,11 +938,13 @@ fn sampler(
 /// naga's backends turn a module they cannot write into a panic as the driver gets the pipeline
 /// (#3525), which a pack's program must not turn into a crash.
 fn checked<T>(device: &wgpu::Device, create: impl FnOnce() -> T) -> Result<T, String> {
+    static SCOPE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if cfg!(target_os = "android") {
         // Yield briefly between pipeline compilations on Android so Mali's internal
         // shader compiler mutex never starves the main render thread's frame submission.
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
+    let _guard = SCOPE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
     let value = crate::crash::contain(create);
@@ -1313,13 +1315,20 @@ fn bindings(
             None => {
                 let mut src = source(&s.name, group.shadow(), shadow.is_some(), watershadow);
                 if matches!(group, Group::Deferred | Group::Composite | Group::Final)
-                    && (src == Source::Atlas || (src == Source::Dummy && s.ty == "sampler2D"))
+                    && src == Source::Atlas
                 {
                     src = Source::Color(0);
                 } else if group == Group::Gbuffers
                     && matches!(s.name.as_str(), "colortex0" | "gcolor" | "colortex1" | "gdepth" | "colortex2" | "gnormal" | "colortex3" | "composite")
                 {
                     src = Source::Atlas;
+                }
+                if group == Group::Translucent && src == Source::Depth {
+                    // Translucent gbuffers (`gbuffers_water`, `gbuffers_entities_translucent`,
+                    // `gbuffers_weather`) sample pre-translucent opaque depth (`depthtex1`) when
+                    // reading `depthtex0` / `gdepthtex` so water depth absorption, shoreline foam,
+                    // underwater refraction, and SSR work without a depth read-write feedback loop.
+                    src = Source::Depth1;
                 }
                 let blank = match src {
                     // The shadow pass writes the shadow map.
@@ -1328,7 +1337,8 @@ fn bindings(
                     Source::Depth => geometry.is_some(),
                     // Translucent terrain reads the copy; opaque terrain would read itself.
                     Source::Depth1 => group == Group::Gbuffers,
-                    Source::Color(n) => in_place & 1 << n != 0,
+                    // Translucent passes copy any written colortex buffer they also sample into `scratch`.
+                    Source::Color(n) => group != Group::Translucent && (in_place & 1 << n != 0),
                     _ => false,
                 };
                 let mut sample_type = match src {
@@ -1848,7 +1858,13 @@ fn build_pass(
         atlas: geometry.and_then(|g| g.atlas.clone()),
         ids: geometry.is_some_and(|g| g.ids.is_some()),
         groups: HashMap::new(),
-        copies: image_buffers(&images) & reads,
+        copies: (image_buffers(&images)
+            | if p.group == Group::Translucent {
+                written
+            } else {
+                0
+            })
+            & reads,
         reads: reads | image_buffers(&images),
         buffers: !interface.buffers.is_empty(),
         buffer_bindings: interface.buffers.clone(),
@@ -2469,11 +2485,25 @@ impl PackPost {
                 }
             }
         }
-        let depth1 = water.is_some()
+        let has_translucent_pass = water.is_some()
+            || weather.is_some()
+            || entities
+                .as_ref()
+                .is_some_and(|e| e.passes.iter().zip(e.late).any(|(p, late)| p.is_some() && late));
+        let depth1 = has_translucent_pass
             && passes
                 .iter()
                 .filter(|p| matches!(p.group, Group::Composite | Group::Final))
                 .chain(&water)
+                .chain(
+                    entities.iter().flat_map(|e| {
+                        e.passes
+                            .iter()
+                            .zip(e.late)
+                            .filter(|&(_, late)| late)
+                            .filter_map(|(p, _)| p.as_ref())
+                    }),
+                )
                 .chain(weather.iter().take(1).flatten())
                 .any(|p| p.samplers.iter().any(|s| s.source == Source::Depth1));
         let every_pass = || {
@@ -2838,7 +2868,7 @@ impl PackPost {
             ],
             fog[0].to_array(),
             fog[1].to_array(),
-            [1.0, 1.0, 1.0, 1.0],
+            pass.depth_linear,
         ];
         let head: &[u8] = bytemuck::cast_slice(&ours);
         let n = head.len().min(pass.block.len());
@@ -3102,15 +3132,12 @@ impl PackPost {
             return;
         };
         let translucent = list.translucent();
-        if list == TerrainList::Translucent
-            && let Some(t) = &self.targets
-            && let Some((copy, _)) = &t.depth1
-        {
-            encoder.copy_texture_to_texture(
-                t.depth_texture.as_image_copy(),
-                copy.as_image_copy(),
-                t.depth_texture.size(),
-            );
+        if !pass.group.shadow() {
+            let stale = pass.mipmaps & self.mipped & !self.mips_valid;
+            for b in (0..BUFFERS).filter(|b| stale & 1 << b != 0) {
+                self.mipmap(encoder, b);
+            }
+            self.mips_valid |= stale;
         }
         let group = self.bind(device, queue, encoder, &mut pass, size);
         {
@@ -3489,6 +3516,15 @@ impl PackPost {
         size: [u32; 2],
         terrain: &mut TerrainDraw<'_>,
     ) {
+        if let Some(t) = &self.targets
+            && let Some((copy, _)) = &t.depth1
+        {
+            encoder.copy_texture_to_texture(
+                t.depth_texture.as_image_copy(),
+                copy.as_image_copy(),
+                t.depth_texture.size(),
+            );
+        }
         self.draw_terrain(
             device,
             queue,
@@ -3866,17 +3902,20 @@ impl PackPost {
             return;
         }
 
-        // Compute the current frame's cache key before borrowing shadow_targets mutably.
-        let cache_key = self.compute_shadow_cache_key(frame);
-
-        // Entity vertices are interpolated each frame, so their shadows cannot be reused.
+        // Entity vertices are interpolated each frame; on Android, `mark_player` always
+        // adds the player shadow draw even in first person, so we throttle entity shadow
+        // refreshes via `cache_key.ticks` (every 2 ticks) instead of disabling the cache.
         let has_shadow_entities = self
             .entities
             .as_ref()
             .is_some_and(|entities| entities.geometry.draws.iter().any(|draw| draw.shadow));
+        let mut cache_key = self.compute_shadow_cache_key(frame);
+        if cfg!(target_os = "android") && has_shadow_entities {
+            cache_key.ticks = frame.ticks / 2;
+        }
         // Custom images are cleared each frame (`pack_images::clear`) before the
         // shadow pass writes them, so a pack with any redraws it too.
-        let cache_hit = !has_shadow_entities
+        let cache_hit = (!has_shadow_entities || cfg!(target_os = "android"))
             && self.images.is_empty()
             && self.shadow_cache.key == Some(cache_key)
             && self.shadow_targets.is_some();

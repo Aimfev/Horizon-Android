@@ -98,7 +98,7 @@ fn sprite_level(uv: vec2<f32>, layer: u32, lod: f32) -> vec4<f32> {
 // across the one screen pixel where two meet, so a linear (and anisotropic) sampler keeps them crisp.
 fn sample_nearest(uv: vec2<f32>, layer: u32, pixel: vec2<f32>, du: vec2<f32>, dv: vec2<f32>,
                   texel_screen: vec2<f32>) -> vec4<f32> {
-    let texel_coords = uv / pixel;
+    let texel_coords = uv * globals.filtering.y;
     let center = round(texel_coords) - 0.5;
     var offset = texel_coords - center;
     if TERRAIN_FILTERING == 0u {
@@ -148,6 +148,9 @@ fn sprite(tiled: vec2<f32>, layer: u32) -> vec4<f32> {
     let dv = dpdy(tiled);
     let uv = tile_uv(tiled);
     let pixel = vec2(1.0 / globals.filtering.y);
+    if TERRAIN_FILTERING == 0u {
+        return sample_nearest(uv, layer, pixel, du, dv, vec2(0.0));
+    }
     let texel_screen = sqrt(du * du + dv * dv);
     if TERRAIN_FILTERING == 1u || (TERRAIN_FILTERING == 3u && u32(globals.filtering.x) == 1u) {
         return sample_rgss(uv, layer, pixel, du, dv, texel_screen);
@@ -447,7 +450,7 @@ fn solid_finish(in: TerrainOut, texel: vec4<f32>, color: vec4<f32>) -> vec4<f32>
     // brightest. Only pixels as bright as their sprite's threshold may: its
     // bright parts, or all of it. Nothing else reads the frame's alpha.
     var emissive = 1.0;
-    if in.emission > 0u {
+    if in.emission > 0u && globals.filtering.w > 0.0 {
         let whole = in.emission > 4u;
         let tier = select(in.emission, in.emission - 4u, whole);
         let l = in.layer & 0x7fffu;

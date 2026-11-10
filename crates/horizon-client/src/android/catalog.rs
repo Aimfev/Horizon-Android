@@ -1548,18 +1548,40 @@ impl Catalog {
         }
         self.start_search();
     }
-    fn fetch_icons(&mut self, home: &Path) {
-        // Collect both direct icon URLs and Horizon/bundled items that need a Modrinth name search
-        // for their PFP and description.
-        let mut tasks: Vec<(String, String, Option<String>, Kind)> = Vec::new();
-        if self.page == Page::Mods
-            && self.config.mod_source == crate::shader_catalog::Origin::Horizon
-        {
+    pub fn fetch_icons(&mut self, home: &Path) {
+        const ICON_WORKER_THREADS: usize = 6;
+        // Collect candidate icon tasks, prioritizing currently visible page items first!
+        let mut raw_tasks: Vec<(String, String, Option<String>, Kind, browser::SourceId)> = Vec::new();
+        if self.page == Page::Mods {
             for (id, title, _) in horizon_client::mod_list::ANDROID_BUNDLED {
                 if !self.icons.contains_key(id) {
-                    tasks.push((id.to_owned(), title.to_owned(), None, Kind::Mod));
+                    raw_tasks.push((
+                        id.to_owned(),
+                        title.to_owned(),
+                        Some(format!("https://horizon-rust.github.io/horizon-mods/icons/{id}.png")),
+                        Kind::Mod,
+                        browser::SourceId::Horizon,
+                    ));
                 }
             }
+        }
+        // Prioritize visible slice of self.results [self.offset .. self.offset + CATALOG_PAGE_SIZE] first
+        let start = self.offset.min(self.results.len());
+        let end = (start + CATALOG_PAGE_SIZE).min(self.results.len());
+        for p in self.results[start..end]
+            .iter()
+            .chain(self.results[..start].iter())
+            .chain(self.results[end..].iter())
+        {
+            if self.icons.contains_key(&p.id) {
+                continue;
+            }
+            let direct = p
+                .icon
+                .as_ref()
+                .map(|u| u.trim().to_owned())
+                .filter(|u| !u.is_empty());
+            raw_tasks.push((p.id.clone(), p.title.clone(), direct, p.kind, p.source));
         }
         for item in &self.local {
             let raw_id = item
@@ -1583,20 +1605,32 @@ impl Catalog {
                     horizon_client::content_files::Kind::Shaders => Kind::Shader,
                 };
                 let clean_q = item.title.split('(').next().unwrap_or(&item.title).trim().to_owned();
-                tasks.push((canon_id, clean_q, None, b_kind));
+                raw_tasks.push((canon_id, clean_q, None, b_kind, browser::SourceId::Horizon));
             }
         }
-        for p in &self.results {
-            if self.icons.contains_key(&p.id) {
+
+        // Pass 1: 0ms synchronous disk-cache check so already-downloaded icons appear immediately!
+        let mut tasks = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (id, title, direct_url, kind, source) in raw_tasks {
+            if !seen.insert(id.clone()) {
                 continue;
             }
-            let direct = p
-                .icon
-                .as_ref()
-                .map(|u| u.trim().to_owned())
-                .filter(|u| !u.is_empty());
-            tasks.push((p.id.clone(), p.title.clone(), direct, p.kind));
+            if let Some((w, h, rgba, summary)) = browser::images::load_cached_rgba_by_id(
+                home,
+                &id,
+                direct_url.as_deref(),
+                browser::images::FAST_ICON,
+            ) {
+                self.icons.insert(id.clone(), (w, h, rgba));
+                if let Some(s) = summary {
+                    self.enriched_summaries.insert(id, s);
+                }
+                continue;
+            }
+            tasks.push((id, title, direct_url, kind, source));
         }
+
         if tasks.is_empty() {
             return;
         }
@@ -1604,24 +1638,79 @@ impl Catalog {
         let (tx, rx) = mpsc::channel();
         self.icon_worker = Some(rx);
         std::thread::spawn(move || {
-            for (id, title, direct_url, kind) in tasks {
-                let mut icon_url = direct_url;
-                let mut found_summary = None;
-                if icon_url.is_none() {
-                    if let Some(hit) = lookup_modrinth_by_name(&title, kind) {
-                        icon_url = hit.icon;
-                        if !hit.summary.trim().is_empty() {
-                            found_summary = Some(hit.summary);
+            // Pass 2: Batch-resolve Modrinth icon URLs in a single API call if any Modrinth item lacks a URL
+            let modrinth_missing: Vec<String> = tasks
+                .iter()
+                .filter(|(_, _, url, _, src)| url.is_none() && *src == browser::SourceId::Modrinth)
+                .map(|(id, _, _, _, _)| id.clone())
+                .collect();
+            let batch_urls: std::collections::HashMap<String, String> =
+                if !modrinth_missing.is_empty() {
+                    browser::modrinth::icons(&modrinth_missing)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect()
+                } else {
+                    std::collections::HashMap::new()
+                };
+
+            // Pass 3: 6-thread parallel worker pool for concurrent icon download & in-memory RGBA decode
+            let next_idx = std::sync::atomic::AtomicUsize::new(0);
+            let worker_count = tasks.len().min(ICON_WORKER_THREADS).max(1);
+            std::thread::scope(|scope| {
+                for _ in 0..worker_count {
+                    let tx = tx.clone();
+                    let home = &home;
+                    let tasks = &tasks;
+                    let batch_urls = &batch_urls;
+                    let next_idx = &next_idx;
+                    scope.spawn(move || {
+                        loop {
+                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
+                            let Some((id, title, direct_url, kind, _)) = tasks.get(i) else {
+                                break;
+                            };
+                            let mut icon_url = direct_url
+                                .clone()
+                                .or_else(|| batch_urls.get(id).cloned());
+                            let mut found_summary = None;
+
+                            // Try direct URL first (e.g.Modrinth CDN or Horizon Registry GitHub Pages)
+                            if let Some(url) = &icon_url {
+                                if let Ok((w, h, rgba)) = browser::images::fetch_rgba_fast(
+                                    home,
+                                    id,
+                                    url,
+                                    browser::images::FAST_ICON,
+                                    None,
+                                ) {
+                                    let _ = tx.send((id.clone(), w, h, rgba, None));
+                                    continue;
+                                }
+                            }
+
+                            // Fallback to Modrinth search by title for PFP & rich summary
+                            if let Some(hit) = lookup_modrinth_by_name(title, *kind) {
+                                icon_url = hit.icon;
+                                if !hit.summary.trim().is_empty() {
+                                    found_summary = Some(hit.summary);
+                                }
+                            }
+                            if let Some(url) = icon_url
+                                && let Ok((w, h, rgba)) = browser::images::fetch_rgba_fast(
+                                    home,
+                                    id,
+                                    &url,
+                                    browser::images::FAST_ICON,
+                                    found_summary.as_deref(),
+                                )
+                            {
+                                let _ = tx.send((id.clone(), w, h, rgba, found_summary));
+                            }
                         }
-                    }
+                    });
                 }
-                if let Some(url) = icon_url
-                    && let Ok(path) = browser::images::fetch(&home, &url, browser::images::ROW)
-                    && let Ok((w, h, rgba)) = horizon_client::hud::decode(&path)
-                {
-                    let _ = tx.send((id, w, h, rgba, found_summary));
-                }
-            }
+            });
         });
     }
 
@@ -1919,7 +2008,7 @@ impl Catalog {
                     .split_whitespace()
                     .map(|w| w.to_lowercase())
                     .collect();
-                for (id, title, summary, downloads) in horizon_client::jar_transpiler::HORIZON_CATALOG_MODS {
+                for (id, title, summary, downloads) in horizon_client::jar_transpiler::all_horizon_catalog_mods() {
                     if horizon_client::mod_list::ANDROID_BUNDLED
                         .iter()
                         .any(|(bid, _, _)| *bid == id)
@@ -1938,7 +2027,7 @@ impl Catalog {
                             author: "Horizon".into(),
                             downloads,
                             page: format!("https://playhorizon.dev/mods/{id}"),
-                            icon: None,
+                            icon: Some(format!("https://horizon-rust.github.io/horizon-mods/icons/{id}.png")),
                             license: "MIT".into(),
                             kind: Kind::Mod,
                             game_versions: vec![browser::GAME.into()],
@@ -2014,7 +2103,7 @@ impl Catalog {
             return;
         }
         let game = self.config.game_home(home);
-        if !matches!(project.kind, Kind::ResourcePack | Kind::Shader | Kind::Mod) {
+        if !matches!(project.kind, Kind::ResourcePack | Kind::Shader | Kind::Mod | Kind::Modpack) {
             return;
         }
         self.downloading = Some((project.source, project.id.clone()));
