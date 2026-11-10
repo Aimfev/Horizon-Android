@@ -658,7 +658,6 @@ pub struct NativeStack {
 
 /// What the player did on a native mod's panel (`native_panel_event`).
 #[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
 pub enum NativePanelEvent {
     Clicked { index: u32, right: bool },
     Search(String),
@@ -699,7 +698,6 @@ pub struct NativeServerPlayer {
 
 /// A command a native mod adds.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct NativeCommand {
     pub usage: String,
     pub level: u8,

@@ -110,5 +110,7 @@ pub(super) fn event(e: BrowserEvent) -> m::BrowserEvent {
         BrowserEvent::Page(i) => m::BrowserEvent::Page(i),
         BrowserEvent::Back => m::BrowserEvent::Back,
         BrowserEvent::Tab(i) => m::BrowserEvent::Tab(i),
+        #[allow(unreachable_patterns)]
+        _ => m::BrowserEvent::Back,
     }
 }

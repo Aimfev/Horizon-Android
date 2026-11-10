@@ -277,7 +277,6 @@ use super::{
     execution_role::ExecutionRole,
     native_block_entity_draw::BlockEntityDraw,
     native_panel_recipes::RecipePage,
-    native_server::{NativeCommand as _, NativeServerPlayer as _},
 };
 use horizon_assets::item_model::StackView;
 pub(crate) use horizon_client::mod_api::{
