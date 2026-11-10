@@ -23,7 +23,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: android-checks-${{ github.workflow }}-${{ github.ref }}
+  group: android-checks-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 jobs:
   source:
@@ -82,3 +82,74 @@ jobs:
           rustup target add "${{ matrix.target }}"
       - name: Check Android Rust code without building an APK
         run: python3 tools/android_build.py --abi "${{ matrix.abi }}" --check --public --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME_17_X64" --ndk-version 28.2.13676358 --build-tools-version 35.0.0
+  apk:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_apk
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.local/ci-target
+      HORIZON_TELEMETRY_URL: 'off'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+        with:
+          gradle-version: '8.14'
+      - name: Install Android toolchain
+        env:
+          ABI: ${{ inputs.abi }}
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$sdkmanager" ]]; then
+            sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n 1)
+          fi
+          test -x "$sdkmanager"
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+          case "$ABI" in
+            arm64-v8a) target=aarch64-linux-android ;;
+            armeabi-v7a) target=armv7-linux-androideabi ;;
+            x86) target=i686-linux-android ;;
+            x86_64) target=x86_64-linux-android ;;
+          esac
+          rustup target add "$target"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .local/ci-target
+          key: android-apk-${{ runner.os }}-${{ inputs.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-${{ github.sha }}
+          restore-keys: |
+            android-apk-${{ runner.os }}-${{ inputs.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-
+      - name: Prepare the pinned engine tables
+        run: python3 tools/android_prepare.py --java-home "$JAVA_HOME"
+      - name: Build the debug APK with Gradle
+        env:
+          ABI: ${{ inputs.abi }}
+        run: |
+          python3 tools/android_build.py --abi "$ABI" --public --profile fast \
+            --sdk "$ANDROID_HOME" --java-home "${JAVA_HOME_17_X64:-$JAVA_HOME}" --gradle "$(command -v gradle)" \
+            --ndk-version 28.2.13676358 --build-tools-version 35.0.0 \
+            --dev-build "${GITHUB_RUN_NUMBER}.${GITHUB_SHA:0:12}" \
+            --dev-version-code "$((1000 + GITHUB_RUN_NUMBER))"
+      - name: Collect the APK
+        env:
+          ABI: ${{ inputs.abi }}
+        run: |
+          mkdir dist
+          cp ".local/android/apk/$ABI/horizon-android-public.apk" "dist/Horizon-Android-debug-$ABI.apk"
+          (cd dist && sha256sum "Horizon-Android-debug-$ABI.apk" > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: horizon-android-debug-${{ inputs.abi }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
