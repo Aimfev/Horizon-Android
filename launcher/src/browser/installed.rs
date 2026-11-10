@@ -380,7 +380,7 @@ pub fn fetch_modpack(
 }
 
 /// A data pack installed into a world.
-#[cfg(not(target_os = "android")]
+#[cfg(not(target_os = "android"))]
 pub struct DataPackInstall {
     pub pack: crate::datapacks::DataPack,
     /// Its version's number.
@@ -392,7 +392,7 @@ pub struct DataPackInstall {
 /// Downloads a project's data pack (checksum checked) into the world folder `world`, under a
 /// free name. Refused when nothing in it runs in Horizon yet. It isn't recorded with the
 /// browser's installs: the world's data pack list (Home, `worlds datapack-list`) has it.
-#[cfg(not(target_os = "android")]
+#[cfg(not(target_os = "android"))]
 pub fn install_datapack(
     source: &dyn Source,
     project: &Project,
