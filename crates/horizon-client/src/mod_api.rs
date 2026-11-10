@@ -1124,5 +1124,5 @@ pub enum WorldHold {
     Release,
 }
 
-/// World-space vertex and fragment warp shader hook (`native_world_warp`). API 415.
-/// Re-exported definition: `pub struct WorldWarp` in `crate::gfx::native_render`.
+// World-space vertex and fragment warp shader hook (`native_world_warp`). API 415.
+// Re-exported definition: pub struct WorldWarp in crate::gfx::native_render.

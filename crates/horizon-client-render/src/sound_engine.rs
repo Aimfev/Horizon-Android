@@ -765,6 +765,20 @@ struct Handle {
     streaming: bool,
     stopped: bool,
 }
+
+/// One operation about to apply a sound's parameters on the game thread.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SoundPlayback<'a> {
+    pub instance: InstanceId,
+    pub identifier: &'a str,
+    pub source: usize,
+    pub position: [f64; 3],
+    pub relative: bool,
+    pub starting: bool,
+}
+pub type PlaybackHook = fn(&SoundPlayback<'_>, &mut f32, &mut f32, &mut bool);
+
 pub struct SoundEngine {
     pub registry: SoundRegistry,
     /// `loaded`: the library opened.

@@ -1,4 +1,3 @@
-pub mod breathing;
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
 #![cfg_attr(not(target_os = "android"), forbid(unsafe_code))]
@@ -8,6 +7,7 @@ pub mod android_resources;
 pub mod animate_tick;
 pub mod arrows;
 pub mod block_contact;
+pub mod breathing;
 pub mod skin_head;
 pub use horizon_client_render::{
     assets, atlas_sources, audio, auth, ban_notice, bidi, biome, block_entities, block_entity_anim,
