@@ -28,6 +28,48 @@ impl Api {
     }
 }
 
+impl std::fmt::Display for Api {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl PartialEq<str> for Api {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<Api> for str {
+    fn eq(&self, other: &Api) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<&str> for Api {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<Api> for &str {
+    fn eq(&self, other: &Api) -> bool {
+        *self == other.as_str()
+    }
+}
+
+impl PartialEq<String> for Api {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl PartialEq<Api> for String {
+    fn eq(&self, other: &Api) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
 /// How a stage or post pass blends its output over the picture.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
