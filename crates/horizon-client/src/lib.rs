@@ -1,3 +1,4 @@
+pub mod breathing;
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
 #![cfg_attr(not(target_os = "android"), forbid(unsafe_code))]
@@ -14,7 +15,7 @@ pub use horizon_client_render::{
     collisions, command_block, containers, crash, datapack, dynamic_light, effects, environment,
     extras, fast_hash, fog, font, gfx, graphics, graphics_style, graphics_ui, hdr_calibration, hud,
     hud_layout, hud_overlays, inventory_effects, java_text, jigsaw_block, level_loading, light,
-    lod, logging, menu_blur, mesher, minimap, mipmap, mod_list, model_library, models,
+    lod, logging, menu_blur, mesher, minimap, mipmap, mod_browser, mod_list, model_library, models,
     multiline_edit, native_emissive, options_file, options_fixes, options_ui, overlay, pack_screen,
     packs, par, particles, poi_sections, post_chain, potent_sulfur, preedit, providers,
     screen_draw, screen_effects, sculk, section_mask, settings, shader_options, shader_pack_list,
@@ -89,6 +90,9 @@ pub mod merchant;
 pub mod mobs;
 pub mod mod_api;
 pub mod mod_content;
+pub mod mod_registry;
+pub mod native_client_hooks;
+pub use horizon_world::json_folder;
 pub mod motion;
 pub mod moved_extras;
 pub mod multiplayer;

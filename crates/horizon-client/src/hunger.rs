@@ -181,3 +181,8 @@ impl FoodWorld for TickWorld<'_> {
         Ok(())
     }
 }
+
+#[inline(never)]
+pub fn native_living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
+    crate::native_client_hooks::living_heal(entity, amount, cancel);
+}

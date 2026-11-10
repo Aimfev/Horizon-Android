@@ -146,3 +146,7 @@ pub mod stepped_interpolation;
 pub mod synced_values;
 
 pub mod inventory_use;
+
+pub mod json_folder;
+
+pub mod native_load_hooks;

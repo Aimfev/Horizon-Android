@@ -14,7 +14,7 @@ import re
 import sys
 
 ROOTS = {
-    "horizon_client_lib": "crates/horizon-client/src/client_lib.rs",
+    "horizon_client": "crates/horizon-client/src/lib.rs",
     "horizon_client_render": "crates/horizon-client-render/src/lib.rs",
     "horizon_client_core": "crates/horizon-client-core/src/lib.rs",
     "horizon_client_input": "crates/horizon-client-input/src/lib.rs",
@@ -111,7 +111,7 @@ def adapt(text, source, modules):
         for old, new in RENAMED.items():
             path = path.replace(old, new)
         path = re.sub(
-            r"\bhorizon_client::(\w+)",
+            r"\bhorizon_client(?:_lib)?::(\w+)",
             lambda m: f"{modules[m[1]]}::{m[1]}" if m[1] in modules else m[0],
             path,
         )
@@ -120,7 +120,7 @@ def adapt(text, source, modules):
     def file(match):
         path = match[2]
         if path == OLD_ROOT:
-            path = ROOTS["horizon_client_lib"]
+            path = ROOTS["horizon_client"]
         elif path.startswith(OLD_FOLDER) and not (source / path).exists():
             moved = (folder + path[len(OLD_FOLDER) :] for folder in FOLDERS)
             path = next((p for p in moved if (source / p).exists()), path)

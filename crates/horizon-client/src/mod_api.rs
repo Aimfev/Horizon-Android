@@ -19,7 +19,9 @@ pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
 pub use crate::merchant::MerchantOffer;
 pub use crate::music::Music;
+pub use crate::mobs::Mob;
 pub use crate::particles::{ParticleOptions, ParticleType};
+pub use crate::sound_engine::SoundPlayback;
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;
 pub use horizon_core::{
@@ -41,6 +43,263 @@ use std::time::Duration;
 pub use wgpu;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
+
+pub use crate::gfx::native_render::{
+    BlockSpriteArrays, HandDrawn, HandDrawnEvent, RenderHooks, RenderNeeds, RenderNeedsEvent,
+    WorldDrawn, WorldDrawnEvent, WorldWarp, WorldWarpEvent,
+};
+pub use crate::mobs::model_layers::{
+    CubeDefinition, CubeDeformation, CubeListBuilder, LayerDefinition, MeshDefinition, ModelPart,
+    ModelPolygon, ModelVertex, PartId, PartPose,
+};
+pub use crate::spans::Span as TickSpan;
+pub use crate::world_primitives::{PrimitiveShape, WorldPrimitive, WorldPrimitives};
+pub use horizon_assets::item_model::StackView;
+pub use horizon_protocol::entity_data::Value as EntityDataValue;
+pub use horizon_protocol::packets::play::Clientbound as ClientboundPlayPacket;
+pub use horizon_protocol::packets::play::Serverbound as ServerboundPlayPacket;
+pub use horizon_world::block_state_properties::BlockProperties;
+pub use horizon_world::level::Ticks;
+pub use horizon_world::player_inventory::EquipmentSlot;
+pub use std::ops::Range;
+pub use std::path::{Path, PathBuf};
+pub use winit::keyboard::KeyCode;
+
+/// Natural mob spawn entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpawnEntry {
+    pub kind: String,
+    pub weight: u32,
+    pub min_count: u32,
+    pub max_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeConfigKind {
+    Client,
+    Common,
+    Server,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativeConfig {
+    pub mod_id: String,
+    pub kind: NativeConfigKind,
+    pub file: String,
+    pub default: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativeConfigFile {
+    pub mod_id: String,
+    pub kind: NativeConfigKind,
+    pub file: String,
+    pub path: PathBuf,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativeReloadListener {
+    pub id: String,
+    pub folder: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NativeTextField {
+    pub value: String,
+    pub cursor: usize,
+    pub highlight: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NativeWorldDraw {
+    pub camera: [f64; 3],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeInventoryKind {
+    Player,
+    Ender,
+    Cursor,
+    Crafting,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativeInventoryError {
+    InsidePlayerTurn,
+    NoServer,
+    LoggingIn,
+    Dead,
+    Online,
+    NoWorld,
+    NoSavedPlayer,
+    HasFile,
+    NotOnline,
+    BothAway,
+    SameInventory,
+    StackChanged,
+    NoRoom,
+    WrongSize { want: usize, got: usize },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HudMode {
+    #[default]
+    AllVisible,
+    NoHud,
+    AllHidden,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeFluidAction {
+    Simulate,
+    Execute,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum NativeFluidDrain {
+    Any(i32),
+    Exact(NativeFluidStack),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeNoteBlockChange<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub instrument: &'a str,
+    pub old_note: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeLootOdds {
+    pub item: String,
+    pub components: String,
+    pub chance: f64,
+    pub min: u32,
+    pub max: u32,
+    pub conditions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeRecipeLookup {
+    Recipes,
+    Uses,
+    Key(String),
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeRecipeCategory {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub icon: NativeStack,
+    pub catalysts: Vec<NativeStack>,
+    pub recipes: Vec<NativeCategoryRecipe>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeCategoryRecipe {
+    pub inputs: Vec<Vec<NativeStack>>,
+    pub outputs: Vec<NativeChanceOutput>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeChanceOutput {
+    pub stack: NativeStack,
+    pub chance: f32,
+    pub min: u32,
+    pub max: u32,
+    pub notes: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativePanelStyle {
+    #[default]
+    RecipeBook,
+    Viewer,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeBossBar {
+    pub name: Text,
+    pub progress: f32,
+    pub color: i32,
+    pub overlay: i32,
+    pub darken: bool,
+    pub music: bool,
+    pub fog: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct NativeLevelStats {
+    pub chunks: usize,
+    pub forced_chunks: usize,
+    pub block_entities: usize,
+    pub ticking_block_entities: usize,
+    pub entities: Vec<(String, usize)>,
+    pub block_entity_types: Vec<(String, usize)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct NativeMobCost {
+    pub dimension: String,
+    pub kind: String,
+    pub nanos: u64,
+    pub mob_ticks: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeFishingMedium {
+    pub surface: f64,
+    pub loot_table: Option<String>,
+    pub lure_ticks: Option<(i32, i32)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LivingRef(EntityRef);
+
+impl LivingRef {
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    pub fn id(self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl From<LivingRef> for EntityRef {
+    fn from(living: LivingRef) -> Self {
+        living.0
+    }
+}
+
+pub type TaskCallback = Box<dyn FnOnce(&mut dyn Host) + Send + 'static>;
+
+pub trait HostTaskExt: Host {
+    fn spawn_task_with<T: Send + 'static>(
+        &self,
+        task: impl FnOnce() -> T + Send + 'static,
+        callback: impl FnOnce(&mut dyn Host, T) + Send + 'static,
+    ) {
+        let _ = (task, callback);
+    }
+}
+
+impl<H: Host + ?Sized> HostTaskExt for H {}
 
 /// One mod block entity's frame, as `submit` gets it.
 #[derive(Clone, Debug, Default)]
@@ -119,29 +378,7 @@ pub struct NativeLootContext<'a> {
     pub luck: f32,
 }
 
-/// World-space render hooks for custom GPU passes.
-pub trait RenderHooks: Send + Sync {}
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RenderNeeds {
-    pub depth: bool,
-}
-
-#[derive(Debug)]
-pub struct RenderNeedsEvent<'a> {
-    pub needs: &'a mut RenderNeeds,
-}
-
-#[derive(Clone, Debug)]
-pub struct WorldDrawn {
-    pub width: u32,
-    pub height: u32,
-}
-
-#[derive(Debug)]
-pub struct WorldDrawnEvent<'a> {
-    pub drawn: &'a mut WorldDrawn,
-}
 
 /// Server-authoritative attachment storage types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -604,15 +841,55 @@ pub fn mods() -> &'static [Box<dyn Hooks>] {
 /// The bundles' `[mod] id`s, one a [`mods`] entry in the same order.
 static MOD_IDS: OnceLock<&'static [&'static str]> = OnceLock::new();
 
+static OFF: OnceLock<Box<[std::sync::atomic::AtomicBool]>> = OnceLock::new();
+
 /// Names the entries of [`mods`] by their bundles' `[mod] id`s, so a panic in a hook names its mod.
 pub fn name_mods(ids: &'static [&'static str]) {
     if MOD_IDS.set(ids).is_err() {
         log::warn!("Trait mods already named; ignoring the second list");
+        return;
     }
+    let _ = OFF.set(
+        ids.iter()
+            .map(|_| std::sync::atomic::AtomicBool::new(false))
+            .collect(),
+    );
+}
+
+/// Turns the trait mod named `id` ([`name_mods`]) on or off for the following dispatches.
+pub fn set_mod_on(id: &str, on: bool) -> bool {
+    let (Some(ids), Some(flags)) = (MOD_IDS.get(), OFF.get()) else {
+        return false;
+    };
+    let mut found = false;
+    for (flag, _) in flags.iter().zip(ids.iter()).filter(|(_, m)| **m == id) {
+        flag.store(!on, std::sync::atomic::Ordering::Relaxed);
+        found = true;
+    }
+    found
+}
+
+/// The ids [`name_mods`] gave the entries of [`mods`].
+pub fn mod_ids() -> &'static [&'static str] {
+    MOD_IDS.get().copied().unwrap_or(&[])
+}
+
+fn is_off(index: usize) -> bool {
+    OFF.get()
+        .and_then(|flags| flags.get(index))
+        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+fn place_in<T>(all: &[T], part: &[T]) -> Option<usize> {
+    let range = all.as_ptr_range();
+    range
+        .contains(&part.as_ptr())
+        .then(|| (part.as_ptr().addr() - range.start.addr()) / size_of::<T>().max(1))
 }
 
 fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
     Entered {
+        first: place_in(self::mods(), mods),
         mods: mods.iter().enumerate(),
         hook,
         guard: None,
@@ -620,6 +897,7 @@ fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
 }
 
 struct Entered<'a> {
+    first: Option<usize>,
     mods: std::iter::Enumerate<std::slice::Iter<'a, Box<dyn Hooks>>>,
     hook: &'static str,
     guard: Option<crate::crash::NativeModGuard>,
@@ -630,7 +908,14 @@ impl<'a> Iterator for Entered<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         drop(self.guard.take());
-        let (index, hooks) = self.mods.next()?;
+        let (index, hooks) = loop {
+            let (index, hooks) = self.mods.next()?;
+            match self.first {
+                Some(first) if is_off(first + index) => continue,
+                Some(first) => break (first + index, hooks),
+                None => break (index, hooks),
+            }
+        };
         self.guard = Some(crate::crash::enter_native_mod(
             crate::crash::NativeModCall {
                 id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
@@ -640,6 +925,89 @@ impl<'a> Iterator for Entered<'a> {
         ));
         Some(hooks)
     }
+}
+
+/// Installs trait mods and registers all client-library, render, and data-load hook callbacks.
+pub fn install_runtime_hooks(mods: Mods) {
+    if !mods.is_empty() || MODS.get().is_none() {
+        let _ = MODS.set(mods);
+    }
+    let renderers = self::mods()
+        .iter()
+        .filter_map(|m| m.render())
+        .collect();
+    let _ = crate::gfx::native_render::install(renderers);
+    let _ = horizon_world::native_load_hooks::install(
+        horizon_world::native_load_hooks::NativeLoadHooks {
+            loot_table_load: |id, table| {
+                dispatch_loot_table_load(self::mods(), id, table);
+            },
+            modify_default_components: |item, components| {
+                dispatch_modify_default_components(self::mods(), item, components);
+            },
+        },
+    );
+    let _ = crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+        menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
+            dispatch_menu_slot_rules(self::mods(), menu, slot, stack, may_place, max_stack);
+        },
+        player_chat: |player, name, message, replies, cancel| {
+            dispatch_player_chat(self::mods(), player, name, message, replies, cancel);
+        },
+        player_chat_v2: |player, name, level, message, replies, cancel| {
+            dispatch_player_chat_v2(self::mods(), player, name, level, message, replies, cancel);
+        },
+        chat_decorate: |player, name, message, decorated| {
+            dispatch_chat_decorate(self::mods(), player, name, message, decorated);
+        },
+        sound_play: |sound, volume, pitch, cancel| {
+            dispatch_sound_play(self::mods(), sound, volume, pitch, cancel);
+        },
+        living_heal: |entity, amount, cancel| {
+            dispatch_living_heal(self::mods(), entity, amount, cancel);
+        },
+        living_breathe: |entity, kind, can_breathe, consume, refill| {
+            dispatch_living_breathe(self::mods(), entity, kind, can_breathe, consume, refill);
+        },
+        living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
+            dispatch_living_drown(
+                self::mods(),
+                entity,
+                kind,
+                is_drowning,
+                damage_amount,
+                bubble_count,
+                cancel,
+            );
+        },
+        living_fall: |entity, kind, distance, multiplier, cancel| {
+            dispatch_living_fall(self::mods(), entity, kind, distance, multiplier, cancel);
+        },
+        living_jump: |entity, kind| {
+            dispatch_living_jump(self::mods(), entity, kind);
+        },
+        register_goals: |mob| {
+            dispatch_register_goals(self::mods(), mob);
+        },
+        player_pre_login: |player, name, address, defer| {
+            dispatch_player_pre_login(self::mods(), player, name, address, defer);
+        },
+        player_profile: |player, name, properties| {
+            dispatch_player_profile(self::mods(), player, name, properties);
+        },
+        ingredient: |kind, data, items| {
+            dispatch_ingredient(self::mods(), kind, data, items);
+        },
+        ingredient_test: |kind, data, stack, accept| {
+            dispatch_ingredient_test(self::mods(), kind, data, stack, accept);
+        },
+        log_line: |level, thread, message, line| {
+            dispatch_log_line(self::mods(), level, thread, message, line);
+        },
+        handshake: |address, host, intent, cancel, reason| {
+            dispatch_handshake(self::mods(), address, host, intent, reason, cancel);
+        },
+    });
 }
 
 /// Whether a mod claims a cancellable hook.
@@ -757,13 +1125,4 @@ pub enum WorldHold {
 }
 
 /// World-space vertex and fragment warp shader hook (`native_world_warp`). API 415.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct WorldWarp {
-    pub vertex_wgsl: String,
-    pub fragment_wgsl: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct WorldWarpEvent<'a> {
-    pub warp: &'a mut Option<WorldWarp>,
-}
+/// Re-exported definition: `pub struct WorldWarp` in `crate::gfx::native_render`.

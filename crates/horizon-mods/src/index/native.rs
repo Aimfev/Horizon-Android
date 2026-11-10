@@ -39,15 +39,13 @@ pub struct Manifest {
     pub version: String,
     pub game: String,
     /// Exact source revisions tested together, never mutable tags.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub horizon: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub mixins: String,
     /// The version of Horizon's native hook points (`game/native_hooks.rs`,
     /// `NATIVE_HOOKS_API`) a mod that hooks nothing else needs: the launcher
     /// builds it on any Horizon with that version or a later one, and
     /// `horizon` is only the revision it was tested on.
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "api")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks: Option<u32>,
     /// System permissions the mod asks for (`PERMISSIONS`), shown to the player on Android.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -63,22 +61,14 @@ pub fn revision(value: &str) -> bool {
 
 impl Manifest {
     pub fn check(&self) -> Result<(), String> {
-        let rev_ok = if self.hooks.is_some() {
-            (self.horizon.is_empty() || revision(&self.horizon))
-                && (self.mixins.is_empty() || revision(&self.mixins))
-        } else {
-            revision(&self.horizon) && revision(&self.mixins)
-        };
         if self.schema != 1
             || !valid_id(&self.id)
             || self.version.is_empty()
             || self.game.is_empty()
-            || !rev_ok
+            || !revision(&self.horizon)
+            || !revision(&self.mixins)
             || self.hooks == Some(0)
-            || self
-                .permissions
-                .iter()
-                .any(|p| !PERMISSIONS.contains(&p.as_str()))
+            || self.permissions.iter().any(|p| !PERMISSIONS.contains(&p.as_str()))
         {
             return Err(
                 "invalid native manifest: schema 1, id, version, game and exact revisions required"
@@ -225,17 +215,7 @@ impl Bundle {
             ));
         }
         let prefix = format!("mixins/{}/", manifest.id);
-        for name in files.keys().filter(|n| {
-            !matches!(
-                n.as_str(),
-                MANIFEST
-                    | "src/lib.rs"
-                    | "horizon-compiled.json"
-                    | "icon.png"
-                    | "mod.toml"
-                    | "horizon-content.json"
-            )
-        }) {
+        for name in files.keys().filter(|n| n.as_str() != MANIFEST) {
             let Some(rest) = name.strip_prefix(&prefix) else {
                 return Err(format!("unexpected native source: {name}"));
             };
@@ -243,34 +223,29 @@ impl Bundle {
                 return Err(format!("unexpected native source: {name}"));
             }
         }
-        if let Some(source) = files.get(&format!("{prefix}horizon-mixin.toml")) {
-            let source: toml::Value =
-                toml::from_str(std::str::from_utf8(source).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?;
-            let compat_rev = source
+        let source = files
+            .get(&format!("{prefix}horizon-mixin.toml"))
+            .ok_or("missing horizon-mixin.toml")?;
+        let source: toml::Value =
+            toml::from_str(std::str::from_utf8(source).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        if source
+            .get("mod")
+            .and_then(|v| v.get("id"))
+            .and_then(|v| v.as_str())
+            != Some(&manifest.id)
+            || source
+                .get("mod")
+                .and_then(|v| v.get("version"))
+                .and_then(|v| v.as_str())
+                != Some(&manifest.version)
+            || source
                 .get("compatibility")
                 .and_then(|v| v.get("horizon_revision"))
-                .and_then(|v| v.as_str());
-            let rev_matches = match compat_rev {
-                Some(r) => r == manifest.horizon,
-                None => manifest.hooks.is_some(),
-            };
-            if source
-                .get("mod")
-                .and_then(|v| v.get("id"))
                 .and_then(|v| v.as_str())
-                != Some(&manifest.id)
-                || source
-                    .get("mod")
-                    .and_then(|v| v.get("version"))
-                    .and_then(|v| v.as_str())
-                    != Some(&manifest.version)
-                || !rev_matches
-            {
-                return Err("native manifest and mixin identity/revision differ".into());
-            }
-        } else if !files.contains_key("horizon-compiled.json") {
-            return Err("missing horizon-mixin.toml".into());
+                != Some(&manifest.horizon)
+        {
+            return Err("native manifest and mixin identity/revision differ".into());
         }
         let mut content = BTreeMap::new();
         if path.extension().is_some_and(|e| e == "hmod") && content_id.is_some() {

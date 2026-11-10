@@ -7,7 +7,7 @@
 //!
 //! Installing copies the carried-over folder mod into `horizon-mods/<mod id>/` beside
 //! `options.txt` and turns it on in `horizon-mods.txt`, where the game's Options > Mods reads it.
-use super::{FileRef, Kind, Project, Source, Support, Version, installed::Entry, pick};
+use super::{installed::Entry, pick, FileRef, Kind, Project, Source, Support, Version};
 use horizon_port_pack::check::{self, Check, Verdict};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -122,6 +122,7 @@ pub fn is_enabled(home: &Path, id: &str) -> bool {
 
 /// Turns mod `id` on (or off) in `horizon-mods.txt`, keeping the other lines.
 pub fn set_enabled(home: &Path, id: &str, on: bool) -> Result<(), String> {
+    let _lock = super::lock_home(home);
     let path = home.join(MODS_LIST);
     let text = fs::read_to_string(&path).unwrap_or_default();
     let key = format!("mod.{id}");
@@ -164,6 +165,7 @@ pub fn install(
     home: &Path,
     progress: &dyn Fn(&str, f32),
 ) -> Result<Vec<Entry>, String> {
+    let _lock = super::lock_home(home);
     let job = Job {
         source,
         everything,
@@ -254,7 +256,9 @@ impl Job<'_> {
             let _ = fs::remove_dir_all(&part);
         })?;
         if let Some(old) = &old {
-            let _ = fs::remove_dir_all(home.join(&old.file));
+            if let Some(dir) = old.path(home) {
+                let _ = fs::remove_dir_all(dir);
+            }
             if old.file != relative {
                 let _ = set_enabled(home, old.file.trim_start_matches("horizon-mods/"), false);
             }
@@ -288,17 +292,11 @@ impl Job<'_> {
 
 /// Removes an installed mod's folder and turns it off.
 pub fn remove(home: &Path, entry: &Entry) -> Result<(), String> {
+    let _lock = super::lock_home(home);
     let Some(id) = entry.file.strip_prefix("horizon-mods/") else {
         return Err(format!("{} isn't in {MODS_DIR}/.", entry.file));
     };
-    let id = id.strip_suffix(".jar").unwrap_or(id);
-    let path = home.join(&entry.file);
-    let removed = if path.is_dir() {
-        fs::remove_dir_all(&path)
-    } else {
-        fs::remove_file(&path)
-    };
-    match removed {
+    match entry.path(home).map_or(Ok(()), fs::remove_dir_all) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("{}: {e}", entry.file)),

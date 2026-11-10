@@ -6,69 +6,125 @@
 use super::Vertex;
 use super::pack_draw::EntitySpan;
 use glam::{DVec3, Mat4};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 
-/// What a mod can draw with once the world is drawn: after the sky, terrain, entities,
-/// particles, weather and the world post pass, before the first-person hand, the HUD and the
-/// screens. `color` holds the world's picture (copy it out before reading it: it is the target
-/// drawn into), `depth` the world's depth, reversed (0 is the sky).
+mod generated;
+pub use generated::{
+    HandDrawnEvent, RenderHooks, RenderNeedsEvent, WorldDrawnEvent, WorldWarpEvent,
+};
+pub use wgpu;
+
+static RENDERERS: OnceLock<Box<[&'static dyn RenderHooks]>> = OnceLock::new();
+
+/// Install trait mod renderers in dispatch order, once per process.
+pub fn install(
+    renderers: Box<[&'static dyn RenderHooks]>,
+) -> Result<(), Box<[&'static dyn RenderHooks]>> {
+    RENDERERS.set(renderers)
+}
+
+static MODS_BUILT_IN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_mods_built_in(on: bool) {
+    MODS_BUILT_IN.store(on, Ordering::Relaxed);
+}
+
+pub fn world_drawn_hooked() -> bool {
+    MODS_BUILT_IN.load(Ordering::Relaxed)
+        || RENDERERS
+            .get()
+            .is_some_and(|renderers| !renderers.is_empty())
+}
+
 pub struct WorldDrawn<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
     pub encoder: &'a mut wgpu::CommandEncoder,
-    /// The frame's target and a view of it in `color_format`.
     pub color: &'a wgpu::Texture,
     pub color_view: &'a wgpu::TextureView,
     pub color_format: wgpu::TextureFormat,
-    /// The size of `color`.
     pub size: [u32; 2],
-    /// The world's depth (Depth32Float, sampleable), and its size: smaller than `size` when the
-    /// world draws at a lower resolution. It holds the frame's depth only when a mod asked for
-    /// it ([`RenderNeeds::world_depth`]) or something else kept it.
     pub depth: &'a wgpu::TextureView,
     pub depth_size: [u32; 2],
-    /// Camera-relative world to clip space, without TAA's jitter, and with it (what the world
-    /// was drawn with).
     pub view_proj: Mat4,
     pub jittered: Mat4,
-    /// The camera's position in the world.
     pub camera: DVec3,
-    /// The camera-relative entity geometry of the frame (`Frame::entities`), quads of 4
-    /// vertices, and its runs by entity when a mod asked for them
-    /// ([`RenderNeeds::entity_spans`]) or a shader pack draws them.
     pub entities: &'a [Vertex],
     pub spans: &'a [EntitySpan],
-    /// The shared atlas entity UVs point into.
     pub atlas: Option<&'a wgpu::Texture>,
-    /// Quad indices (0 1 2 0 2 3 for each 4 vertices), for as many quads as `entities` holds.
     pub quad_indices: &'a wgpu::Buffer,
 }
 
-/// What the mods need from a frame that the game doesn't make for itself. Each mod sets what it
-/// needs and leaves the rest, so several can ask.
+#[non_exhaustive]
+pub struct BlockSpriteArrays<'a> {
+    pub views: &'a [wgpu::TextureView],
+    pub split: u32,
+    pub size: u32,
+    pub nearest: &'a wgpu::Sampler,
+    pub filtered: &'a wgpu::Sampler,
+}
+
+#[non_exhaustive]
+pub struct HandDrawn<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    pub color: &'a wgpu::Texture,
+    pub color_view: &'a wgpu::TextureView,
+    pub color_format: wgpu::TextureFormat,
+    pub size: [u32; 2],
+    pub hand: &'a [Vertex],
+    pub view_proj: Mat4,
+    pub camera: DVec3,
+    pub atlas: Option<&'a wgpu::Texture>,
+    pub quad_indices: &'a wgpu::Buffer,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RenderNeeds {
-    /// Record `Frame::entity_spans` without a shader pack: entity runs get a stable id from
-    /// their type's name, block entity runs their block state.
     pub entity_spans: bool,
-    /// Keep the world pass's depth for [`native_world_drawn`] when nothing else does.
     pub world_depth: bool,
 }
 
-/// The world is drawn (see [`WorldDrawn`]). Not called on the title screen's panorama.
 #[inline(never)]
 pub fn native_world_drawn(world: &mut WorldDrawn<'_>) {
-    let _ = world;
+    generated::dispatch_world_drawn(RENDERERS.get().map_or(&[], |renderers| renderers), world);
 }
 
-/// Asked as a frame is built and drawn: set what your mod needs.
+#[inline(never)]
+pub fn native_hand_drawn(hand: &mut HandDrawn<'_>) {
+    generated::dispatch_hand_drawn(RENDERERS.get().map_or(&[], |renderers| renderers), hand);
+}
+
 #[inline(never)]
 pub fn native_render_needs(needs: &mut RenderNeeds) {
-    let _ = needs;
+    generated::dispatch_render_needs(RENDERERS.get().map_or(&[], |renderers| renderers), needs);
 }
 
-/// What the mods need this frame ([`native_render_needs`]).
 pub fn render_needs() -> RenderNeeds {
     let mut needs = RenderNeeds::default();
     native_render_needs(&mut needs);
     needs
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct WorldWarp {
+    pub source: Option<Arc<str>>,
+    pub on: bool,
+    pub params: [f32; 16],
+}
+
+#[inline(never)]
+pub fn native_world_warp(warp: &mut WorldWarp) {
+    generated::dispatch_world_warp(RENDERERS.get().map_or(&[], |renderers| renderers), warp);
+}
+
+pub fn world_warp() -> WorldWarp {
+    let mut warp = WorldWarp::default();
+    native_world_warp(&mut warp);
+    warp
 }

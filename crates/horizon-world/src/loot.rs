@@ -416,7 +416,17 @@ pub fn shared_tables(
 /// 75.
 #[inline(never)]
 pub fn native_loot_table_load(id: &str, table: &mut Value) {
-    let _ = (id, table);
+    crate::native_load_hooks::loot_table_load(id, table);
+}
+
+#[inline(never)]
+pub fn native_loot_function(kind: &str, data: &Value, ctx: &str, stack: &mut LootStack) {
+    let _ = (kind, data, ctx, stack);
+}
+
+#[inline(never)]
+pub fn native_loot_condition(kind: &str, data: &Value, ctx: &str, holds: &mut bool) {
+    let _ = (kind, data, ctx, holds);
 }
 
 fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {

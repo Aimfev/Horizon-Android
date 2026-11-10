@@ -226,3 +226,8 @@ mod tests {
         assert!(worked.as_millis() >= 10, "{worked:?} while busy");
     }
 }
+
+pub mod startup {
+    pub fn init(_at: std::time::Instant) {}
+    pub fn step(_name: &'static str) {}
+}

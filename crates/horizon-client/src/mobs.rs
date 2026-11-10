@@ -1,3 +1,4 @@
+pub mod model_layers;
 //! Mobs: entity types (dimensions and default attributes exported from
 //! vanilla), models (vanilla `LayerDefinitions` baked part trees) and the
 //! `Mob` entity with vanilla's AI framework: goal and target selectors with

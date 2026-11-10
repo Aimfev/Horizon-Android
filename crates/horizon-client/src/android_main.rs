@@ -199,6 +199,7 @@ fn init_logging() {
 
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    horizon_client::mod_api::install_runtime_hooks(Default::default());
     use winit::platform::android::activity::input::Axis;
     for axis in [
         Axis::Vscroll,

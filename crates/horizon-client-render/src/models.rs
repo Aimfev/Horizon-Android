@@ -10,6 +10,22 @@ use horizon_world::registry::{BlockRegistry, BlockStateId};
 use serde_json::{Value, json};
 use std::path::Path;
 
+static STANDALONE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+pub fn register_standalone(mut names: Vec<String>) -> bool {
+    names.retain(|n| {
+        n.split_once(':')
+            .is_some_and(|(ns, path)| !ns.is_empty() && !path.is_empty())
+    });
+    names.sort();
+    names.dedup();
+    STANDALONE.set(names).is_ok()
+}
+
+pub fn standalone() -> &'static [String] {
+    STANDALONE.get().map_or(&[], Vec::as_slice)
+}
+
 type Placement = (&'static str, &'static [(&'static str, &'static str)]);
 const GALLERY: [Placement; 16] = [
     (

@@ -231,11 +231,12 @@ pub(super) fn running_build_info() -> Option<String> {
 }
 
 /// The `horizon-native-mods` folder's mods, each a length and its file, for the service.
-fn bundles_body() -> Result<Vec<u8>, String> {
+fn bundles_body_for(profile_dir: &std::path::Path) -> Result<(Vec<u8>, Vec<PathBuf>, Vec<String>), String> {
+    let mod_list = horizon_client::mod_list::ModList::load(profile_dir);
     let mut paths: Vec<PathBuf> = Vec::new();
     for folder in [
-        Game::game_dir().join(horizon_client::mod_list::NATIVE_DIR),
-        Game::game_dir().join(horizon_client::mod_list::DIR),
+        profile_dir.join(horizon_client::mod_list::NATIVE_DIR),
+        profile_dir.join(horizon_client::mod_list::DIR),
         horizon_client::logging::private_home().join(horizon_client::mod_list::NATIVE_DIR),
         horizon_client::logging::private_home().join(horizon_client::mod_list::DIR),
     ] {
@@ -243,25 +244,183 @@ fn bundles_body() -> Result<Vec<u8>, String> {
             paths.extend(rd.flatten().map(|e| e.path()));
         }
     }
-    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod" || e == "hmod"));
     paths.sort();
     let mut seen_ids = std::collections::BTreeSet::new();
+    let mut kept_paths = Vec::new();
+    let mut kept_ids = Vec::new();
     let mut body = Vec::new();
     for path in paths {
         let Ok(bundle) = horizon_mods::index::native::Bundle::read(&path) else {
             continue;
         };
-        if !seen_ids.insert(bundle.manifest.id) {
+        let id = bundle.manifest.id;
+        if mod_list.disabled.contains(&id) || !seen_ids.insert(id.clone()) {
             continue;
         }
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         body.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
         body.extend_from_slice(&bytes);
+        kept_paths.push(path);
+        kept_ids.push(id);
     }
     if body.is_empty() {
-        return Err("There is no native mod to compile.".into());
+        return Err("There is no enabled native mod (.hnmod / .hmod) in horizon-native-mods/ to compile.".into());
     }
-    Ok(body)
+    Ok((body, kept_paths, kept_ids))
+}
+
+fn bundles_body() -> Result<Vec<u8>, String> {
+    bundles_body_for(&Game::game_dir()).map(|(b, _, _)| b)
+}
+
+/// Compiles the active profile's enabled native mods (`.hnmod` and combined `.hmod`) into
+/// `files/native/<build>/libhorizon_android.so` and selects it in `files/native/current`.
+/// Uses a local checkout (`HORIZON_SOURCE_DIR`) when available, else the Horizon Mod Build Server.
+pub fn compile_profile_blocking(
+    profile_dir: &std::path::Path,
+    version: &str,
+    progress: &dyn Fn(&str, f32),
+) -> Result<(String, Vec<String>), String> {
+    let (body, bundle_paths, mod_ids) = bundles_body_for(profile_dir)?;
+    progress(
+        &format!("Validated {} native mod(s): {}", mod_ids.len(), mod_ids.join(", ")),
+        0.10,
+    );
+
+    // 1. If a local Horizon checkout with native_build.sh is configured (e.g. Termux / local workstation), run it directly
+    if let Ok(src_dir) = std::env::var("HORIZON_SOURCE_DIR") {
+        let script = PathBuf::from(&src_dir).join("packaging/android/native_build.sh");
+        if script.is_file() {
+            progress("Running local packaging/android/native_build.sh...", 0.25);
+            let name = "compiled-local".to_owned();
+            let folder = dir().join(&name);
+            std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+            let mut cmd = std::process::Command::new("bash");
+            cmd.arg(&script)
+                .arg(&src_dir)
+                .arg(&folder)
+                .env("NATIVE_LIBRARY_ONLY", "1");
+            for bp in &bundle_paths {
+                cmd.arg(bp);
+            }
+            let out = cmd.output().map_err(|e| format!("native_build.sh: {e}"))?;
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                return Err(format!("Local native_build.sh failed: {stderr}"));
+            }
+            std::fs::write(folder.join("for"), version).map_err(|e| e.to_string())?;
+            std::fs::write(dir().join("current"), &name).map_err(|e| e.to_string())?;
+            let _ = std::fs::remove_file(dir().join("starts"));
+            progress("Compiled libhorizon_android.so locally!", 1.0);
+            return Ok((name, mod_ids));
+        }
+    }
+
+    // 2. Otherwise compile via the Horizon Mod Build Server and download libhorizon_android.so
+    let shared = Mutex::new(Shared::default());
+    let server = std::env::var("HORIZON_BUILD_SERVER").unwrap_or_else(|_| BUILD_SERVER.into());
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(20))
+        .timeout_read(Duration::from_secs(40))
+        .build();
+    progress("Sending native mod bundles to build server...", 0.20);
+    let started = Instant::now();
+    let job = loop {
+        let answer: serde_json::Value = agent
+            .post(&format!("{server}/v1/build?version={version}"))
+            .set("Content-Type", "application/octet-stream")
+            .send_bytes(&body)
+            .map_err(service_error)?
+            .into_json()
+            .map_err(|e| e.to_string())?;
+        if answer["starting"].as_bool() != Some(true) {
+            break answer["job"].as_str().unwrap_or_default().to_owned();
+        }
+        if started.elapsed() > WAKING {
+            return Err("The build server did not wake up. Try again later.".into());
+        }
+        progress("Waking the build server up: about a minute...", 0.25);
+        std::thread::sleep(POLL * 3);
+    };
+    if !plain(&job) {
+        return Err("The build server gave no job.".into());
+    }
+    let mut quiet = 0;
+    let finished = loop {
+        if started.elapsed() > LONGEST {
+            return Err("The build took too long. Try again later.".into());
+        }
+        std::thread::sleep(POLL);
+        let looked = agent
+            .get(&format!("{server}/v1/job/{job}"))
+            .call()
+            .map_err(service_error)
+            .and_then(|r| {
+                r.into_json::<serde_json::Value>()
+                    .map_err(|e| e.to_string())
+            });
+        let status = match looked {
+            Ok(status) => status,
+            Err(e) => {
+                quiet += 1;
+                if quiet >= QUIET_TRIES {
+                    return Err(e);
+                }
+                continue;
+            }
+        };
+        quiet = 0;
+        match status["state"].as_str() {
+            Some("starting") => progress("Waking the build server up: about a minute...", 0.30),
+            Some("queued") => progress(
+                &format!("In queue: {} build(s) ahead", status["ahead"].as_u64().unwrap_or(0)),
+                0.35,
+            ),
+            Some("building") => {
+                let seconds = status["seconds"].as_u64().unwrap_or(0);
+                let pct = (0.40 + (seconds as f32 / 180.0) * 0.40).clamp(0.40, 0.80);
+                progress(&format!("Compiling on server: {}:{:02}", seconds / 60, seconds % 60), pct);
+            }
+            Some("done") => break status,
+            Some("failed") => {
+                return Err(status["error"]
+                    .as_str()
+                    .unwrap_or("The build failed.")
+                    .to_owned());
+            }
+            _ => return Err("The build server lost the job. Try again.".into()),
+        }
+    };
+    let want = finished["sha256"].as_str().unwrap_or_default().to_owned();
+    let size = finished["size"].as_u64().unwrap_or(0);
+    if want.len() != 64 || size == 0 {
+        return Err("The build does not say its SHA-256.".into());
+    }
+    progress("Downloading compiled libhorizon_android.so...", 0.85);
+    let name = format!("{COMPILED}{job}");
+    let folder = dir().join(&name);
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let part = folder.join(format!("{LIBRARY}.part"));
+    let url = format!("{server}/v1/job/{job}/lib");
+    fetch_library(&agent, &url, &part, size, &want, &shared)?;
+    std::fs::rename(&part, folder.join(LIBRARY)).map_err(|e| e.to_string())?;
+    std::fs::write(folder.join("for"), version).map_err(|e| e.to_string())?;
+    std::fs::write(
+        folder.join("build.json"),
+        finished["build"].to_string().as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::write(dir().join("current"), &name).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(dir().join("starts"));
+    for entry in std::fs::read_dir(dir()).into_iter().flatten().flatten() {
+        let other = entry.file_name().to_string_lossy().into_owned();
+        if other.starts_with(COMPILED) && other != name {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+    progress("Ready! HorizonActivity will load libhorizon_android.so on next Play.", 1.0);
+    Ok((name, mod_ids))
 }
 
 /// What a refused request says (the service's JSON `error`), or that it can't be reached.

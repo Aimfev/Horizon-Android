@@ -23,8 +23,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 const MAX_ZIP_ENTRIES: usize = 4096;
 const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
-pub const DEFAULT_HORIZON_REV: &str = "7c38f33c1ce1fb18ae513c7b60ab2dda178eb282";
-pub const DEFAULT_MIXINS_REV: &str = "ddd9700b21997c95d95ac6ee5ecafe3830cf622a";
+pub const DEFAULT_HORIZON_REV: &str = "8933e8c2d81bef1549a63dc1c8341ca46fe3cffa";
+pub const DEFAULT_MIXINS_REV: &str = "1e758beab4f00b7ab82183f5b4a7ec4f42599a98";
 
 fn is_safe_zip_entry_name(name: &str) -> bool {
     !name.is_empty()

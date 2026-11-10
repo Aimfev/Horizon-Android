@@ -54,6 +54,7 @@ pub mod menu_blur;
 pub mod mesher;
 pub mod minimap;
 pub mod mipmap;
+pub mod mod_browser;
 pub mod mod_list;
 pub mod model_library;
 pub mod models;
@@ -135,3 +136,5 @@ pub use horizon_items::enchant;
 pub use horizon_items::item_data;
 pub use horizon_items::items;
 pub use horizon_items::random_sequences;
+
+pub mod world_primitives;

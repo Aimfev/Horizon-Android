@@ -4637,6 +4637,137 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    fn baby_entity_spawn(&self, host: &mut dyn Host, event: &mut BabyEntitySpawnEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn can_player_sleep(&self, host: &mut dyn Host, event: &mut CanPlayerSleepEvent<'_>) { let _ = host; let _ = event; }
+    fn item_model_property(&self, host: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) { let _ = host; let _ = event; }
+    fn living_conversion_post(&self, host: &mut dyn Host, event: &mut LivingConversionPostEvent<'_>) { let _ = host; let _ = event; }
+    fn living_conversion_pre(&self, host: &mut dyn Host, event: &mut LivingConversionPreEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn living_death(&self, host: &mut dyn Host, event: &mut LivingDeathEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn living_incoming_damage_v2(&self, host: &mut dyn Host, event: &mut LivingIncomingDamageV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn mob_split(&self, host: &mut dyn Host, event: &mut MobSplitEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn register_configs(&self, host: &mut dyn Host, event: &mut RegisterConfigsEvent<'_>) { let _ = host; let _ = event; }
+    fn config_loading(&self, host: &mut dyn Host, event: &mut ConfigLoadingEvent<'_>) { let _ = host; let _ = event; }
+    fn config_reloading(&self, host: &mut dyn Host, event: &mut ConfigReloadingEvent<'_>) { let _ = host; let _ = event; }
+    fn config_unloading(&self, host: &mut dyn Host, event: &mut ConfigUnloadingEvent<'_>) { let _ = host; let _ = event; }
+    fn note_block_change(&self, level: &dyn LevelHost, event: &mut NoteBlockChangeEvent<'_, '_>) -> Flow { let _ = level; let _ = event; Flow::Continue }
+    fn potential_spawns(&self, host: &dyn Host, event: &mut PotentialSpawnsEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn village_siege(&self, host: &mut dyn Host, event: &mut VillageSiegeEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn player_xp_change(&self, host: &mut dyn Host, event: &mut PlayerXpChangeEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn camera_pose(&self, host: &dyn Host, event: &mut CameraPoseEvent) { let _ = host; let _ = event; }
+    fn client_chat_received(&self, host: &mut dyn Host, event: &mut ClientChatReceivedEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn client_packet(&self, host: &mut dyn Host, event: &mut ClientPacketEvent<'_>) { let _ = host; let _ = event; }
+    fn menu_extra_data(&self, host: &mut dyn Host, event: &mut MenuExtraDataEvent<'_>) -> Option<Vec<u8>> { let _ = host; let _ = event; None }
+    fn merchant_offer_traded(&self, host: &mut dyn Host, event: &mut MerchantOfferTradedEvent<'_>) { let _ = host; let _ = event; }
+    fn add_server_reload_listeners(&self, host: &mut dyn Host, event: &mut AddServerReloadListenersEvent<'_>) { let _ = host; let _ = event; }
+    fn server_reload_listener_apply(&self, host: &mut dyn Host, event: &mut ServerReloadListenerApplyEvent<'_>) { let _ = host; let _ = event; }
+    fn client_start(&self, host: &mut dyn Host, event: &mut ClientStartEvent) { let _ = host; let _ = event; }
+    fn client_disconnecting(&self, host: &dyn Host, event: &mut ClientDisconnectingEvent) { let _ = host; let _ = event; }
+    fn client_stopping(&self, host: &dyn Host, event: &mut ClientStoppingEvent) { let _ = host; let _ = event; }
+    fn menu_background(&self, host: &dyn Host, event: &mut MenuBackgroundEvent<'_>) { let _ = host; let _ = event; }
+    fn gui_render_post(&self, host: &dyn Host, event: &mut GuiRenderPostEvent<'_>) { let _ = host; let _ = event; }
+    fn world_hold(&self, host: &dyn Host, event: &mut WorldHoldEvent) { let _ = host; let _ = event; }
+    fn anvil_update(&self, host: &mut dyn Host, event: &mut AnvilUpdateEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn block_clone_item(&self, host: &dyn Host, event: &mut BlockCloneItemEvent<'_>) -> Option<ItemStack> { let _ = host; let _ = event; None }
+    fn block_entity_accepts_fluid(&self, host: &dyn Host, event: &mut BlockEntityAcceptsFluidEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn block_grow(&self, level: &dyn LevelHost, event: &mut BlockGrowEvent<'_>) -> Flow { let _ = level; let _ = event; Flow::Continue }
+    fn block_place(&self, host: &mut dyn Host, event: &mut BlockPlaceEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn block_redstone(&self, level: &dyn LevelHost, event: &mut BlockRedstoneEvent) { let _ = level; let _ = event; }
+    fn break_speed(&self, host: &dyn Host, event: &mut BreakSpeedEvent) { let _ = host; let _ = event; }
+    fn can_build(&self, host: &dyn Host, event: &mut CanBuildEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn chat_suggestion_applied(&self, host: &dyn Host, event: &mut ChatSuggestionAppliedEvent<'_>) { let _ = host; let _ = event; }
+    fn client_attack(&self, host: &mut dyn Host, event: &mut ClientAttackEvent) { let _ = host; let _ = event; }
+    fn client_hurt(&self, host: &mut dyn Host, event: &mut ClientHurtEvent) { let _ = host; let _ = event; }
+    fn client_player_network_logging_in(&self, host: &mut dyn Host, event: &mut ClientPlayerNetworkLoggingInEvent) { let _ = host; let _ = event; }
+    fn client_tick_pre(&self, host: &mut dyn Host, event: &mut ClientTickPreEvent) { let _ = host; let _ = event; }
+    fn client_tick_post(&self, host: &mut dyn Host, event: &mut ClientTickPostEvent) { let _ = host; let _ = event; }
+    fn console_line(&self, host: &mut dyn Host, event: &mut ConsoleLineEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn container_accepts(&self, host: &dyn Host, event: &mut ContainerAcceptsEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn creative_slot_v2(&self, host: &mut dyn Host, event: &mut CreativeSlotV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn custom_block_fluids(&self, host: &dyn Host, event: &mut CustomBlockFluidsEvent<'_>) { let _ = host; let _ = event; }
+    fn custom_fluid_tanks(&self, host: &dyn Host, event: &mut CustomFluidTanksEvent) -> Option<Vec<NativeFluidTankView>> { let _ = host; let _ = event; None }
+    fn custom_fluid_fill(&self, host: &mut dyn Host, event: &mut CustomFluidFillEvent<'_>) -> Option<i32> { let _ = host; let _ = event; None }
+    fn custom_fluid_drain(&self, host: &mut dyn Host, event: &mut CustomFluidDrainEvent<'_>) -> Option<NativeFluidStack> { let _ = host; let _ = event; None }
+    fn custom_payload_from_client(&self, host: &mut dyn Host, event: &mut CustomPayloadFromClientEvent<'_>) { let _ = host; let _ = event; }
+    fn entity_change_block_v2(&self, host: &mut dyn Host, event: &mut EntityChangeBlockV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn entity_change_block_v3(&self, host: &mut dyn Host, event: &mut EntityChangeBlockV3Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn entity_data_to(&self, event: &mut EntityDataToEvent<'_>) { let _ = event; }
+    fn entity_interact_specific(&self, host: &mut dyn Host, event: &mut EntityInteractSpecificEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn entity_outline(&self, host: &dyn Host, event: &mut EntityOutlineEvent<'_>) { let _ = host; let _ = event; }
+    fn fishing_hook_landed(&self, host: &mut dyn Host, event: &mut FishingHookLandedEvent<'_>) { let _ = host; let _ = event; }
+    fn fishing_medium(&self, host: &mut dyn Host, event: &mut FishingMediumEvent<'_>) -> Option<NativeFishingMedium> { let _ = host; let _ = event; None }
+    fn hanging_break_v2(&self, host: &mut dyn Host, event: &mut HangingBreakV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn interact_entity_v2(&self, host: &mut dyn Host, event: &mut InteractEntityV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn inventory_changed(&self, host: &mut dyn Host, event: &mut InventoryChangedEvent) { let _ = host; let _ = event; }
+    fn inventory_click(&self, host: &mut dyn Host, event: &mut InventoryClickEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn inventory_drag(&self, host: &mut dyn Host, event: &mut InventoryDragEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn item_after_vertical_collision(&self, host: &mut dyn Host, event: &mut ItemAfterVerticalCollisionEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn item_dropped_v2(&self, host: &mut dyn Host, event: &mut ItemDroppedV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn item_interact_mob(&self, host: &mut dyn Host, event: &mut ItemInteractMobEvent<'_>) -> Option<bool> { let _ = host; let _ = event; None }
+    fn item_picked_up_v2(&self, host: &mut dyn Host, event: &mut ItemPickedUpV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn living_change_target(&self, event: &mut LivingChangeTargetEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn living_damage_pre(&self, event: &mut LivingDamagePreEvent<'_>) { let _ = event; }
+    fn living_damage_post(&self, event: &mut LivingDamagePostEvent<'_>) { let _ = event; }
+    fn living_experience_drop(&self, host: &mut dyn Host, event: &mut LivingExperienceDropEvent<'_>) { let _ = host; let _ = event; }
+    fn living_incoming_damage_v3(&self, event: &mut LivingIncomingDamageV3Event<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn log_line(&self, event: &mut LogLineEvent<'_>) { let _ = event; }
+    fn menu_input_closed(&self, host: &mut dyn Host, event: &mut MenuInputClosedEvent<'_>) { let _ = host; let _ = event; }
+    fn menu_links(&self, host: &mut dyn Host, event: &mut MenuLinksEvent<'_>) { let _ = host; let _ = event; }
+    fn layer_definitions(&self, event: &mut LayerDefinitionsEvent<'_>) { let _ = event; }
+    fn permission_check(&self, host: &dyn Host, event: &mut PermissionCheckEvent<'_>) -> Option<bool> { let _ = host; let _ = event; None }
+    fn permission_groups(&self, host: &dyn Host, event: &mut PermissionGroupsEvent<'_>) { let _ = host; let _ = event; }
+    fn player_register_channels(&self, host: &mut dyn Host, event: &mut PlayerRegisterChannelsEvent<'_>) { let _ = host; let _ = event; }
+    fn player_command_level(&self, host: &mut dyn Host, event: &mut PlayerCommandLevelEvent<'_>) { let _ = host; let _ = event; }
+    fn player_commands_sent_v2(&self, host: &mut dyn Host, event: &mut PlayerCommandsSentV2Event<'_>) { let _ = host; let _ = event; }
+    fn player_died_v2(&self, host: &mut dyn Host, event: &mut PlayerDiedV2Event<'_>) { let _ = host; let _ = event; }
+    fn player_fish_v2(&self, host: &mut dyn Host, event: &mut PlayerFishV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn player_hurt_by_player(&self, event: &mut PlayerHurtByPlayerEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn player_inventory_changed(&self, host: &mut dyn Host, event: &mut PlayerInventoryChangedEvent<'_>) { let _ = host; let _ = event; }
+    fn player_join_message(&self, host: &mut dyn Host, event: &mut PlayerJoinMessageEvent<'_>) { let _ = host; let _ = event; }
+    fn player_launch_projectile_v2(&self, host: &mut dyn Host, event: &mut PlayerLaunchProjectileV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn player_leave_message(&self, host: &mut dyn Host, event: &mut PlayerLeaveMessageEvent<'_>) { let _ = host; let _ = event; }
+    fn player_logging_out(&self, host: &mut dyn Host, event: &mut PlayerLoggingOutEvent<'_>) { let _ = host; let _ = event; }
+    fn player_move(&self, event: &mut PlayerMoveEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn player_physical_trigger(&self, level: &dyn LevelHost, event: &mut PlayerPhysicalTriggerEvent<'_>) -> Flow { let _ = level; let _ = event; Flow::Continue }
+    fn player_respawn_position(&self, host: &mut dyn Host, event: &mut PlayerRespawnPositionEvent<'_>) { let _ = host; let _ = event; }
+    fn player_spawn_location(&self, host: &mut dyn Host, event: &mut PlayerSpawnLocationEvent<'_>) { let _ = host; let _ = event; }
+    fn player_teleport(&self, event: &mut PlayerTeleportEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn player_tick_pre(&self, host: &mut dyn Host, event: &mut PlayerTickPreEvent) { let _ = host; let _ = event; }
+    fn potion_splash_v2(&self, host: &mut dyn Host, event: &mut PotionSplashV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn projectile_world_border(&self, event: &mut ProjectileWorldBorderEvent<'_>) { let _ = event; }
+    fn recipe_categories(&self, host: &mut dyn Host, event: &mut RecipeCategoriesEvent<'_>) { let _ = host; let _ = event; }
+    fn recipe_lookup(&self, host: &mut dyn Host, event: &mut RecipeLookupEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn recipe_sources(&self, host: &mut dyn Host, event: &mut RecipeSourcesEvent<'_>) { let _ = host; let _ = event; }
+    fn resource_pack_status_v2(&self, host: &mut dyn Host, event: &mut ResourcePackStatusV2Event<'_>) { let _ = host; let _ = event; }
+    fn right_click_block_v2(&self, host: &mut dyn Host, event: &mut RightClickBlockV2Event) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn screen_mouse_dragged_pre_v2(&self, host: &mut dyn Host, event: &mut ScreenMouseDraggedPreV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn screen_mouse_scrolled_pre_v2(&self, host: &mut dyn Host, event: &mut ScreenMouseScrolledPreV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn screen_text_field_char_typed_pre(&self, host: &dyn Host, event: &mut ScreenTextFieldCharTypedPreEvent<'_, '_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn screen_transparent_background(&self, host: &dyn Host, event: &mut ScreenTransparentBackgroundEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn server_packet(&self, event: &mut ServerPacketEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn server_packets(&self, host: &mut dyn Host, event: &mut ServerPacketsEvent<'_>) { let _ = host; let _ = event; }
+    fn server_stopped(&self, host: &mut dyn Host, event: &mut ServerStoppedEvent) { let _ = host; let _ = event; }
+    fn server_tick_timed(&self, host: &mut dyn Host, event: &mut ServerTickTimedEvent<'_>) { let _ = host; let _ = event; }
+    fn stateful_block_entity(&self, host: &dyn Host, event: &mut StatefulBlockEntityEvent<'_>) { let _ = host; let _ = event; }
+    fn block_entity_from_state(&self, event: &mut BlockEntityFromStateEvent<'_>) -> Option<(String, Compound)> { let _ = event; None }
+    fn tab_complete_v2(&self, host: &mut dyn Host, event: &mut TabCompleteV2Event<'_>) { let _ = host; let _ = event; }
+    fn tnt_primed_v2(&self, host: &mut dyn Host, event: &mut TntPrimedV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn toast_add(&self, host: &mut dyn Host, event: &mut ToastAddEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn tooltip_render_pre(&self, host: &mut dyn Host, event: &mut TooltipRenderPreEvent<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn trample(&self, event: &mut TrampleEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn vehicle_moved_v2(&self, host: &mut dyn Host, event: &mut VehicleMovedV2Event<'_>) -> Flow { let _ = host; let _ = event; Flow::Continue }
+    fn wind_burst(&self, host: &mut dyn Host, event: &mut WindBurstEvent<'_>) { let _ = host; let _ = event; }
+    fn world_submit(&self, host: &dyn Host, event: &mut WorldSubmitEvent<'_>) { let _ = host; let _ = event; }
+    fn world_primitives(&self, host: &dyn Host, event: &mut WorldPrimitivesEvent<'_>) { let _ = host; let _ = event; }
+    fn player_chat(&self, event: &mut PlayerChatEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn player_chat_v2(&self, event: &mut PlayerChatV2Event<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn chat_decorate(&self, event: &mut ChatDecorateEvent<'_>) -> Option<Text> { let _ = event; None }
+    fn handshake(&self, event: &mut HandshakeEvent<'_>) -> Flow { let _ = event; Flow::Continue }
+    fn player_pre_login(&self, event: &mut PlayerPreLoginEvent<'_>) { let _ = event; }
+    fn player_profile(&self, event: &mut PlayerProfileEvent<'_>) { let _ = event; }
+    fn register_goals(&self, event: &mut RegisterGoalsEvent<'_>) { let _ = event; }
+    fn sound_play(&self, event: &mut SoundPlayEvent<'_, '_>) -> Flow { let _ = event; Flow::Continue }
+
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -14331,4 +14462,1237 @@ pub fn dispatch_tooltip_color(
     *background = event.background;
     *border_top = event.border_top;
     *border_bottom = event.border_bottom;
+}
+
+#[non_exhaustive]
+pub struct BabyEntitySpawnEvent<'a> {
+    pub parent: u32,
+    pub partner: u32,
+    pub player: u128,
+    pub kind: &'a str,
+}
+pub fn dispatch_baby_entity_spawn(host: &mut dyn Host, mods: &[Box<dyn Hooks>], parent: u32, partner: u32, player: u128, kind: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = BabyEntitySpawnEvent { parent, partner, player, kind }; for mod_hook in super::entered(mods, "baby_entity_spawn") { if matches!(mod_hook.baby_entity_spawn(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct CanPlayerSleepEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub problem: &'a mut Option<String>,
+}
+pub fn dispatch_can_player_sleep(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, pos: [i32; 3], problem: &mut Option<String>) {
+    let mut event = CanPlayerSleepEvent { player, name, pos, problem }; for mod_hook in super::entered(mods, "can_player_sleep") { mod_hook.can_player_sleep(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ItemModelPropertyEvent<'a> {
+    pub property: &'a str,
+    pub stack: &'a StackView,
+    pub value: bool,
+}
+pub fn dispatch_item_model_property(host: &dyn Host, mods: &[Box<dyn Hooks>], property: &str, stack: &StackView, value: &mut bool) {
+    let mut event = ItemModelPropertyEvent { property, stack, value: *value }; for mod_hook in super::entered(mods, "item_model_property") { mod_hook.item_model_property(host, &mut event); } *value = event.value;
+}
+#[non_exhaustive]
+pub struct LivingConversionPostEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub converted: u32,
+    pub converted_kind: &'a str,
+}
+pub fn dispatch_living_conversion_post(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: u32, kind: &str, converted: u32, converted_kind: &str) {
+    let mut event = LivingConversionPostEvent { entity, kind, converted, converted_kind }; for mod_hook in super::entered(mods, "living_conversion_post") { mod_hook.living_conversion_post(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct LivingConversionPreEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub outcome: &'a str,
+}
+pub fn dispatch_living_conversion_pre(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: u32, kind: &str, outcome: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = LivingConversionPreEvent { entity, kind, outcome }; for mod_hook in super::entered(mods, "living_conversion_pre") { if matches!(mod_hook.living_conversion_pre(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct LivingDeathEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub attacker: u32,
+}
+pub fn dispatch_living_death(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: u32, kind: &str, damage_type: &str, attacker: u32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = LivingDeathEvent { entity, kind, damage_type, attacker }; for mod_hook in super::entered(mods, "living_death") { if matches!(mod_hook.living_death(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct LivingIncomingDamageV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub source_position: Option<[f64; 3]>,
+    pub victim_position: [f64; 3],
+    pub victim_view: [f64; 3],
+    pub weapon: Option<&'a ItemStack>,
+    pub amount: f32,
+}
+pub fn dispatch_living_incoming_damage_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: i32, kind: &str, damage_type: &str, causing: i32, source_position: Option<[f64; 3]>, victim_position: [f64; 3], victim_view: [f64; 3], weapon: Option<&ItemStack>, amount: &mut f32, canceled: &mut bool) {
+    if *canceled { return; } let mut event = LivingIncomingDamageV2Event { entity, kind, damage_type, causing, source_position, victim_position, victim_view, weapon, amount: *amount }; for mod_hook in super::entered(mods, "living_incoming_damage_v2") { if matches!(mod_hook.living_incoming_damage_v2(host, &mut event), Flow::Cancel) { *canceled = true; break; } } *amount = event.amount;
+}
+#[non_exhaustive]
+pub struct LivingKnockbackV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
+    pub strength: f64,
+    pub x: f64,
+    pub z: f64,
+}
+pub fn dispatch_living_knockback_v2(mods: &[Box<dyn Hooks>], entity: i32, kind: &str, attacker: i32, attacker_main: Option<&ItemStack>, attacker_off: Option<&ItemStack>, strength: &mut f64, x: &mut f64, z: &mut f64, canceled: &mut bool) {
+    if *canceled { return; } let mut event = LivingKnockbackV2Event { entity, kind, attacker, attacker_main, attacker_off, strength: *strength, x: *x, z: *z }; for mod_hook in super::entered(mods, "living_knockback_v2") { if matches!(mod_hook.living_knockback_v2(&mut event), Flow::Cancel) { *canceled = true; break; } } *strength = event.strength; *x = event.x; *z = event.z;
+}
+#[non_exhaustive]
+pub struct MobSplitEvent<'a> {
+    pub parent: u32,
+    pub kind: &'a str,
+    pub size: i32,
+    pub child_size: i32,
+    pub count: u32,
+}
+pub fn dispatch_mob_split(host: &mut dyn Host, mods: &[Box<dyn Hooks>], parent: u32, kind: &str, size: i32, child_size: i32, count: &mut u32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = MobSplitEvent { parent, kind, size, child_size, count: *count }; for mod_hook in super::entered(mods, "mob_split") { if matches!(mod_hook.mob_split(host, &mut event), Flow::Cancel) { *cancel = true; break; } } *count = event.count;
+}
+#[non_exhaustive]
+pub struct RegisterConfigsEvent<'a> {
+    pub configs: &'a mut Vec<NativeConfig>,
+}
+pub fn dispatch_register_configs(host: &mut dyn Host, mods: &[Box<dyn Hooks>], configs: &mut Vec<NativeConfig>) {
+    let mut event = RegisterConfigsEvent { configs }; for mod_hook in super::entered(mods, "register_configs") { mod_hook.register_configs(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ConfigLoadingEvent<'a> {
+    pub config: &'a NativeConfigFile,
+}
+pub fn dispatch_config_loading(host: &mut dyn Host, mods: &[Box<dyn Hooks>], config: &NativeConfigFile) {
+    let mut event = ConfigLoadingEvent { config }; for mod_hook in super::entered(mods, "config_loading") { mod_hook.config_loading(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ConfigReloadingEvent<'a> {
+    pub config: &'a NativeConfigFile,
+}
+pub fn dispatch_config_reloading(host: &mut dyn Host, mods: &[Box<dyn Hooks>], config: &NativeConfigFile) {
+    let mut event = ConfigReloadingEvent { config }; for mod_hook in super::entered(mods, "config_reloading") { mod_hook.config_reloading(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ConfigUnloadingEvent<'a> {
+    pub config: &'a NativeConfigFile,
+}
+pub fn dispatch_config_unloading(host: &mut dyn Host, mods: &[Box<dyn Hooks>], config: &NativeConfigFile) {
+    let mut event = ConfigUnloadingEvent { config }; for mod_hook in super::entered(mods, "config_unloading") { mod_hook.config_unloading(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct NoteBlockChangeEvent<'a, 'b> {
+    pub context: &'a NativeNoteBlockChange<'b>,
+    pub new_note: i32,
+}
+pub fn dispatch_note_block_change(level: &dyn LevelHost, mods: &[Box<dyn Hooks>], context: &NativeNoteBlockChange<'_>, new_note: &mut i32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = NoteBlockChangeEvent { context, new_note: *new_note }; for mod_hook in super::entered(mods, "note_block_change") { if matches!(mod_hook.note_block_change(level, &mut event), Flow::Cancel) { *cancel = true; break; } } *new_note = event.new_note;
+}
+#[non_exhaustive]
+pub struct PotentialSpawnsEvent<'a> {
+    pub dimension: &'a str,
+    pub category: &'a str,
+    pub pos: [i32; 3],
+    pub entries: &'a mut Vec<SpawnEntry>,
+}
+pub fn dispatch_potential_spawns(host: &dyn Host, mods: &[Box<dyn Hooks>], dimension: &str, category: &str, pos: [i32; 3], entries: &mut Vec<SpawnEntry>, canceled: &mut bool) {
+    if *canceled { return; } let mut event = PotentialSpawnsEvent { dimension, category, pos, entries }; for mod_hook in super::entered(mods, "potential_spawns") { if matches!(mod_hook.potential_spawns(host, &mut event), Flow::Cancel) { *canceled = true; break; } }
+}
+#[non_exhaustive]
+pub struct VillageSiegeEvent<'a> {
+    pub dimension: &'a str,
+    pub player: u128,
+    pub attempted_pos: [f64; 3],
+}
+pub fn dispatch_village_siege(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str, player: u128, attempted_pos: [f64; 3], canceled: &mut bool) {
+    if *canceled { return; } let mut event = VillageSiegeEvent { dimension, player, attempted_pos }; for mod_hook in super::entered(mods, "village_siege") { if matches!(mod_hook.village_siege(host, &mut event), Flow::Cancel) { *canceled = true; break; } }
+}
+#[non_exhaustive]
+pub struct PlayerXpChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub amount: i32,
+}
+pub fn dispatch_player_xp_change(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, amount: &mut i32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerXpChangeEvent { player, name, amount: *amount }; for mod_hook in super::entered(mods, "player_xp_change") { if matches!(mod_hook.player_xp_change(host, &mut event), Flow::Cancel) { *cancel = true; break; } } *amount = event.amount;
+}
+#[non_exhaustive]
+pub struct CameraPoseEvent {
+    pub partial: f32,
+    pub position: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+}
+pub fn dispatch_camera_pose(host: &dyn Host, mods: &[Box<dyn Hooks>], partial: f32, position: &mut [f64; 3], yaw: &mut f32, pitch: &mut f32) {
+    let mut event = CameraPoseEvent { partial, position: *position, yaw: *yaw, pitch: *pitch }; for mod_hook in super::entered(mods, "camera_pose") { mod_hook.camera_pose(host, &mut event); } *position = event.position; *yaw = event.yaw; *pitch = event.pitch;
+}
+#[non_exhaustive]
+pub struct ClientChatReceivedEvent<'a> {
+    pub system: bool,
+    pub overlay: bool,
+    pub sender: u128,
+    pub chat_type: Option<&'a str>,
+    pub message: &'a mut Text,
+}
+pub fn dispatch_client_chat_received(host: &mut dyn Host, mods: &[Box<dyn Hooks>], system: bool, overlay: bool, sender: u128, chat_type: Option<&str>, message: &mut Text, cancel: &mut bool) {
+    if *cancel { return; } let mut event = ClientChatReceivedEvent { system, overlay, sender, chat_type, message }; for mod_hook in super::entered(mods, "client_chat_received") { if matches!(mod_hook.client_chat_received(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ClientPacketEvent<'a> {
+    pub packet: &'a ClientboundPlayPacket,
+}
+pub fn dispatch_client_packet(host: &mut dyn Host, mods: &[Box<dyn Hooks>], packet: &ClientboundPlayPacket) {
+    let mut event = ClientPacketEvent { packet }; for mod_hook in super::entered(mods, "client_packet") { mod_hook.client_packet(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct MenuExtraDataEvent<'a> {
+    pub player: u128,
+    pub menu: &'a str,
+    pub block: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_menu_extra_data(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, menu: &str, block: &str, pos: [i32; 3], data: &mut Option<Vec<u8>>) {
+    if data.is_some() { return; } let mut event = MenuExtraDataEvent { player, menu, block, pos }; for mod_hook in super::entered(mods, "menu_extra_data") { if let Some(replacement_) = mod_hook.menu_extra_data(host, &mut event) { *data = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct MerchantOfferTradedEvent<'a> {
+    pub merchant: u32,
+    pub kind: &'a str,
+    pub offer: &'a mut MerchantOffer,
+}
+pub fn dispatch_merchant_offer_traded(host: &mut dyn Host, mods: &[Box<dyn Hooks>], merchant: u32, kind: &str, offer: &mut MerchantOffer) {
+    let mut event = MerchantOfferTradedEvent { merchant, kind, offer }; for mod_hook in super::entered(mods, "merchant_offer_traded") { mod_hook.merchant_offer_traded(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct AddServerReloadListenersEvent<'a> {
+    pub listeners: &'a mut Vec<NativeReloadListener>,
+}
+pub fn dispatch_add_server_reload_listeners(host: &mut dyn Host, mods: &[Box<dyn Hooks>], listeners: &mut Vec<NativeReloadListener>) {
+    let mut event = AddServerReloadListenersEvent { listeners }; for mod_hook in super::entered(mods, "add_server_reload_listeners") { mod_hook.add_server_reload_listeners(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ServerReloadListenerApplyEvent<'a> {
+    pub listener: &'a NativeReloadListener,
+    pub files: &'a [(String, serde_json::Value)],
+}
+pub fn dispatch_server_reload_listener_apply(host: &mut dyn Host, mods: &[Box<dyn Hooks>], listener: &NativeReloadListener, files: &[(String, serde_json::Value)]) {
+    let mut event = ServerReloadListenerApplyEvent { listener, files }; for mod_hook in super::entered(mods, "server_reload_listener_apply") { mod_hook.server_reload_listener_apply(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientStartEvent {
+}
+pub fn dispatch_client_start(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = ClientStartEvent {  }; for mod_hook in super::entered(mods, "client_start") { mod_hook.client_start(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientDisconnectingEvent {
+}
+pub fn dispatch_client_disconnecting(host: &dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = ClientDisconnectingEvent {  }; for mod_hook in super::entered(mods, "client_disconnecting") { mod_hook.client_disconnecting(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientStoppingEvent {
+}
+pub fn dispatch_client_stopping(host: &dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = ClientStoppingEvent {  }; for mod_hook in super::entered(mods, "client_stopping") { mod_hook.client_stopping(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct MenuBackgroundEvent<'a> {
+    pub radius: &'a mut Option<f32>,
+}
+pub fn dispatch_menu_background(host: &dyn Host, mods: &[Box<dyn Hooks>], radius: &mut Option<f32>) {
+    let mut event = MenuBackgroundEvent { radius }; for mod_hook in super::entered(mods, "menu_background") { mod_hook.menu_background(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct GuiRenderPostEvent<'a> {
+    pub batch: &'a mut HudBatch,
+    pub gui_hidden: bool,
+    pub focused: bool,
+}
+pub fn dispatch_gui_render_post(host: &dyn Host, mods: &[Box<dyn Hooks>], batch: &mut HudBatch, gui_hidden: bool, focused: bool) {
+    let mut event = GuiRenderPostEvent { batch, gui_hidden, focused }; for mod_hook in super::entered(mods, "gui_render_post") { mod_hook.gui_render_post(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct WorldHoldEvent {
+    pub hold: WorldHold,
+}
+pub fn dispatch_world_hold(host: &dyn Host, mods: &[Box<dyn Hooks>], hold: &mut WorldHold) {
+    let mut event = WorldHoldEvent { hold: *hold }; for mod_hook in super::entered(mods, "world_hold") { mod_hook.world_hold(host, &mut event); } *hold = event.hold;
+}
+#[non_exhaustive]
+pub struct AnvilUpdateEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub left: &'a ItemStack,
+    pub right: Option<&'a ItemStack>,
+    pub item_name: Option<&'a str>,
+    pub vanilla_output: Option<&'a ItemStack>,
+    pub vanilla_xp_cost: i32,
+    pub vanilla_material_cost: i32,
+    pub output: &'a mut Option<ItemStack>,
+    pub xp_cost: i32,
+    pub material_cost: i32,
+}
+pub fn dispatch_anvil_update(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, left: &ItemStack, right: Option<&ItemStack>, item_name: Option<&str>, vanilla_output: Option<&ItemStack>, vanilla_xp_cost: i32, vanilla_material_cost: i32, output: &mut Option<ItemStack>, xp_cost: &mut i32, material_cost: &mut i32, canceled: &mut bool) {
+    if *canceled { return; } let mut event = AnvilUpdateEvent { player, name, left, right, item_name, vanilla_output, vanilla_xp_cost, vanilla_material_cost, output, xp_cost: *xp_cost, material_cost: *material_cost }; for mod_hook in super::entered(mods, "anvil_update") { if matches!(mod_hook.anvil_update(host, &mut event), Flow::Cancel) { *canceled = true; break; } } *xp_cost = event.xp_cost; *material_cost = event.material_cost;
+}
+#[non_exhaustive]
+pub struct BlockCloneItemEvent<'a> {
+    pub block: &'a str,
+    pub pos: [i32; 3],
+    pub state: BlockStateId,
+}
+pub fn dispatch_block_clone_item(host: &dyn Host, mods: &[Box<dyn Hooks>], block: &str, pos: [i32; 3], state: BlockStateId, stack: &mut Option<ItemStack>) {
+    if stack.is_some() { return; } let mut event = BlockCloneItemEvent { block, pos, state }; for mod_hook in super::entered(mods, "block_clone_item") { if let Some(replacement_) = mod_hook.block_clone_item(host, &mut event) { *stack = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct BlockEntityAcceptsFluidEvent<'a> {
+    pub block: &'a str,
+    pub tank: usize,
+    pub fluid: &'a str,
+}
+pub fn dispatch_block_entity_accepts_fluid(host: &dyn Host, mods: &[Box<dyn Hooks>], block: &str, tank: usize, fluid: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = BlockEntityAcceptsFluidEvent { block, tank, fluid }; for mod_hook in super::entered(mods, "block_entity_accepts_fluid") { if matches!(mod_hook.block_entity_accepts_fluid(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct BlockGrowEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_block_grow(level: &dyn LevelHost, mods: &[Box<dyn Hooks>], dimension: &str, pos: [i32; 3], from: &str, to: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = BlockGrowEvent { dimension, pos, from, to }; for mod_hook in super::entered(mods, "block_grow") { if matches!(mod_hook.block_grow(level, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct BlockPlaceEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub stack: &'a ItemStack,
+    pub pos: [i32; 3],
+    pub state: BlockStateId,
+}
+pub fn dispatch_block_place(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, stack: &ItemStack, pos: [i32; 3], state: BlockStateId, cancel: &mut bool) {
+    if *cancel { return; } let mut event = BlockPlaceEvent { player, name, stack, pos, state }; for mod_hook in super::entered(mods, "block_place") { if matches!(mod_hook.block_place(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct BlockRedstoneEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub old: i32,
+    pub new: i32,
+}
+pub fn dispatch_block_redstone(level: &dyn LevelHost, mods: &[Box<dyn Hooks>], dimension: LevelDimension, pos: BlockPos, old: i32, new: &mut i32) {
+    let mut event = BlockRedstoneEvent { dimension, pos, old, new: *new }; for mod_hook in super::entered(mods, "block_redstone") { mod_hook.block_redstone(level, &mut event); } *new = event.new;
+}
+#[non_exhaustive]
+pub struct BreakSpeedEvent {
+    pub pos: [i32; 3],
+    pub state: BlockStateId,
+    pub original: f32,
+    pub speed: f32,
+}
+pub fn dispatch_break_speed(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], state: BlockStateId, original: f32, speed: &mut f32) {
+    let mut event = BreakSpeedEvent { pos, state, original, speed: *speed }; for mod_hook in super::entered(mods, "break_speed") { mod_hook.break_speed(host, &mut event); } *speed = event.speed;
+}
+#[non_exhaustive]
+pub struct CanBuildEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub action: &'a str,
+}
+pub fn dispatch_can_build(host: &dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, dimension: &str, pos: [i32; 3], action: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = CanBuildEvent { player, name, dimension, pos, action }; for mod_hook in super::entered(mods, "can_build") { if matches!(mod_hook.can_build(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ChatSuggestionAppliedEvent<'a> {
+    pub original: &'a str,
+    pub start: usize,
+    pub end: usize,
+    pub suggestion: &'a str,
+    pub input: &'a str,
+}
+pub fn dispatch_chat_suggestion_applied(host: &dyn Host, mods: &[Box<dyn Hooks>], original: &str, start: usize, end: usize, suggestion: &str, input: &str) {
+    let mut event = ChatSuggestionAppliedEvent { original, start, end, suggestion, input }; for mod_hook in super::entered(mods, "chat_suggestion_applied") { mod_hook.chat_suggestion_applied(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientAttackEvent {
+    pub target: u32,
+    pub player: bool,
+}
+pub fn dispatch_client_attack(host: &mut dyn Host, mods: &[Box<dyn Hooks>], target: u32, player: bool) {
+    let mut event = ClientAttackEvent { target, player }; for mod_hook in super::entered(mods, "client_attack") { mod_hook.client_attack(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientHurtEvent {
+    pub attacker: Option<u32>,
+    pub player: bool,
+}
+pub fn dispatch_client_hurt(host: &mut dyn Host, mods: &[Box<dyn Hooks>], attacker: Option<u32>, player: bool) {
+    let mut event = ClientHurtEvent { attacker, player }; for mod_hook in super::entered(mods, "client_hurt") { mod_hook.client_hurt(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientPlayerNetworkLoggingInEvent {
+}
+pub fn dispatch_client_player_network_logging_in(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = ClientPlayerNetworkLoggingInEvent {  }; for mod_hook in super::entered(mods, "client_player_network_logging_in") { mod_hook.client_player_network_logging_in(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientTickPreEvent {
+}
+pub fn dispatch_client_tick_pre(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = ClientTickPreEvent {  }; for mod_hook in super::entered(mods, "client_tick_pre") { mod_hook.client_tick_pre(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ClientTickPostEvent {
+}
+pub fn dispatch_client_tick_post(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = ClientTickPostEvent {  }; for mod_hook in super::entered(mods, "client_tick_post") { mod_hook.client_tick_post(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ConsoleLineEvent<'a> {
+    pub source: &'a str,
+    pub line: &'a str,
+    pub replies: &'a mut Vec<Text>,
+}
+pub fn dispatch_console_line(host: &mut dyn Host, mods: &[Box<dyn Hooks>], source: &str, line: &str, cancel: &mut bool, replies: &mut Vec<Text>) {
+    if *cancel { return; } let mut event = ConsoleLineEvent { source, line, replies }; for mod_hook in super::entered(mods, "console_line") { if matches!(mod_hook.console_line(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ContainerAcceptsEvent<'a> {
+    pub pos: [i32; 3],
+    pub entity: &'a ModBlockEntity,
+    pub slot: usize,
+    pub stack: &'a ItemStack,
+    pub face: Option<Direction>,
+}
+pub fn dispatch_container_accepts(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], entity: &ModBlockEntity, slot: usize, stack: &ItemStack, face: Option<Direction>, cancel: &mut bool) {
+    if *cancel { return; } let mut event = ContainerAcceptsEvent { pos, entity, slot, stack, face }; for mod_hook in super::entered(mods, "container_accepts") { if matches!(mod_hook.container_accepts(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct CreativeSlotV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub slot: i32,
+    pub stack: Option<&'a ItemStack>,
+}
+pub fn dispatch_creative_slot_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, slot: i32, stack: Option<&ItemStack>, cancel: &mut bool) {
+    if *cancel { return; } let mut event = CreativeSlotV2Event { player, name, slot, stack }; for mod_hook in super::entered(mods, "creative_slot_v2") { if matches!(mod_hook.creative_slot_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct CustomBlockFluidsEvent<'a> {
+    pub block: &'a str,
+    pub custom: bool,
+}
+pub fn dispatch_custom_block_fluids(host: &dyn Host, mods: &[Box<dyn Hooks>], block: &str, custom: &mut bool) {
+    let mut event = CustomBlockFluidsEvent { block, custom: *custom }; for mod_hook in super::entered(mods, "custom_block_fluids") { mod_hook.custom_block_fluids(host, &mut event); } *custom = event.custom;
+}
+#[non_exhaustive]
+pub struct CustomFluidTanksEvent {
+    pub pos: [i32; 3],
+    pub side: Option<Direction>,
+}
+pub fn dispatch_custom_fluid_tanks(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], side: Option<Direction>, out: &mut Option<Vec<NativeFluidTankView>>) {
+    if out.is_some() { return; } let mut event = CustomFluidTanksEvent { pos, side }; for mod_hook in super::entered(mods, "custom_fluid_tanks") { if let Some(replacement_) = mod_hook.custom_fluid_tanks(host, &mut event) { *out = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct CustomFluidFillEvent<'a> {
+    pub pos: [i32; 3],
+    pub side: Option<Direction>,
+    pub resource: &'a NativeFluidStack,
+    pub action: NativeFluidAction,
+}
+pub fn dispatch_custom_fluid_fill(host: &mut dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], side: Option<Direction>, resource: &NativeFluidStack, action: NativeFluidAction, out: &mut Option<i32>) {
+    if out.is_some() { return; } let mut event = CustomFluidFillEvent { pos, side, resource, action }; for mod_hook in super::entered(mods, "custom_fluid_fill") { if let Some(replacement_) = mod_hook.custom_fluid_fill(host, &mut event) { *out = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct CustomFluidDrainEvent<'a> {
+    pub pos: [i32; 3],
+    pub side: Option<Direction>,
+    pub request: &'a NativeFluidDrain,
+    pub action: NativeFluidAction,
+}
+pub fn dispatch_custom_fluid_drain(host: &mut dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], side: Option<Direction>, request: &NativeFluidDrain, action: NativeFluidAction, out: &mut Option<NativeFluidStack>) {
+    if out.is_some() { return; } let mut event = CustomFluidDrainEvent { pos, side, request, action }; for mod_hook in super::entered(mods, "custom_fluid_drain") { if let Some(replacement_) = mod_hook.custom_fluid_drain(host, &mut event) { *out = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct CustomPayloadFromClientEvent<'a> {
+    pub player: u128,
+    pub channel: &'a str,
+    pub data: &'a [u8],
+}
+pub fn dispatch_custom_payload_from_client(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, channel: &str, data: &[u8]) {
+    let mut event = CustomPayloadFromClientEvent { player, channel, data }; for mod_hook in super::entered(mods, "custom_payload_from_client") { mod_hook.custom_payload_from_client(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct EntityChangeBlockV2Event<'a> {
+    pub player: Option<u128>,
+    pub entity: Option<u32>,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_entity_change_block_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: Option<u128>, entity: Option<u32>, kind: &str, pos: [i32; 3], from: &str, to: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = EntityChangeBlockV2Event { player, entity, kind, pos, from, to }; for mod_hook in super::entered(mods, "entity_change_block_v2") { if matches!(mod_hook.entity_change_block_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct EntityChangeBlockV3Event<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_entity_change_block_v3(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: u32, kind: &str, pos: [i32; 3], from: &str, to: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = EntityChangeBlockV3Event { entity, kind, pos, from, to }; for mod_hook in super::entered(mods, "entity_change_block_v3") { if matches!(mod_hook.entity_change_block_v3(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct EntityDataToEvent<'a> {
+    pub viewer: u128,
+    pub entity: i32,
+    pub values: &'a mut Vec<(u8, i32, EntityDataValue)>,
+}
+pub fn dispatch_entity_data_to(mods: &[Box<dyn Hooks>], viewer: u128, entity: i32, values: &mut Vec<(u8, i32, EntityDataValue)>) {
+    let mut event = EntityDataToEvent { viewer, entity, values }; for mod_hook in super::entered(mods, "entity_data_to") { mod_hook.entity_data_to(&mut event); }
+}
+#[non_exhaustive]
+pub struct EntityInteractSpecificEvent<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub stack: Option<&'a ItemStack>,
+    pub location: [f64; 3],
+}
+pub fn dispatch_entity_interact_specific(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: i32, kind: &str, stack: Option<&ItemStack>, location: [f64; 3], claimed: &mut bool) {
+    if *claimed { return; } let mut event = EntityInteractSpecificEvent { entity, kind, stack, location }; for mod_hook in super::entered(mods, "entity_interact_specific") { if matches!(mod_hook.entity_interact_specific(host, &mut event), Flow::Cancel) { *claimed = true; break; } }
+}
+#[non_exhaustive]
+pub struct EntityOutlineEvent<'a> {
+    pub entity_id: u32,
+    pub kind: &'a str,
+    pub outline: &'a mut Option<u32>,
+}
+pub fn dispatch_entity_outline(host: &dyn Host, mods: &[Box<dyn Hooks>], entity_id: u32, kind: &str, outline: &mut Option<u32>) {
+    let mut event = EntityOutlineEvent { entity_id, kind, outline }; for mod_hook in super::entered(mods, "entity_outline") { mod_hook.entity_outline(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct FishingHookLandedEvent<'a> {
+    pub player: u128,
+    pub hook: u32,
+    pub dimension: &'a str,
+    pub block: [i32; 3],
+    pub face: [i32; 3],
+}
+pub fn dispatch_fishing_hook_landed(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, hook: u32, dimension: &str, block: [i32; 3], face: [i32; 3]) {
+    let mut event = FishingHookLandedEvent { player, hook, dimension, block, face }; for mod_hook in super::entered(mods, "fishing_hook_landed") { mod_hook.fishing_hook_landed(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct FishingMediumEvent<'a> {
+    pub dimension: &'a str,
+    pub hook: u32,
+    pub position: [f64; 3],
+    pub owner: Option<[f64; 3]>,
+}
+pub fn dispatch_fishing_medium(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str, hook: u32, position: [f64; 3], owner: Option<[f64; 3]>, medium: &mut Option<NativeFishingMedium>) {
+    if medium.is_some() { return; } let mut event = FishingMediumEvent { dimension, hook, position, owner }; for mod_hook in super::entered(mods, "fishing_medium") { if let Some(replacement_) = mod_hook.fishing_medium(host, &mut event) { *medium = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct HangingBreakV2Event<'a> {
+    pub player: Option<u128>,
+    pub dimension: &'a str,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_hanging_break_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: Option<u128>, dimension: &str, kind: &str, pos: [i32; 3], cancel: &mut bool) {
+    if *cancel { return; } let mut event = HangingBreakV2Event { player, dimension, kind, pos }; for mod_hook in super::entered(mods, "hanging_break_v2") { if matches!(mod_hook.hanging_break_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct InteractEntityV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+}
+pub fn dispatch_interact_entity_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: i32, kind: &str, hand: Hand, stack: Option<&ItemStack>, cancel: &mut bool) {
+    if *cancel { return; } let mut event = InteractEntityV2Event { entity, kind, hand, stack }; for mod_hook in super::entered(mods, "interact_entity_v2") { if matches!(mod_hook.interact_entity_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct InventoryChangedEvent {
+    pub uuid: u128,
+    pub kind: crate::mod_api::NativeInventoryKind,
+}
+pub fn dispatch_inventory_changed(host: &mut dyn Host, mods: &[Box<dyn Hooks>], uuid: u128, kind: crate::mod_api::NativeInventoryKind) {
+    let mut event = InventoryChangedEvent { uuid, kind }; for mod_hook in super::entered(mods, "inventory_changed") { mod_hook.inventory_changed(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct InventoryClickEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub window: i32,
+    pub slot: i32,
+    pub button: i32,
+    pub mode: i32,
+}
+pub fn dispatch_inventory_click(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, window: i32, slot: i32, button: i32, mode: i32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = InventoryClickEvent { player, name, window, slot, button, mode }; for mod_hook in super::entered(mods, "inventory_click") { if matches!(mod_hook.inventory_click(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct InventoryDragEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub window: i32,
+    pub kind: i32,
+    pub slots: &'a [i32],
+}
+pub fn dispatch_inventory_drag(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, window: i32, kind: i32, slots: &[i32], cancel: &mut bool) {
+    if *cancel { return; } let mut event = InventoryDragEvent { player, name, window, kind, slots }; for mod_hook in super::entered(mods, "inventory_drag") { if matches!(mod_hook.inventory_drag(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ItemAfterVerticalCollisionEvent<'a> {
+    pub dimension: &'a str,
+    pub client: bool,
+    pub entity: u32,
+    pub state: BlockStateId,
+    pub block_pos: [i32; 3],
+    pub item_pos: [f64; 3],
+    pub stack: &'a mut ItemStack,
+}
+pub fn dispatch_item_after_vertical_collision(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str, client: bool, entity: u32, state: BlockStateId, block_pos: [i32; 3], item_pos: [f64; 3], stack: &mut ItemStack, discard: &mut bool) {
+    if *discard { return; } let mut event = ItemAfterVerticalCollisionEvent { dimension, client, entity, state, block_pos, item_pos, stack }; for mod_hook in super::entered(mods, "item_after_vertical_collision") { if matches!(mod_hook.item_after_vertical_collision(host, &mut event), Flow::Cancel) { *discard = true; break; } }
+}
+#[non_exhaustive]
+pub struct ItemDroppedV2Event<'a> {
+    pub player: u128,
+    pub stack: &'a ItemStack,
+}
+pub fn dispatch_item_dropped_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, stack: &ItemStack, cancel: &mut bool) {
+    if *cancel { return; } let mut event = ItemDroppedV2Event { player, stack }; for mod_hook in super::entered(mods, "item_dropped_v2") { if matches!(mod_hook.item_dropped_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ItemInteractMobEvent<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub stack: Option<&'a ItemStack>,
+}
+pub fn dispatch_item_interact_mob(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: i32, kind: &str, stack: Option<&ItemStack>, swing: &mut Option<bool>) {
+    if swing.is_some() { return; } let mut event = ItemInteractMobEvent { entity, kind, stack }; for mod_hook in super::entered(mods, "item_interact_mob") { if let Some(replacement_) = mod_hook.item_interact_mob(host, &mut event) { *swing = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct ItemPickedUpV2Event<'a> {
+    pub player: u128,
+    pub stack: &'a ItemStack,
+    pub thrower: Option<u128>,
+    pub position: [f64; 3],
+}
+pub fn dispatch_item_picked_up_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, stack: &ItemStack, thrower: Option<u128>, position: [f64; 3], canceled: &mut bool) {
+    if *canceled { return; } let mut event = ItemPickedUpV2Event { player, stack, thrower, position }; for mod_hook in super::entered(mods, "item_picked_up_v2") { if matches!(mod_hook.item_picked_up_v2(host, &mut event), Flow::Cancel) { *canceled = true; break; } }
+}
+#[non_exhaustive]
+pub struct LivingChangeTargetEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: u32,
+    pub kind: &'a str,
+    pub target: Option<u128>,
+    pub target_mob: Option<u32>,
+}
+pub fn dispatch_living_change_target(mods: &[Box<dyn Hooks>], dimension: &str, entity: u32, kind: &str, target: Option<u128>, target_mob: Option<u32>, cancel: &mut bool) {
+    if *cancel { return; } let mut event = LivingChangeTargetEvent { dimension, entity, kind, target, target_mob }; for mod_hook in super::entered(mods, "living_change_target") { if matches!(mod_hook.living_change_target(&mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct LivingDamagePreEvent<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub direct: i32,
+    pub amount: f32,
+}
+pub fn dispatch_living_damage_pre(mods: &[Box<dyn Hooks>], entity: i32, kind: &str, damage_type: &str, causing: i32, direct: i32, amount: &mut f32) {
+    let mut event = LivingDamagePreEvent { entity, kind, damage_type, causing, direct, amount: *amount }; for mod_hook in super::entered(mods, "living_damage_pre") { mod_hook.living_damage_pre(&mut event); } *amount = event.amount;
+}
+#[non_exhaustive]
+pub struct LivingDamagePostEvent<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub direct: i32,
+    pub amount: f32,
+}
+pub fn dispatch_living_damage_post(mods: &[Box<dyn Hooks>], entity: i32, kind: &str, damage_type: &str, causing: i32, direct: i32, amount: f32) {
+    let mut event = LivingDamagePostEvent { entity, kind, damage_type, causing, direct, amount }; for mod_hook in super::entered(mods, "living_damage_post") { mod_hook.living_damage_post(&mut event); }
+}
+#[non_exhaustive]
+pub struct LivingExperienceDropEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub xp: i32,
+}
+pub fn dispatch_living_experience_drop(host: &mut dyn Host, mods: &[Box<dyn Hooks>], entity: u32, kind: &str, xp: &mut i32) {
+    let mut event = LivingExperienceDropEvent { entity, kind, xp: *xp }; for mod_hook in super::entered(mods, "living_experience_drop") { mod_hook.living_experience_drop(host, &mut event); } *xp = event.xp;
+}
+#[non_exhaustive]
+pub struct LivingIncomingDamageV3Event<'a> {
+    pub victim: u32,
+    pub victim_uuid: Option<u128>,
+    pub kind: &'a str,
+    pub attacker: Option<u32>,
+    pub attacker_uuid: Option<u128>,
+    pub direct: Option<u32>,
+    pub damage_type: &'a str,
+    pub amount: f32,
+}
+pub fn dispatch_living_incoming_damage_v3(mods: &[Box<dyn Hooks>], victim: u32, victim_uuid: Option<u128>, kind: &str, attacker: Option<u32>, attacker_uuid: Option<u128>, direct: Option<u32>, damage_type: &str, amount: &mut f32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = LivingIncomingDamageV3Event { victim, victim_uuid, kind, attacker, attacker_uuid, direct, damage_type, amount: *amount }; for mod_hook in super::entered(mods, "living_incoming_damage_v3") { if matches!(mod_hook.living_incoming_damage_v3(&mut event), Flow::Cancel) { *cancel = true; break; } } *amount = event.amount;
+}
+#[non_exhaustive]
+pub struct LogLineEvent<'a> {
+    pub level: &'a str,
+    pub thread: &'a str,
+    pub message: &'a str,
+    pub line: &'a str,
+}
+pub fn dispatch_log_line(mods: &[Box<dyn Hooks>], level: &str, thread: &str, message: &str, line: &str) {
+    let mut event = LogLineEvent { level, thread, message, line }; for mod_hook in super::entered(mods, "log_line") { mod_hook.log_line(&mut event); }
+}
+#[non_exhaustive]
+pub struct MenuInputClosedEvent<'a> {
+    pub uuid: u128,
+    pub window: i32,
+    pub slots: &'a mut Vec<Option<ItemStack>>,
+}
+pub fn dispatch_menu_input_closed(host: &mut dyn Host, mods: &[Box<dyn Hooks>], uuid: u128, window: i32, slots: &mut Vec<Option<ItemStack>>) {
+    let mut event = MenuInputClosedEvent { uuid, window, slots }; for mod_hook in super::entered(mods, "menu_input_closed") { mod_hook.menu_input_closed(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct MenuLinksEvent<'a> {
+    pub player: u128,
+    pub menu: &'a str,
+    pub pos: [i32; 3],
+    pub links: &'a mut Vec<[i32; 3]>,
+}
+pub fn dispatch_menu_links(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, menu: &str, pos: [i32; 3], links: &mut Vec<[i32; 3]>) {
+    let mut event = MenuLinksEvent { player, menu, pos, links }; for mod_hook in super::entered(mods, "menu_links") { mod_hook.menu_links(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct LayerDefinitionsEvent<'a> {
+    pub layers: &'a mut Vec<(String, LayerDefinition)>,
+}
+pub fn dispatch_layer_definitions(mods: &[Box<dyn Hooks>], layers: &mut Vec<(String, LayerDefinition)>) {
+    let mut event = LayerDefinitionsEvent { layers }; for mod_hook in super::entered(mods, "layer_definitions") { mod_hook.layer_definitions(&mut event); }
+}
+#[non_exhaustive]
+pub struct PermissionCheckEvent<'a> {
+    pub player: u128,
+    pub node: &'a str,
+    pub default_level: u8,
+}
+pub fn dispatch_permission_check(host: &dyn Host, mods: &[Box<dyn Hooks>], player: u128, node: &str, default_level: u8, result: &mut Option<bool>) {
+    if result.is_some() { return; } let mut event = PermissionCheckEvent { player, node, default_level }; for mod_hook in super::entered(mods, "permission_check") { if let Some(replacement_) = mod_hook.permission_check(host, &mut event) { *result = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct PermissionGroupsEvent<'a> {
+    pub player: u128,
+    pub groups: &'a mut Vec<String>,
+}
+pub fn dispatch_permission_groups(host: &dyn Host, mods: &[Box<dyn Hooks>], player: u128, groups: &mut Vec<String>) {
+    let mut event = PermissionGroupsEvent { player, groups }; for mod_hook in super::entered(mods, "permission_groups") { mod_hook.permission_groups(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerRegisterChannelsEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub channels: &'a [String],
+    pub register: bool,
+}
+pub fn dispatch_player_register_channels(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, channels: &[String], register: bool) {
+    let mut event = PlayerRegisterChannelsEvent { player, name, channels, register }; for mod_hook in super::entered(mods, "player_register_channels") { mod_hook.player_register_channels(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerCommandLevelEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub command: &'a str,
+    pub level: u8,
+}
+pub fn dispatch_player_command_level(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, command: &str, level: &mut u8) {
+    let mut event = PlayerCommandLevelEvent { player, name, command, level: *level }; for mod_hook in super::entered(mods, "player_command_level") { mod_hook.player_command_level(host, &mut event); } *level = event.level;
+}
+#[non_exhaustive]
+pub struct PlayerCommandsSentV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub names: &'a mut Vec<String>,
+    pub names_hidden: &'a mut Vec<String>,
+}
+pub fn dispatch_player_commands_sent_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, names: &mut Vec<String>, names_hidden: &mut Vec<String>) {
+    let mut event = PlayerCommandsSentV2Event { player, name, names, names_hidden }; for mod_hook in super::entered(mods, "player_commands_sent_v2") { mod_hook.player_commands_sent_v2(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerDiedV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub message: &'a Text,
+}
+pub fn dispatch_player_died_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, message: &Text) {
+    let mut event = PlayerDiedV2Event { player, name, message }; for mod_hook in super::entered(mods, "player_died_v2") { mod_hook.player_died_v2(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerFishV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub state: i32,
+    pub hand: Hand,
+}
+pub fn dispatch_player_fish_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, state: i32, hand: Hand, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerFishV2Event { player, name, state, hand }; for mod_hook in super::entered(mods, "player_fish_v2") { if matches!(mod_hook.player_fish_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct PlayerHurtByPlayerEvent<'a> {
+    pub attacker: u128,
+    pub attacker_entity: i32,
+    pub victim: u128,
+    pub victim_entity: i32,
+    pub source: &'a str,
+    pub damage_type: &'a str,
+    pub amount: f32,
+}
+pub fn dispatch_player_hurt_by_player(mods: &[Box<dyn Hooks>], attacker: u128, attacker_entity: i32, victim: u128, victim_entity: i32, source: &str, damage_type: &str, amount: &mut f32, canceled: &mut bool) {
+    if *canceled { return; } let mut event = PlayerHurtByPlayerEvent { attacker, attacker_entity, victim, victim_entity, source, damage_type, amount: *amount }; for mod_hook in super::entered(mods, "player_hurt_by_player") { if matches!(mod_hook.player_hurt_by_player(&mut event), Flow::Cancel) { *canceled = true; break; } } *amount = event.amount;
+}
+#[non_exhaustive]
+pub struct PlayerInventoryChangedEvent<'a> {
+    pub player: u128,
+    pub stacks: &'a [Option<ItemStack>],
+}
+pub fn dispatch_player_inventory_changed(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, stacks: &[Option<ItemStack>]) {
+    let mut event = PlayerInventoryChangedEvent { player, stacks }; for mod_hook in super::entered(mods, "player_inventory_changed") { mod_hook.player_inventory_changed(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerJoinMessageEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub line: &'a mut Option<Text>,
+}
+pub fn dispatch_player_join_message(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, line: &mut Option<Text>) {
+    let mut event = PlayerJoinMessageEvent { player, name, line }; for mod_hook in super::entered(mods, "player_join_message") { mod_hook.player_join_message(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerLaunchProjectileV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub stack: &'a ItemStack,
+}
+pub fn dispatch_player_launch_projectile_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, stack: &ItemStack, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerLaunchProjectileV2Event { player, name, stack }; for mod_hook in super::entered(mods, "player_launch_projectile_v2") { if matches!(mod_hook.player_launch_projectile_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct PlayerLeaveMessageEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub line: &'a mut Option<Text>,
+}
+pub fn dispatch_player_leave_message(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, line: &mut Option<Text>) {
+    let mut event = PlayerLeaveMessageEvent { player, name, line }; for mod_hook in super::entered(mods, "player_leave_message") { mod_hook.player_leave_message(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerLoggingOutEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_logging_out(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str) {
+    let mut event = PlayerLoggingOutEvent { player, name }; for mod_hook in super::entered(mods, "player_logging_out") { mod_hook.player_logging_out(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerMoveEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub on_ground: bool,
+}
+pub fn dispatch_player_move(mods: &[Box<dyn Hooks>], player: u128, name: &str, from: [f64; 3], to: &mut [f64; 3], yaw: f32, pitch: f32, on_ground: bool, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerMoveEvent { player, name, from, to: *to, yaw, pitch, on_ground }; for mod_hook in super::entered(mods, "player_move") { if matches!(mod_hook.player_move(&mut event), Flow::Cancel) { *cancel = true; break; } } *to = event.to;
+}
+#[non_exhaustive]
+pub struct PlayerPhysicalTriggerEvent<'a> {
+    pub dimension: LevelDimension,
+    pub player: u128,
+    pub pos: BlockPos,
+    pub block: &'a str,
+}
+pub fn dispatch_player_physical_trigger(level: &dyn LevelHost, mods: &[Box<dyn Hooks>], dimension: LevelDimension, player: u128, pos: BlockPos, block: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerPhysicalTriggerEvent { dimension, player, pos, block }; for mod_hook in super::entered(mods, "player_physical_trigger") { if matches!(mod_hook.player_physical_trigger(level, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct PlayerRespawnPositionEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub dimension: &'a mut String,
+    pub pos: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+}
+pub fn dispatch_player_respawn_position(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, dimension: &mut String, pos: &mut [f64; 3], yaw: &mut f32, pitch: &mut f32) {
+    let mut event = PlayerRespawnPositionEvent { player, name, dimension, pos: *pos, yaw: *yaw, pitch: *pitch }; for mod_hook in super::entered(mods, "player_respawn_position") { mod_hook.player_respawn_position(host, &mut event); } *pos = event.pos; *yaw = event.yaw; *pitch = event.pitch;
+}
+#[non_exhaustive]
+pub struct PlayerSpawnLocationEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub dimension: &'a mut String,
+    pub position: [f64; 3],
+    pub rotation: [f32; 2],
+}
+pub fn dispatch_player_spawn_location(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, dimension: &mut String, position: &mut [f64; 3], rotation: &mut [f32; 2]) {
+    let mut event = PlayerSpawnLocationEvent { player, name, dimension, position: *position, rotation: *rotation }; for mod_hook in super::entered(mods, "player_spawn_location") { mod_hook.player_spawn_location(host, &mut event); } *position = event.position; *rotation = event.rotation;
+}
+#[non_exhaustive]
+pub struct PlayerTeleportEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub cause: &'a str,
+    pub from_dimension: &'a str,
+    pub from: [f64; 3],
+    pub to_dimension: &'a str,
+    pub to: [f64; 3],
+    pub relative: u32,
+}
+pub fn dispatch_player_teleport(mods: &[Box<dyn Hooks>], player: u128, name: &str, cause: &str, from_dimension: &str, from: [f64; 3], to_dimension: &str, to: &mut [f64; 3], relative: &mut u32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerTeleportEvent { player, name, cause, from_dimension, from, to_dimension, to: *to, relative: *relative }; for mod_hook in super::entered(mods, "player_teleport") { if matches!(mod_hook.player_teleport(&mut event), Flow::Cancel) { *cancel = true; break; } } *to = event.to; *relative = event.relative;
+}
+#[non_exhaustive]
+pub struct PlayerTickPreEvent {
+}
+pub fn dispatch_player_tick_pre(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = PlayerTickPreEvent {  }; for mod_hook in super::entered(mods, "player_tick_pre") { mod_hook.player_tick_pre(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct PotionSplashV2Event<'a> {
+    pub item: &'a str,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_potion_splash_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], item: &str, pos: [f64; 3], cancel: &mut bool) {
+    if *cancel { return; } let mut event = PotionSplashV2Event { item, pos }; for mod_hook in super::entered(mods, "potion_splash_v2") { if matches!(mod_hook.potion_splash_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ProjectileWorldBorderEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: u32,
+    pub kind: &'a str,
+    pub pos: [f64; 3],
+    pub velocity: [f64; 3],
+    pub collide: bool,
+}
+pub fn dispatch_projectile_world_border(mods: &[Box<dyn Hooks>], dimension: &str, entity: u32, kind: &str, pos: &mut [f64; 3], velocity: &mut [f64; 3], collide: &mut bool) {
+    let mut event = ProjectileWorldBorderEvent { dimension, entity, kind, pos: *pos, velocity: *velocity, collide: *collide }; for mod_hook in super::entered(mods, "projectile_world_border") { mod_hook.projectile_world_border(&mut event); } *pos = event.pos; *velocity = event.velocity; *collide = event.collide;
+}
+#[non_exhaustive]
+pub struct RecipeCategoriesEvent<'a> {
+    pub categories: &'a mut Vec<NativeRecipeCategory>,
+}
+pub fn dispatch_recipe_categories(host: &mut dyn Host, mods: &[Box<dyn Hooks>], categories: &mut Vec<NativeRecipeCategory>) {
+    let mut event = RecipeCategoriesEvent { categories }; for mod_hook in super::entered(mods, "recipe_categories") { mod_hook.recipe_categories(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct RecipeLookupEvent<'a> {
+    pub stack: &'a NativeStack,
+    pub lookup: &'a NativeRecipeLookup,
+}
+pub fn dispatch_recipe_lookup(host: &mut dyn Host, mods: &[Box<dyn Hooks>], stack: &NativeStack, lookup: &NativeRecipeLookup, handled: &mut bool) {
+    if *handled { return; } let mut event = RecipeLookupEvent { stack, lookup }; for mod_hook in super::entered(mods, "recipe_lookup") { if matches!(mod_hook.recipe_lookup(host, &mut event), Flow::Cancel) { *handled = true; break; } }
+}
+#[non_exhaustive]
+pub struct RecipeSourcesEvent<'a> {
+    pub player: u128,
+    pub menu: &'a str,
+    pub pos: [i32; 3],
+    pub sources: &'a mut Vec<[i32; 3]>,
+}
+pub fn dispatch_recipe_sources(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, menu: &str, pos: [i32; 3], sources: &mut Vec<[i32; 3]>) {
+    let mut event = RecipeSourcesEvent { player, menu, pos, sources }; for mod_hook in super::entered(mods, "recipe_sources") { mod_hook.recipe_sources(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ResourcePackStatusV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pack: u128,
+    pub status: i32,
+}
+pub fn dispatch_resource_pack_status_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, pack: u128, status: i32) {
+    let mut event = ResourcePackStatusV2Event { player, name, pack, status }; for mod_hook in super::entered(mods, "resource_pack_status_v2") { mod_hook.resource_pack_status_v2(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct RightClickBlockV2Event {
+    pub pos: [i32; 3],
+    pub face: [i32; 3],
+    pub hand: Hand,
+}
+pub fn dispatch_right_click_block_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], face: [i32; 3], hand: Hand, cancel: &mut bool) {
+    if *cancel { return; } let mut event = RightClickBlockV2Event { pos, face, hand }; for mod_hook in super::entered(mods, "right_click_block_v2") { if matches!(mod_hook.right_click_block_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ScreenMouseDraggedPreV2Event<'a> {
+    pub screen: &'a str,
+    pub mouse: [f32; 2],
+    pub button: i32,
+    pub delta: [f32; 2],
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_mouse_dragged_pre_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], screen: &str, mouse: [f32; 2], button: i32, delta: [f32; 2], modifiers: u32, canceled: &mut bool) {
+    if *canceled { return; } let mut event = ScreenMouseDraggedPreV2Event { screen, mouse, button, delta, modifiers }; for mod_hook in super::entered(mods, "screen_mouse_dragged_pre_v2") { if matches!(mod_hook.screen_mouse_dragged_pre_v2(host, &mut event), Flow::Cancel) { *canceled = true; break; } }
+}
+#[non_exhaustive]
+pub struct ScreenMouseScrolledPreV2Event<'a> {
+    pub screen: &'a str,
+    pub mouse: [f32; 2],
+    pub scroll: [f64; 2],
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_mouse_scrolled_pre_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], screen: &str, mouse: [f32; 2], scroll: [f64; 2], modifiers: u32, canceled: &mut bool) {
+    if *canceled { return; } let mut event = ScreenMouseScrolledPreV2Event { screen, mouse, scroll, modifiers }; for mod_hook in super::entered(mods, "screen_mouse_scrolled_pre_v2") { if matches!(mod_hook.screen_mouse_scrolled_pre_v2(host, &mut event), Flow::Cancel) { *canceled = true; break; } }
+}
+#[non_exhaustive]
+pub struct ScreenTextFieldCharTypedPreEvent<'a, 'b> {
+    pub screen: &'a NativeScreenView<'b>,
+    pub field: &'a mut NativeTextField,
+    pub character: char,
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_text_field_char_typed_pre(host: &dyn Host, mods: &[Box<dyn Hooks>], screen: &NativeScreenView<'_>, field: &mut NativeTextField, character: char, modifiers: u32, canceled: &mut bool) {
+    if *canceled { return; } let mut event = ScreenTextFieldCharTypedPreEvent { screen, field, character, modifiers }; for mod_hook in super::entered(mods, "screen_text_field_char_typed_pre") { if matches!(mod_hook.screen_text_field_char_typed_pre(host, &mut event), Flow::Cancel) { *canceled = true; break; } }
+}
+#[non_exhaustive]
+pub struct ScreenTransparentBackgroundEvent<'a> {
+    pub screen: &'a str,
+    pub batch: &'a mut HudBatch,
+}
+pub fn dispatch_screen_transparent_background(host: &dyn Host, mods: &[Box<dyn Hooks>], screen: &str, batch: &mut HudBatch, canceled: &mut bool) {
+    if *canceled { return; } let mut event = ScreenTransparentBackgroundEvent { screen, batch }; for mod_hook in super::entered(mods, "screen_transparent_background") { if matches!(mod_hook.screen_transparent_background(host, &mut event), Flow::Cancel) { *canceled = true; break; } }
+}
+#[non_exhaustive]
+pub struct ServerPacketEvent<'a> {
+    pub player: u128,
+    pub packet: &'a mut ClientboundPlayPacket,
+}
+pub fn dispatch_server_packet(mods: &[Box<dyn Hooks>], player: u128, packet: &mut ClientboundPlayPacket, cancel: &mut bool) {
+    if *cancel { return; } let mut event = ServerPacketEvent { player, packet }; for mod_hook in super::entered(mods, "server_packet") { if matches!(mod_hook.server_packet(&mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ServerPacketsEvent<'a> {
+    pub player: u128,
+    pub packets: &'a [(i32, usize)],
+    pub outbound: bool,
+}
+pub fn dispatch_server_packets(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, packets: &[(i32, usize)], outbound: bool) {
+    let mut event = ServerPacketsEvent { player, packets, outbound }; for mod_hook in super::entered(mods, "server_packets") { mod_hook.server_packets(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ServerStoppedEvent {
+    pub dedicated: bool,
+}
+pub fn dispatch_server_stopped(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dedicated: bool) {
+    let mut event = ServerStoppedEvent { dedicated }; for mod_hook in super::entered(mods, "server_stopped") { mod_hook.server_stopped(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct ServerTickTimedEvent<'a> {
+    pub wall_ms: f32,
+    pub cpu_ms: Option<f32>,
+    pub spans: &'a [TickSpan],
+}
+pub fn dispatch_server_tick_timed(host: &mut dyn Host, mods: &[Box<dyn Hooks>], wall_ms: f32, cpu_ms: Option<f32>, spans: &[TickSpan]) {
+    let mut event = ServerTickTimedEvent { wall_ms, cpu_ms, spans }; for mod_hook in super::entered(mods, "server_tick_timed") { mod_hook.server_tick_timed(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct StatefulBlockEntityEvent<'a> {
+    pub block: &'a str,
+    pub stateful: bool,
+}
+pub fn dispatch_stateful_block_entity(host: &dyn Host, mods: &[Box<dyn Hooks>], block: &str, stateful: &mut bool) {
+    let mut event = StatefulBlockEntityEvent { block, stateful: *stateful }; for mod_hook in super::entered(mods, "stateful_block_entity") { mod_hook.stateful_block_entity(host, &mut event); } *stateful = event.stateful;
+}
+#[non_exhaustive]
+pub struct BlockEntityFromStateEvent<'a> {
+    pub block: &'a str,
+    pub properties: &'a BlockProperties,
+}
+pub fn dispatch_block_entity_from_state(mods: &[Box<dyn Hooks>], block: &str, properties: &BlockProperties, entity: &mut Option<(String, Compound)>) {
+    if entity.is_some() { return; } let mut event = BlockEntityFromStateEvent { block, properties }; for mod_hook in super::entered(mods, "block_entity_from_state") { if let Some(replacement_) = mod_hook.block_entity_from_state(&mut event) { *entity = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct TabCompleteV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub label: &'a str,
+    pub arguments: &'a [String],
+    pub range: [usize; 2],
+    pub suggestions: &'a mut Vec<Suggestion>,
+}
+pub fn dispatch_tab_complete_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: u128, name: &str, label: &str, arguments: &[String], range: [usize; 2], suggestions: &mut Vec<Suggestion>) {
+    let mut event = TabCompleteV2Event { player, name, label, arguments, range, suggestions }; for mod_hook in super::entered(mods, "tab_complete_v2") { mod_hook.tab_complete_v2(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct TntPrimedV2Event<'a> {
+    pub player: Option<u128>,
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_tnt_primed_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: Option<u128>, dimension: &str, pos: [i32; 3], cancel: &mut bool) {
+    if *cancel { return; } let mut event = TntPrimedV2Event { player, dimension, pos }; for mod_hook in super::entered(mods, "tnt_primed_v2") { if matches!(mod_hook.tnt_primed_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ToastAddEvent<'a> {
+    pub kind: &'a str,
+    pub id: &'a str,
+}
+pub fn dispatch_toast_add(host: &mut dyn Host, mods: &[Box<dyn Hooks>], kind: &str, id: &str, cancel: &mut bool) {
+    if *cancel { return; } let mut event = ToastAddEvent { kind, id }; for mod_hook in super::entered(mods, "toast_add") { if matches!(mod_hook.toast_add(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct TooltipRenderPreEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub batch: &'a mut HudBatch,
+    pub x: f32,
+    pub y: f32,
+}
+pub fn dispatch_tooltip_render_pre(host: &mut dyn Host, mods: &[Box<dyn Hooks>], stack: &ItemStack, batch: &mut HudBatch, x: f32, y: f32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = TooltipRenderPreEvent { stack, batch, x, y }; for mod_hook in super::entered(mods, "tooltip_render_pre") { if matches!(mod_hook.tooltip_render_pre(host, &mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct TrampleEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: i32,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub fall_distance: f64,
+}
+pub fn dispatch_trample(mods: &[Box<dyn Hooks>], dimension: &str, entity: i32, kind: &str, pos: [i32; 3], fall_distance: f64, cancel: &mut bool) {
+    if *cancel { return; } let mut event = TrampleEvent { dimension, entity, kind, pos, fall_distance }; for mod_hook in super::entered(mods, "trample") { if matches!(mod_hook.trample(&mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct VehicleMovedV2Event<'a> {
+    pub player: Option<u128>,
+    pub dimension: &'a str,
+    pub vehicle: u32,
+    pub kind: &'a str,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+}
+pub fn dispatch_vehicle_moved_v2(host: &mut dyn Host, mods: &[Box<dyn Hooks>], player: Option<u128>, dimension: &str, vehicle: u32, kind: &str, from: [f64; 3], to: &mut [f64; 3], cancel: &mut bool) {
+    if *cancel { return; } let mut event = VehicleMovedV2Event { player, dimension, vehicle, kind, from, to: *to }; for mod_hook in super::entered(mods, "vehicle_moved_v2") { if matches!(mod_hook.vehicle_moved_v2(host, &mut event), Flow::Cancel) { *cancel = true; break; } } *to = event.to;
+}
+#[non_exhaustive]
+pub struct WindBurstEvent<'a> {
+    pub dimension: &'a str,
+    pub center: [f64; 3],
+    pub blocks: &'a mut Vec<[i32; 3]>,
+}
+pub fn dispatch_wind_burst(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str, center: [f64; 3], blocks: &mut Vec<[i32; 3]>) {
+    let mut event = WindBurstEvent { dimension, center, blocks }; for mod_hook in super::entered(mods, "wind_burst") { mod_hook.wind_burst(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct WorldSubmitEvent<'a> {
+    pub draw: &'a mut NativeWorldDraw,
+}
+pub fn dispatch_world_submit(host: &dyn Host, mods: &[Box<dyn Hooks>], draw: &mut NativeWorldDraw) {
+    let mut event = WorldSubmitEvent { draw }; for mod_hook in super::entered(mods, "world_submit") { mod_hook.world_submit(host, &mut event); }
+}
+#[non_exhaustive]
+pub struct WorldPrimitivesEvent<'a> {
+    pub partial: f32,
+    pub camera: [f64; 3],
+    pub primitives: &'a mut WorldPrimitives,
+}
+pub fn dispatch_world_primitives(host: &dyn Host, mods: &[Box<dyn Hooks>], partial: f32, camera: [f64; 3], primitives: &mut WorldPrimitives) {
+    let mut event = WorldPrimitivesEvent { partial, camera, primitives }; for mod_hook in super::entered(mods, "world_primitives") { mod_hook.world_primitives(host, &mut event); }
+}
+
+#[non_exhaustive]
+pub struct PlayerChatEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub message: &'a str,
+    pub replies: &'a mut Vec<Text>,
+}
+pub fn dispatch_player_chat(mods: &[Box<dyn Hooks>], player: u128, name: &str, message: &str, replies: &mut Vec<Text>, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerChatEvent { player, name, message, replies }; for mod_hook in super::entered(mods, "player_chat") { if matches!(mod_hook.player_chat(&mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct PlayerChatV2Event<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub level: u8,
+    pub message: &'a str,
+    pub replies: &'a mut Vec<Text>,
+}
+pub fn dispatch_player_chat_v2(mods: &[Box<dyn Hooks>], player: u128, name: &str, level: u8, message: &str, replies: &mut Vec<Text>, cancel: &mut bool) {
+    if *cancel { return; } let mut event = PlayerChatV2Event { player, name, level, message, replies }; for mod_hook in super::entered(mods, "player_chat_v2") { if matches!(mod_hook.player_chat_v2(&mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct ChatDecorateEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub message: &'a str,
+}
+pub fn dispatch_chat_decorate(mods: &[Box<dyn Hooks>], player: u128, name: &str, message: &str, decorated: &mut Option<Text>) {
+    if decorated.is_some() { return; } let mut event = ChatDecorateEvent { player, name, message }; for mod_hook in super::entered(mods, "chat_decorate") { if let Some(replacement_) = mod_hook.chat_decorate(&mut event) { *decorated = Some(replacement_); break; } }
+}
+#[non_exhaustive]
+pub struct HandshakeEvent<'a> {
+    pub address: std::net::SocketAddr,
+    pub host: &'a mut String,
+    pub intent: i32,
+    pub reason: &'a mut Option<Text>,
+}
+pub fn dispatch_handshake(mods: &[Box<dyn Hooks>], address: std::net::SocketAddr, host: &mut String, intent: i32, reason: &mut Option<Text>, cancel: &mut bool) {
+    if *cancel { return; } let mut event = HandshakeEvent { address, host, intent, reason }; for mod_hook in super::entered(mods, "handshake") { if matches!(mod_hook.handshake(&mut event), Flow::Cancel) { *cancel = true; break; } }
+}
+#[non_exhaustive]
+pub struct PlayerPreLoginEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub address: std::net::SocketAddr,
+    pub defer: &'a mut Vec<std::sync::mpsc::Receiver<Result<(), Text>>>,
+}
+pub fn dispatch_player_pre_login(mods: &[Box<dyn Hooks>], player: u128, name: &str, address: std::net::SocketAddr, defer: &mut Vec<std::sync::mpsc::Receiver<Result<(), Text>>>) {
+    let mut event = PlayerPreLoginEvent { player, name, address, defer }; for mod_hook in super::entered(mods, "player_pre_login") { mod_hook.player_pre_login(&mut event); }
+}
+#[non_exhaustive]
+pub struct PlayerProfileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub properties: &'a mut Vec<horizon_protocol::packets::login::Property>,
+}
+pub fn dispatch_player_profile(mods: &[Box<dyn Hooks>], player: u128, name: &str, properties: &mut Vec<horizon_protocol::packets::login::Property>) {
+    let mut event = PlayerProfileEvent { player, name, properties }; for mod_hook in super::entered(mods, "player_profile") { mod_hook.player_profile(&mut event); }
+}
+#[non_exhaustive]
+pub struct RegisterGoalsEvent<'a> {
+    pub mob: &'a mut Mob,
+}
+pub fn dispatch_register_goals(mods: &[Box<dyn Hooks>], mob: &mut Mob) {
+    let mut event = RegisterGoalsEvent { mob }; for mod_hook in super::entered(mods, "register_goals") { mod_hook.register_goals(&mut event); }
+}
+#[non_exhaustive]
+pub struct SoundPlayEvent<'a, 'b> {
+    pub sound: &'a SoundPlayback<'b>,
+    pub volume: f32,
+    pub pitch: f32,
+}
+pub fn dispatch_sound_play(mods: &[Box<dyn Hooks>], sound: &SoundPlayback<'_>, volume: &mut f32, pitch: &mut f32, cancel: &mut bool) {
+    if *cancel { return; } let mut event = SoundPlayEvent { sound, volume: *volume, pitch: *pitch }; for mod_hook in super::entered(mods, "sound_play") { if matches!(mod_hook.sound_play(&mut event), Flow::Cancel) { *cancel = true; break; } } *volume = event.volume; *pitch = event.pitch;
 }

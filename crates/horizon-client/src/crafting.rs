@@ -2276,3 +2276,22 @@ mod tests {
         assert_eq!(apply_dyes(None, &[14]), 0xB02E26);
     }
 }
+
+#[inline(never)]
+pub fn native_ingredient(
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    items: &mut Vec<String>,
+) {
+    crate::native_client_hooks::ingredient(kind, data, items);
+}
+
+#[inline(never)]
+pub fn native_ingredient_test(
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    crate::native_client_hooks::ingredient_test(kind, data, stack, accept);
+}

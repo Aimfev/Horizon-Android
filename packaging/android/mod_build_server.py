@@ -88,16 +88,23 @@ def read_bundle(path):
         if not isinstance(mod_id, str) or not ID.match(mod_id):
             raise Refused("The native mod's id is not valid.")
         prefix = f"mixins/{mod_id}/"
+        api_prefix = "api/"
         entries = {}
         for info in infos:
             name = info.filename
-            if name == "horizon-native.json" or name == "horizon-mod.toml":
+            if name in ("horizon-native.json", "horizon-mod.toml"):
+                entries[name] = archive.read(info)
                 continue
             if name.startswith(("assets/", "data/")):
+                entries[name] = archive.read(info)
                 continue
-            if not name.startswith(prefix) or not allowed(name[len(prefix) :]):
-                raise Refused(f"Unexpected file in the native mod: {name[:80]}")
-            entries[name[len(prefix) :]] = archive.read(info)
+            if name.startswith(prefix) and allowed(name[len(prefix) :]):
+                entries[name[len(prefix) :]] = archive.read(info)
+                continue
+            if name.startswith(api_prefix) and allowed(name[len(api_prefix) :]):
+                entries[name] = archive.read(info)
+                continue
+            raise Refused(f"Unexpected file in the native mod: {name[:80]}")
         if "horizon-mixin.toml" not in entries:
             raise Refused("The native mod has no horizon-mixin.toml.")
         return mod_id, entries

@@ -5113,3 +5113,8 @@ mod tests {
         );
     }
 }
+
+#[inline(never)]
+pub fn native_living_jump(entity: u32, kind: &str) {
+    crate::native_client_hooks::living_jump(entity, kind);
+}

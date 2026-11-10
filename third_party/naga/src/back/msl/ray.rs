@@ -274,7 +274,7 @@ impl<W: Write> Writer<W> {
                     // Determine whether or not to cull opaque/non-opaques
                     let f_opaque = back::RayFlag::CULL_OPAQUE.bits();
                     let f_no_opaque = back::RayFlag::CULL_NO_OPAQUE.bits();
-                    writeln!(self.out, "{inner_level}{RT_NAMESPACE}::opacity_cull_mode cull_mode = 
+                    writeln!(self.out, "{inner_level}{RT_NAMESPACE}::opacity_cull_mode cull_mode =
 {inner_level}{INDENT}(desc.flags & {f_opaque}) != 0 ? {RT_NAMESPACE}::opacity_cull_mode::opaque : (
 {inner_level}{INDENT}{INDENT}(desc.flags & {f_no_opaque}) != 0 ? {RT_NAMESPACE}::opacity_cull_mode::non_opaque : {RT_NAMESPACE}::opacity_cull_mode::none
 {inner_level}{INDENT});")?;
