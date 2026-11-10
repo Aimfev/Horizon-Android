@@ -1680,6 +1680,7 @@ impl Settings {
                 key: k1.into(),
                 second_key: k2.into(),
                 third_key: String::new(),
+                fourth_key: String::new(),
                 custom_label: label.into(),
                 always_visible: in_menu,
                 layouts: [p; 3],

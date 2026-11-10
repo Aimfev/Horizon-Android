@@ -1220,6 +1220,15 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn('"Manifest" | "Resolve" => Icon::FileText,', lp_rs)
         self.assertIn('"Client JAR" | "Download" => Icon::Packs,', lp_rs)
 
+        # 5. GoyControl 4th event slot & sequential execution, independent button holding, and chat mentions
+        custom_rs = _read_repo_file("crates/horizon-client-render/src/touch/custom.rs")
+        self.assertIn("pub fourth_key: String,", custom_rs)
+        self.assertIn("self.custom_swipe_btn.values().any(|&idx| idx == index)", custom_rs)
+        layout_rs = _read_repo_file("crates/horizon-client-render/src/touch/layout.rs")
+        self.assertIn("fourth_key: String::new(),", layout_rs)
+        chat_rs = _read_repo_file("crates/horizon-client-render/src/chat.rs")
+        self.assertIn("builder.suggest(format!(\"@{player}\"));", chat_rs)
+
 
 
     def test_full_horizon_mod_loader_library_shader_store_and_fast_icon_loading(self) -> None:
