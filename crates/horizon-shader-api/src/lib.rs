@@ -16,5 +16,8 @@ pub use manifest::{
     API, Api, Blend, LightColor, MANIFEST, Manifest, Material, OptionKind, OptionPage, PackOption,
     PackTexture, PageItem, SCHEMA, SpriteTag, Stage,
 };
-pub use package::{EXTENSION, Pack};
+pub use package::{
+    BUILTIN_SHADERS, EXTENSION, HORIZON_SHADER_STORE_LIBRARY, Pack, all_horizon_shader_packs,
+    build_builtin_hshader_bytes, builtin_shader_pack,
+};
 pub use stages::{Composed, StageKind, compose};

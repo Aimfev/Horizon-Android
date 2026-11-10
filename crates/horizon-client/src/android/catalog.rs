@@ -2681,7 +2681,7 @@ impl Catalog {
                 skipped: chk.skipped.clone(),
                 depends: chk.depends.clone(),
                 namespaces: chk.namespaces.clone(),
-                mapped_hooks: chk.code.events.clone(),
+                mapped_hooks: chk.code.events.iter().cloned().collect(),
                 carry_dir,
                 hmod_path,
                 check_json_path: check_path,

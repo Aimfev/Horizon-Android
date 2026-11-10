@@ -453,7 +453,7 @@ impl Game<'_> {
                             );
                             if let Some(renderer) = &self.renderer {
                                 let ctx = renderer.shader_pack_build_context();
-                                let gen = SHADER_JOB_GENERATION
+                                let job_gen = SHADER_JOB_GENERATION
                                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                                     + 1;
                                 let (tx, rx) = std::sync::mpsc::channel();
@@ -465,7 +465,7 @@ impl Game<'_> {
                                             .unwrap_or_else(std::sync::PoisonError::into_inner);
                                         if SHADER_JOB_GENERATION
                                             .load(std::sync::atomic::Ordering::SeqCst)
-                                            != gen
+                                            != job_gen
                                         {
                                             return;
                                         }

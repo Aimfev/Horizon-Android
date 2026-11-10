@@ -364,7 +364,7 @@ fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
     let set = projectiles::register_thrown_types(
         types
             .iter()
-            .map(|t| (t.id.clone(), t.item.clone(), t.damage)),
+            .filter_map(|t| t.item.as_ref().map(|item| (t.id.clone(), item.clone(), t.damage))),
     );
     if !set
         && projectiles::thrown_types()

@@ -1059,7 +1059,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             if let Some((mod_id, ext)) = imported_mod_id {
                 let mut on = horizon_client::mod_list::ModList::load(&request.home);
                 on.disabled.remove(&mod_id);
-                on.enabled.insert(mod_id);
+                on.enabled.insert(mod_id.clone());
                 if ext == "mrpack"
                     && let Ok((pack, rows, count)) = horizon_port_pack::android_port::port_modpack_natively(
                         &target,

@@ -14925,13 +14925,13 @@ impl Game<'_> {
         let weights = {
             let chunks = &self.world.chunks;
             let plains = biomes.id("minecraft:plains");
-            let mut last_chunk: Option<((i32, i32), Option<&horizon_world::chunk::Chunk>)> = None;
+            let mut last_chunk: Option<((i32, i32), Option<&horizon_client::chunk::Chunk>)> = None;
             horizon_client::biome::gaussian_weights(camera.to_array(), |qx, qy, qz| {
                 let key = (qx >> 2, qz >> 2);
                 let chunk = match last_chunk {
                     Some((k, c)) if k == key => c,
                     _ => {
-                        let c = chunks.get(&key);
+                        let c = chunks.get(&key).map(|c| c.as_ref());
                         last_chunk = Some((key, c));
                         c
                     }

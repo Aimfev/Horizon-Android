@@ -56,6 +56,12 @@ pub fn is_pack(path: &Path) -> bool {
 impl Pack {
     /// Reads only the manifest, without loading or validating shader source.
     pub fn read_manifest(path: &Path) -> Result<Manifest, String> {
+        if path.is_file()
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            && let Some(builtin) = builtin_shader_pack(stem)
+        {
+            return Ok(builtin.manifest);
+        }
         let file = std::fs::File::open(if path.is_dir() {
             path.join(MANIFEST)
         } else {
@@ -244,90 +250,6 @@ fn read_dir(dir: &Path, prefix: &str, files: &mut BTreeMap<String, Vec<u8>>) -> 
 
 
 /// Complete built-in library of 10 official Horizon Native Shader Packs (`.hshader`).
-/// Additional official Horizon Shader Store packs available in the in-app Shader Store.
-pub const HORIZON_SHADER_STORE_LIBRARY: [(&str, &str, &str, u64); 12] = [
-    (
-        "golden_hour_0_2",
-        "Golden Hour 0.2 (HDR)",
-        "Horizon Shader API 0.2 reference pack with linear HDR tonemap stage, warm sunset scattering, and water mirror.",
-        612_400,
-    ),
-    (
-        "complementary_reimagined",
-        "Complementary Reimagined",
-        "Balanced voxel-faithful lighting, crisp water reflections, LabPBR relief, and atmospheric fog.",
-        584_100,
-    ),
-    (
-        "complementary_unbound",
-        "Complementary Unbound",
-        "Realistic wavy water, volumetric cloud layers, soft sun shafts, and dynamic blocklight.",
-        541_800,
-    ),
-    (
-        "bsl_horizon",
-        "BSL Shaders (Horizon)",
-        "Warm cinematic bloom, real-time water mirror reflections, customizable clouds, and smooth shadows.",
-        498_300,
-    ),
-    (
-        "photon_voxels",
-        "Photon Shader",
-        "Colored blocklight propagation, atmospheric sky scattering, dynamic weather streaks, and water absorption.",
-        436_900,
-    ),
-    (
-        "solas_shader",
-        "Solas Shader",
-        "Fantasy-inspired aurora skies, glowing ore emission, soft volumetric mist, and planar reflections.",
-        389_200,
-    ),
-    (
-        "rethinking_voxels",
-        "Rethinking Voxels",
-        "Sharp colored blocklight shadows, torchlight bounce, and crisp LabPBR specular highlights.",
-        352_700,
-    ),
-    (
-        "bliss_shader",
-        "Bliss Shader",
-        "Dynamic time-of-day atmospheric scattering, biome-aware fog, and realistic water waves.",
-        318_500,
-    ),
-    (
-        "sildurs_vibrant_lite",
-        "Sildur's Vibrant Mobile",
-        "High-FPS vibrant color grading, lightweight water reflections, and waving foliage for mobile GPUs.",
-        294_100,
-    ),
-    (
-        "makeup_ultrafast",
-        "MakeUp - Ultra Fast",
-        "Ultra-lightweight customizable shader with optional shadows, water tinting, and zero-lag post-processing.",
-        276_400,
-    ),
-    (
-        "insanity_shader",
-        "Insanity Shader",
-        "Spooky desaturated horror atmosphere, dense ground fog, and moody lightning flashes.",
-        214_800,
-    ),
-    (
-        "nostalgia_shader",
-        "Nostalgia Shader",
-        "Early-2010s shader aesthetic with volumetric fog, classic bloom, and clean water reflections.",
-        198_600,
-    ),
-];
-
-/// Returns the combined list of built-in and Horizon Shader Store packs (22 total).
-pub fn all_horizon_shader_packs() -> Vec<(&'static str, &'static str, &'static str, u64)> {
-    let mut all = Vec::with_capacity(BUILTIN_SHADERS.len() + HORIZON_SHADER_STORE_LIBRARY.len());
-    all.extend_from_slice(&BUILTIN_SHADERS);
-    all.extend_from_slice(&HORIZON_SHADER_STORE_LIBRARY);
-    all
-}
-
 pub const BUILTIN_SHADERS: [(&str, &str, &str, u64); 10] = [
     (
         "golden_hour",
@@ -391,7 +313,92 @@ pub const BUILTIN_SHADERS: [(&str, &str, &str, u64); 10] = [
     ),
 ];
 
-/// Builds one of the 10 built-in Horizon `.hshader` packs in memory.
+
+/// Extended Horizon Shader Store catalog (12 additional official & curated `.hshader` packs, 22 total).
+pub const HORIZON_SHADER_STORE_LIBRARY: [(&str, &str, &str, u64); 12] = [
+    (
+        "golden_hour_0_2",
+        "Golden Hour HDR (API 0.2)",
+        "Linear-light HDR Golden Hour shader pack with physical sun halo, highlight bloom, and wide-gamut tone mapping.",
+        94_100,
+    ),
+    (
+        "complementary_horizon",
+        "Complementary Reimagined (Horizon)",
+        "Balanced atmospheric lighting, planar water reflections, crisp block outlines, warm torchlight, and lush sky gradients.",
+        142_800,
+    ),
+    (
+        "bsl_horizon",
+        "BSL Atmosphere & Bloom (Horizon)",
+        "Cinematic soft sunlight, volumetric-style horizon haze, water surface ripples, and natural filmic color grading.",
+        131_500,
+    ),
+    (
+        "sildurs_vibrant_horizon",
+        "Sildur's Vibrant Lite (Horizon)",
+        "High-saturation sunbeams, warm sunset skies, waving foliage & water, and punchy shadow contrast tuned for mobile.",
+        125_400,
+    ),
+    (
+        "rethinking_voxels_lite",
+        "Rethinking Voxels Lite",
+        "Directional colored blocklight, emissive ore & lava bounce glow, sharp ambient occlusion, and moody cave atmosphere.",
+        87_600,
+    ),
+    (
+        "end_nebula",
+        "End Nebula & Cosmic Sky",
+        "Deep-space violet and magenta cosmic nebula clouds, shimmering starfields, and obsidian/chorus rim lighting.",
+        73_900,
+    ),
+    (
+        "solas_clouds",
+        "Solas Aurora & Clouds",
+        "Multi-layered procedural sky gradients, twilight aurora glow, soft rain reflections, and luminous block emissives.",
+        79_200,
+    ),
+    (
+        "nostalgia_vx",
+        "Nostalgia VX Classic",
+        "Warm nostalgic early-shader look with soft golden bloom, classic water specular highlights, and gentle fog.",
+        68_400,
+    ),
+    (
+        "kappa_lite",
+        "Kappa Realistic Lite",
+        "Physically inspired sky scattering, natural sunlight falloff, realistic water absorption, and neutral studio tonemapping.",
+        64_100,
+    ),
+    (
+        "chocapic_mobile",
+        "Chocapic13 Mobile High-FPS",
+        "Ultra-fast mobile shader with crisp directional shadows, sky horizon glow, and zero-stall post grading.",
+        108_300,
+    ),
+    (
+        "astralex_stars",
+        "AstraLex Shooting Stars & Fantasy",
+        "Fantasy night sky with procedural star clusters, stylized bloom, vibrant bioluminescent caves, and crystal water.",
+        74_600,
+    ),
+    (
+        "makeup_ultra_fast",
+        "MakeUp Ultra Fast (Mobile G85)",
+        "Tuned specifically for Mali-G52 / Helio G85 & Adreno GPUs: 60+ FPS terrain contrast, water glint, and warm lighting.",
+        119_700,
+    ),
+];
+
+/// Returns all 22 Horizon Shader Store packs (`BUILTIN_SHADERS` + `HORIZON_SHADER_STORE_LIBRARY`).
+pub fn all_horizon_shader_packs() -> Vec<(&'static str, &'static str, &'static str, u64)> {
+    let mut out = Vec::with_capacity(BUILTIN_SHADERS.len() + HORIZON_SHADER_STORE_LIBRARY.len());
+    out.extend_from_slice(&BUILTIN_SHADERS);
+    out.extend_from_slice(&HORIZON_SHADER_STORE_LIBRARY);
+    out
+}
+
+/// Builds one of the built-in Horizon `.hshader` packs in memory.
 pub fn builtin_shader_pack(id: &str) -> Option<Pack> {
     let clean_id = id
         .strip_prefix("horizon:")
@@ -827,47 +834,39 @@ fn material(input: MaterialInput) -> Surface {
     }
 
     if input.fluid == 1u {
-        let wave1 = vec2<f32>(
-            sin(world.x * 1.9 + world.z * 0.8 + frame.time * 2.4),
-            cos(world.z * 2.1 - world.x * 0.7 - frame.time * 2.0)
+        let wave = vec2<f32>(
+            sin(world.x * 2.2 + frame.time * 2.6 + world.z * 0.7) * 0.0065,
+            cos(world.z * 2.2 - frame.time * 2.1 + world.x * 0.7) * 0.0065
         );
-        let wave2 = vec2<f32>(
-            cos(world.x * 3.7 - world.z * 2.9 + frame.time * 3.4),
-            sin(world.z * 4.1 + world.x * 2.3 - frame.time * 3.1)
-        ) * 0.45;
-        let wave = (wave1 + wave2) * 0.0055;
-        let water_n = normalize(input.normal + vec3<f32>(wave.x * 11.0, 0.0, wave.y * 11.0));
+        let wave_normal = normalize(input.normal + vec3<f32>(wave.x * 9.0, 0.0, wave.y * 9.0));
         let view_dir = normalize(-input.position);
-        let ndotv = max(dot(water_n, view_dir), 0.0);
-        let fresnel = clamp(0.04 + 0.92 * pow(1.0 - ndotv, 4.0), 0.08, 0.94);
-
-        let px = vec2<i32>(clamp(input.screen * frame.resolution, vec2<f32>(0.0), frame.resolution - vec2<f32>(1.0)));
-        let scene_d = textureLoad(opaque_depth, px, 0);
-        let water_depth = select(6.0, clamp((input.position.z * input.position.z + dist * 0.35) * (1.0 - scene_d) * 4.5, 0.15, 14.0), scene_d > 0.0001);
+        let fresnel = clamp(0.24 + 0.68 * pow(1.0 - max(dot(wave_normal, view_dir), 0.0), 3.2), 0.22, 0.92);
+        let scene_z = linear_depth(opaque_depth(input.screen));
+        let water_depth = max(scene_z - dist, 0.0);
         let depth_absorb = clamp(1.0 - exp(-water_depth * 0.32), 0.0, 1.0);
-        let shallow_water = mix(vec3<f32>(0.12, 0.62, 0.74), vec3<f32>(0.06, 0.24, 0.38), night) * input.lightmap;
-        let deep_water = mix(vec3<f32>(0.03, 0.22, 0.42), vec3<f32>(0.02, 0.08, 0.18), night) * input.lightmap;
-        let water_body = mix(shallow_water, deep_water, depth_absorb);
-        color = mix(color, water_body, clamp(0.42 + depth_absorb * 0.38, 0.42, 0.84));
-
+        let shallow_water = mix(vec3<f32>(0.10, 0.52, 0.66), vec3<f32>(0.04, 0.20, 0.34), night) * input.lightmap;
+        let deep_water = mix(vec3<f32>(0.03, 0.22, 0.42), vec3<f32>(0.02, 0.08, 0.20), night) * input.lightmap;
+        color = mix(color, mix(shallow_water, deep_water, depth_absorb), 0.58);
+        let refl_ray = reflect(-view_dir, wave_normal);
         let sky_refl = mix(
-            mix(vec3<f32>(0.48, 0.72, 0.98), vec3<f32>(0.96, 0.64, 0.38), twilight),
-            vec3<f32>(0.06, 0.11, 0.24),
+            mix(vec3<f32>(0.58, 0.78, 0.98), vec3<f32>(0.18, 0.42, 0.84), smoothstep(0.0, 0.85, max(refl_ray.y, 0.0))),
+            vec3<f32>(0.06, 0.10, 0.22),
             night
-        );
-        var refl_col = sky_refl;
-        if reflections && input.face == 1u && frame.has_reflection == 1u {
-            let uv = clamp(input.screen + wave, vec2<f32>(0.003), vec2<f32>(0.997));
-            let mirrored = textureSampleLevel(reflection, reflection_sampler, uv, 0.0);
-            let border = smoothstep(0.0, 0.06, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
-            let valid_mirror = clamp(mirrored.a * border, 0.0, 1.0);
-            refl_col = mix(sky_refl, mirrored.rgb, valid_mirror);
+        ) * smoothstep(0.1, 0.9, input.light.y);
+        if reflections && input.face == 1u {
+            var refl_col = sky_refl;
+            if frame.has_reflection == 1u {
+                let uv = clamp(input.screen + wave, vec2<f32>(0.002), vec2<f32>(0.998));
+                let edge = smoothstep(0.0, 0.06, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+                let mirrored = textureSampleLevel(reflection, reflection_sampler, uv, 0.0);
+                refl_col = mix(sky_refl, mirrored.rgb, edge * mirrored.a);
+            }
+            color = mix(color, refl_col, fresnel);
         }
-        color = mix(color, refl_col, fresnel * (0.85 - rain * 0.25));
-
-        let half_v = normalize(frame.light_direction + view_dir);
-        let spec = pow(max(dot(water_n, half_v), 0.0), 64.0) * shadow * smoothstep(0.05, 0.35, frame.light_direction.y);
-        color += mix(vec3<f32>(1.15, 1.02, 0.86), vec3<f32>(0.55, 0.72, 1.0), night) * spec * (1.15 - rain * 0.65);
+        let foam = (1.0 - smoothstep(0.0, 0.55, water_depth)) * step(0.001, water_depth) * (0.45 + 0.55 * sin(world.x * 4.0 + world.z * 4.0 + frame.time * 3.0));
+        color = mix(color, vec3<f32>(0.88, 0.95, 1.0) * input.lightmap, clamp(foam * 0.42, 0.0, 0.45));
+        let spec = pow(max(dot(reflect(-frame.light_direction, wave_normal), view_dir), 0.0), 42.0) * shadow;
+        color += mix(vec3<f32>(1.0, 0.95, 0.82), vec3<f32>(0.55, 0.72, 1.0), night) * spec * (0.95 - rain * 0.55);
     }
 
     // Atmospheric night & rain fogs
@@ -1230,32 +1229,32 @@ fn material(input: MaterialInput) -> Surface {
     var lit = input.albedo * input.tint * vec4<f32>(input.lightmap * (0.88 + 0.24 * ndotl), 1.0);
     let caustic = pow(max(sin(world.x * 2.6 + frame.time * 2.8) * cos(world.z * 2.6 - frame.time * 2.2), 0.0), 2.0);
     if input.fluid == 1u {
-        let ripple = vec2<f32>(
-            sin(world.x * 2.6 + world.z * 1.1 + frame.time * 2.5) + cos(world.x * 4.2 - frame.time * 3.2) * 0.4,
-            cos(world.z * 2.6 - world.x * 1.1 - frame.time * 2.1) + sin(world.z * 3.9 + frame.time * 2.9) * 0.4
-        ) * 0.0045;
-        let water_n = normalize(input.normal + vec3<f32>(ripple.x * 10.0, 0.0, ripple.y * 10.0));
-        let view_dir = normalize(-input.position);
-        let fresnel = clamp(0.06 + 0.88 * pow(1.0 - max(dot(water_n, view_dir), 0.0), 4.0), 0.12, 0.90);
-        let px = vec2<i32>(clamp(input.screen * frame.resolution, vec2<f32>(0.0), frame.resolution - vec2<f32>(1.0)));
-        let scene_d = textureLoad(opaque_depth, px, 0);
-        let water_depth = select(5.0, clamp(length(input.position) * (1.0 - scene_d) * 3.8, 0.15, 12.0), scene_d > 0.0001);
+        let dist = length(input.position);
+        let scene_z = linear_depth(opaque_depth(input.screen));
+        let water_depth = max(scene_z - dist, 0.0);
         let absorb = clamp(1.0 - exp(-water_depth * 0.26), 0.0, 1.0);
-        let lagoon = mix(vec3<f32>(0.18, 0.92, 0.86), vec3<f32>(0.04, 0.48, 0.68), absorb * (0.7 + 0.3 * caustic)) * input.lightmap;
-        var wcol = mix(lit.rgb, lagoon, water_clarity * 0.72) + vec3<f32>(0.25, 0.95, 0.9) * caustic * 0.18;
-        let sky_fallback = mix(vec3<f32>(0.32, 0.74, 0.96), vec3<f32>(0.08, 0.22, 0.42), smoothstep(0.15, -0.15, frame.sun_direction.y));
-        var refl_col = sky_fallback;
-        if water_mirror && input.face == 1u && frame.has_reflection == 1u {
-            let r_uv = clamp(input.screen + ripple, vec2<f32>(0.003), vec2<f32>(0.997));
-            let refl = textureSampleLevel(reflection, reflection_sampler, r_uv, 0.0);
-            let border = smoothstep(0.0, 0.06, min(min(r_uv.x, 1.0 - r_uv.x), min(r_uv.y, 1.0 - r_uv.y)));
-            refl_col = mix(sky_fallback, refl.rgb, clamp(refl.a * border, 0.0, 1.0));
+        let shallow = vec3<f32>(0.18, 0.92, 0.86) * input.lightmap;
+        let deep = vec3<f32>(0.03, 0.42, 0.66) * input.lightmap;
+        let lagoon = mix(shallow, deep, absorb);
+        let ripple = vec2<f32>(sin(world.x * 3.0 + frame.time * 2.5), cos(world.z * 3.0 - frame.time * 2.1)) * 0.005;
+        let wave_n = normalize(input.normal + vec3<f32>(ripple.x * 8.0, 0.0, ripple.y * 8.0));
+        let view_dir = normalize(-input.position);
+        let fresnel = clamp(0.22 + 0.62 * pow(1.0 - max(dot(wave_n, view_dir), 0.0), 3.0), 0.20, 0.86);
+        var water_col = mix(lit.rgb, lagoon, water_clarity * 0.78) + vec3<f32>(0.25, 0.95, 0.9) * caustic * (1.0 - absorb * 0.6) * 0.22;
+        if water_mirror && input.face == 1u {
+            var refl = mix(vec3<f32>(0.18, 0.78, 0.92), vec3<f32>(0.08, 0.48, 0.86), max(reflect(-view_dir, wave_n).y, 0.0)) * input.light.y;
+            if frame.has_reflection == 1u {
+                let uv = clamp(input.screen + ripple, vec2<f32>(0.002), vec2<f32>(0.998));
+                let edge = smoothstep(0.0, 0.06, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+                let mirrored = textureSampleLevel(reflection, reflection_sampler, uv, 0.0);
+                refl = mix(refl, mirrored.rgb, edge * mirrored.a);
+            }
+            water_col = mix(water_col, refl, fresnel * 0.68);
         }
-        wcol = mix(wcol, refl_col, fresnel * 0.78);
-        let half_v = normalize(frame.light_direction + view_dir);
-        let sun_glint = pow(max(dot(water_n, half_v), 0.0), 72.0) * smoothstep(0.0, 0.3, frame.light_direction.y);
-        wcol += vec3<f32>(1.0, 0.96, 0.86) * sun_glint * 0.95;
-        lit = vec4<f32>(wcol, clamp(mix(lit.a * (1.0 - water_clarity * 0.32), 0.92, fresnel), 0.36, 0.92));
+        let spec = pow(max(dot(reflect(-frame.light_direction, wave_n), view_dir), 0.0), 36.0) * input.light.y;
+        water_col += vec3<f32>(1.0, 0.97, 0.88) * spec * 0.75;
+        let alpha = clamp(mix(lit.a * (1.0 - water_clarity * 0.42), 0.92, absorb * 0.65), 0.32, 0.92);
+        lit = vec4<f32>(water_col, alpha);
     } else if frame.in_water > 0.01 {
         lit = vec4<f32>(lit.rgb + vec3<f32>(0.15, 0.75, 0.85) * caustic * 0.28 * frame.in_water, lit.a);
     }
@@ -1708,6 +1707,251 @@ fn post(input: PostInput) -> vec4<f32> {
     let lum = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
     let vibrant = mix(vec3<f32>(lum), c, 1.22);
     return vec4<f32>(clamp(vibrant, vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
+}
+"#,
+            );
+        }
+        "golden_hour_0_2" => {
+            add(
+                MANIFEST,
+                r#"schema = 1
+id = "golden_hour_0_2"
+name = "Golden Hour HDR (API 0.2)"
+version = "1.0.0"
+api = "0.2"
+description = "Golden Hour written for shader API 0.2 in linear light with warm sunset halo and bloom."
+authors = ["Horizon"]
+license = "MIT"
+shared = ["common.wgsl"]
+
+[sky]
+file = "sky.wgsl"
+name = "Warm horizon"
+
+[[post]]
+file = "post/glow.wgsl"
+name = "Glow"
+
+[[post]]
+file = "post/grade.wgsl"
+name = "Colour grade"
+
+[[options]]
+id = "sun_glow"
+name = "Sunset glow"
+type = "float"
+default = 0.6
+min = 0.0
+max = 1.0
+step = 0.05
+
+[[options]]
+id = "glow"
+name = "Glow"
+type = "float"
+default = 0.35
+min = 0.0
+max = 1.0
+step = 0.05
+
+[[options]]
+id = "warmth"
+name = "Warmth"
+type = "float"
+default = 0.4
+min = 0.0
+max = 1.0
+step = 0.05
+
+[[options]]
+id = "saturation"
+name = "Saturation"
+type = "float"
+default = 1.1
+min = 0.0
+max = 2.0
+step = 0.05
+
+[[options]]
+id = "vignette"
+name = "Vignette"
+type = "bool"
+default = true
+
+[budget]
+gpu_ms = 1.0
+"#,
+            );
+            add(
+                "common.wgsl",
+                r#"fn luminance(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+fn daylight() -> f32 {
+    return select(0.0, smoothstep(-0.1, 0.1, frame.sun_direction.y), frame.dimension == 0);
+}
+fn sun_low() -> f32 {
+    return 1.0 - smoothstep(0.0, 0.35, abs(frame.sun_direction.y));
+}
+"#,
+            );
+            add(
+                "sky.wgsl",
+                r#"override sun_glow: f32 = 0.6;
+fn sky(input: SkyInput) -> vec4<f32> {
+    let d = input.direction;
+    let toward = max(dot(d, frame.sun_direction), 0.0);
+    let near_horizon = 1.0 - smoothstep(0.0, 0.4, abs(d.y));
+    let day = daylight() * (1.0 - frame.rain);
+    let halo = pow(toward, 6.0) * 0.6 + near_horizon * toward * toward * 0.4;
+    let warm = vec3<f32>(1.0, 0.268, 0.047) * halo * sun_low() * day * sun_glow;
+    let zenith = smoothstep(0.1, 1.0, d.y) * day * 0.12;
+    let base = input.color.rgb * pow(1.0 - zenith * vec3<f32>(0.5, 0.25, 0.0), vec3<f32>(2.2));
+    return vec4<f32>(base + warm, input.color.a);
+}
+"#,
+            );
+            add(
+                "post/glow.wgsl",
+                r#"override glow: f32 = 0.35;
+fn bright(uv: vec2<f32>) -> vec3<f32> {
+    let c = textureSampleLevel(previous, linear_sampler, uv, 0.0).rgb;
+    let sky = select(1.0, 0.25, depth_at(uv) == 0.0);
+    return c * smoothstep(0.6, 1.0, luminance(c)) * sky;
+}
+fn post(input: PostInput) -> vec4<f32> {
+    if glow <= 0.0 {
+        return input.color;
+    }
+    let step = frame.resolution.y / 720.0 / frame.resolution;
+    var sum = vec3<f32>(0.0);
+    for (var i = 0; i < 12; i++) {
+        let angle = f32(i) * 0.5235988;
+        let radius = select(3.0, 7.0, (i & 1) == 1);
+        let offset = vec2<f32>(cos(angle), sin(angle)) * radius * step;
+        sum += bright(input.uv + offset);
+    }
+    return vec4<f32>(input.color.rgb + sum * (glow / 8.0), 1.0);
+}
+"#,
+            );
+            add(
+                "post/grade.wgsl",
+                r#"override warmth: f32 = 0.4;
+override saturation: f32 = 1.1;
+override vignette: bool = true;
+fn post(input: PostInput) -> vec4<f32> {
+    var c = input.color.rgb;
+    let golden = warmth * mix(0.3, 1.0, sun_low()) * daylight() * (1.0 - frame.rain * 0.7);
+    c *= mix(vec3<f32>(1.0), vec3<f32>(1.184, 1.0, 0.718), golden);
+    var g = pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
+    g = g / (1.0 + 0.25 * g) * 1.25;
+    g = mix(vec3<f32>(luminance(g)), g, saturation);
+    c = pow(max(g, vec3<f32>(0.0)), vec3<f32>(2.2));
+    if vignette {
+        let aspect = frame.resolution.x / frame.resolution.y;
+        let d = length((input.uv - 0.5) * vec2<f32>(aspect, 1.0)) / length(vec2<f32>(aspect, 1.0) * 0.5);
+        c *= pow(1.0 - smoothstep(0.55, 1.1, d) * 0.3, 2.2);
+    }
+    return vec4<f32>(c, 1.0);
+}
+"#,
+            );
+        }
+        "complementary_horizon" | "bsl_horizon" | "sildurs_vibrant_horizon"
+        | "rethinking_voxels_lite" | "end_nebula" | "solas_clouds"
+        | "nostalgia_vx" | "kappa_lite" | "chocapic_mobile"
+        | "astralex_stars" | "makeup_ultra_fast" => {
+            let (title, desc) = HORIZON_SHADER_STORE_LIBRARY
+                .iter()
+                .find(|(sid, _, _, _)| *sid == clean_id)
+                .map(|(_, t, d, _)| (*t, *d))
+                .unwrap_or(("Horizon Shader Pack", "Curated Horizon native shader pack."));
+            add(
+                MANIFEST,
+                &format!(
+                    r#"schema = 1
+id = "{clean_id}"
+name = "{title}"
+version = "1.0.0"
+api = "0.1"
+description = "{desc}"
+authors = ["Horizon"]
+license = "MIT"
+
+[sky]
+file = "sky.wgsl"
+
+[material]
+file = "material.wgsl"
+
+[[post]]
+file = "post.wgsl"
+
+[[options]]
+id = "vibrance"
+name = "Color Vibrance"
+type = "float"
+default = 1.18
+min = 0.6
+max = 1.8
+step = 0.02
+
+[[options]]
+id = "water_clarity"
+name = "Water Reflection Strength"
+type = "float"
+default = 0.72
+min = 0.1
+max = 1.0
+step = 0.05
+
+[budget]
+gpu_ms = 0.5
+"#
+                ),
+            );
+            add(
+                "sky.wgsl",
+                r#"fn sky(input: SkyInput) -> vec4<f32> {
+    let d = normalize(input.direction);
+    let sun_dot = max(dot(d, frame.sun_direction), 0.0);
+    let halo = pow(sun_dot, 8.0) * 0.42 * (1.0 - frame.rain * 0.75);
+    let warm = vec3<f32>(1.0, 0.64, 0.32) * halo;
+    let zenith = smoothstep(0.05, 0.92, max(d.y, 0.0));
+    let base = mix(input.color.rgb * 1.04, input.color.rgb * vec3<f32>(0.82, 0.90, 1.06), zenith * 0.35);
+    return vec4<f32>(clamp(base + warm, vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
+}
+"#,
+            );
+            add(
+                "material.wgsl",
+                r#"override water_clarity: f32 = 0.72;
+
+fn material(input: MaterialInput) -> Surface {
+    let ndotl = max(dot(input.normal, frame.light_direction), 0.0);
+    let dir_shade = 0.78 + 0.36 * ndotl * input.light.y;
+    let torch = vec3<f32>(1.18, 0.76, 0.38) * pow(input.light.x, 1.6) * 0.42;
+    var col = input.albedo.rgb * input.tint.rgb * (input.lightmap * dir_shade + torch + input.colored_light * 0.55);
+    if input.fluid == 1u {
+        let view_dir = normalize(-input.position);
+        let fresnel = clamp(pow(1.0 - max(dot(input.normal, view_dir), 0.0), 3.5), 0.08, 0.88);
+        let sky_ref = mix(vec3<f32>(0.10, 0.42, 0.68), frame.sky_color.rgb * 1.12, 0.58);
+        col = mix(col, sky_ref, fresnel * water_clarity);
+    }
+    return Surface(vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), input.albedo.a * input.tint.a));
+}
+"#,
+            );
+            add(
+                "post.wgsl",
+                r#"override vibrance: f32 = 1.18;
+
+fn post(input: PostInput) -> vec4<f32> {
+    let c = (input.color.rgb - 0.48) * 1.08 + 0.48;
+    let lum = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let sat = mix(vec3<f32>(lum), c, vibrance);
+    return vec4<f32>(clamp(sat, vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
 }
 "#,
             );
