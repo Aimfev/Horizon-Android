@@ -272,7 +272,6 @@
 //! that would break such a bundle is not made.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
-use super::native_lifecycle::{NativeLifecycleContext, ServerTickPhase, WorldPhase};
 use super::{
     Game, GameLevel, LevelDimension, Screen,
     execution_role::ExecutionRole,
@@ -285,7 +284,7 @@ use horizon_client::mod_api::{
     self, AttachmentResult, Attachments, BiomeColors, BlockProperties, ClientboundPlayPacket,
     EntityDataValue, EquipmentSlot, Holder, HudMode, ItemEnergyBuffer, LayerDefinition,
     ModEnergyBuffer, Music, MusicLayer, NativeBlockRim, NativeBossBar, NativeCamera,
-    NativeColoredLight, NativeCommand, NativeConfig, NativeConfigFile, NativeDataMapType,
+    NativeClock, NativeColoredLight, NativeCommand, NativeConfig, NativeConfigFile, NativeDataMapType,
     NativeDispensed, NativeFishingMedium, NativeFluidAction, NativeFluidDrain, NativeFluidStack,
     NativeFluidTankView, NativeInventoryKind, NativeLifecycleContext, NativeLootDrops,
     NativeLootOdds, NativeMapDecoration, NativeMapInfo, NativeMinimap, NativeMobRender, NativeMod,
@@ -1164,140 +1163,6 @@ impl GameLevel<'_> {
     ) {
         mod_api::dispatch_smoke_source(self, mod_api::mods(), dimension, state, smoke);
     }
-
-    /// A block nothing in Horizon knows a `BonemealableBlock` for is about to
-    /// take bone meal: vanilla's `BonemealableBlock.isValidBonemealTarget`,
-    /// `state` the block's own state at `pos`. Answer `valid` for your own
-    /// blocks: the meal is used up on one as vanilla uses it up (the growth
-    /// particles and the sound follow, whether or not the roll below grows
-    /// it), from a player's `BoneMealItem.useOn`, from a dispenser and, on a
-    /// crop (a villager bonemeals only a `CropBlock`), from a villager. Asked
-    /// on both sides, as vanilla asks it on both, so a client predicts the
-    /// use with your answer: say no where you can only grow on a server
-    /// (`is_client_side`). `Some(false)` refuses the meal, even on a block
-    /// whose template takes it (vanilla's `growCrop` then keeps the meal);
-    /// left `None`, the block keeps the `BonemealableBlock` its template gives
-    /// it, or takes no bone meal.
-    /// 72.
-    #[inline(always)]
-    pub(super) fn native_is_valid_bonemeal_target(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        valid: &mut Option<bool>,
-    ) {
-        let _ = (dimension, pos, state, valid);
-    }
-
-    /// `BonemealableBlock.isBonemealSuccess` for a block that answered
-    /// `native_is_valid_bonemeal_target`, after it did: set `success` to grow
-    /// it this time. Vanilla draws the level's random here
-    /// (`isBonemealSuccess(Level, RandomSource, BlockPos, BlockState)`), so
-    /// draw from `native_level_random` to keep vanilla's order.
-    /// Authoritative servers only. 72.
-    #[inline(always)]
-    pub(super) fn native_is_bonemeal_success(
-        &mut self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        success: &mut bool,
-    ) {
-        let _ = (dimension, pos, state, success);
-    }
-
-    /// `BonemealableBlock.performBonemeal` for a block that answered
-    /// `native_is_valid_bonemeal_target` and whose `native_is_bonemeal_success`
-    /// said yes: grow it here, `state` its state at `pos`. The meal is used up
-    /// either way. Change the block with the level's
-    /// `native_set_block_property`, and schedule with `native_schedule_block_tick`
-    /// (`ticks` is the hook's). Authoritative servers only. 72.
-    #[inline(always)]
-    pub(super) fn native_perform_bonemeal(
-        &mut self,
-        ticks: &mut Ticks,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-    ) {
-        let _ = (ticks, dimension, pos, state);
-    }
-}
-
-/// What dropped the items [`Game::native_loot_drops`] hears.
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct NativeLootDrops<'a> {
-    /// The block's or mob's own loot table (`minecraft:blocks/stone`, `minecraft:entities/zombie`);
-    /// empty when none rolled: the block or mob has none, the `mob_drops` rule is off, a baby
-    /// animal. A mob's drops may hold more: a charged creeper's head, a fox's mouth item.
-    pub(crate) table: &'a str,
-    /// The level they drop in (`minecraft:overworld`).
-    pub(crate) dimension: &'a str,
-    /// `LootContextParams.ORIGIN`: a broken block's centre, a mob's position.
-    pub(crate) origin: [f64; 3],
-    /// The block broken: its position and state.
-    pub(crate) block: Option<([i32; 3], BlockStateId)>,
-    /// The mob that died, or the entity a player's use dropped them from (the
-    /// sheep sheared, the item frame broken): its entity ID and type
-    /// (`minecraft:zombie`).
-    pub(crate) entity: Option<(u32, &'a str)>,
-    /// The player who broke the block or killed the mob, when known. A mob
-    /// names one only while it remembers the player's hit (100 ticks), so one
-    /// that dies to lava long after names none.
-    pub(crate) player: Option<u128>,
-    /// What broke the block (`LootContextParams.TOOL`).
-    pub(crate) tool: Option<&'a ItemStack>,
-    /// The radius of the explosion that broke the block.
-    pub(crate) explosion: Option<f32>,
-    /// A player's use dropped them rather than a break or a death: shears on a
-    /// sheep, a mooshroom, a snow golem or a bogged, a brush on an armadillo or
-    /// a suspicious block, shears carving a pumpkin, picking sweet berries or
-    /// cave vines, a hit taking an item frame or its item, or untying a lead
-    /// or cutting it with shears. `player` names them; `block` or `entity` says
-    /// what dropped them. API @API:use_drops@. A mob that a player killed while
-    /// leashed drops its lead on its next tick as a call of its own (`entity`
-    /// the mob, `player` its killer, `table` empty, `used` false). API
-    /// @API:lead_drops@.
-    pub(crate) used: bool,
-}
-
-/// A depth-tested outline of the client's block selection shape.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct NativeBlockRim {
-    pub(crate) pos: [i32; 3],
-    pub(crate) argb: u32,
-    pub(crate) width: f32,
-}
-
-/// A camera-local visual light, with no gameplay light or shadow writes.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct NativeColoredLight {
-    pub(crate) at: [f64; 3],
-    pub(crate) rgb: u32,
-    pub(crate) radius: f32,
-    pub(crate) intensity: f32,
-}
-
-/// The zoom a native mod asks for (`native_zoom`): the factor (1 is none),
-/// eased through the field of view like the spyglass when `smooth`, and the
-/// scale of mouse turning.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct NativeZoom {
-    pub(crate) factor: f32,
-    pub(crate) smooth: bool,
-    pub(crate) turn: f32,
-}
-
-/// The camera shake native mods ask for (`native_camera_shake`): turns in
-/// degrees, and an offset in blocks along the camera's right, up and back.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct NativeShake {
-    pub(crate) pitch: f32,
-    pub(crate) yaw: f32,
-    pub(crate) roll: f32,
-    pub(crate) offset: [f32; 3],
 }
 
 /// The largest turn a shake gives, in degrees, on each axis.
@@ -1345,83 +1210,6 @@ fn shake_pose(shake: NativeShake) -> glam::Mat4 {
         * glam::Mat4::from_rotation_y(shake.yaw.to_radians())
 }
 
-/// The minimap a native mod shows (`native_minimap`), drawn by Horizon's
-/// minimap: its corner, its side in GUI pixels, blocks per map pixel,
-/// turning with the player or north up, round or square.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct NativeMinimap {
-    pub(crate) corner: Corner,
-    pub(crate) size: f32,
-    pub(crate) blocks_per_pixel: f32,
-    pub(crate) rotate: bool,
-    pub(crate) round: bool,
-}
-
-/// A mod block's screen over its menu (`native_screen`): its size, where
-/// each of the container's slots is (`Slot.x`, `Slot.y`; none hides the
-/// slot, and so do slots past the list; the server's menu does not have a
-/// hidden slot either, so clicks and shift-clicks skip it), and the player inventory's first
-/// row (vanilla's is 84; the hotbar is 58 below it) and left column, from
-/// its top left.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct NativeScreen {
-    /// Vanilla's container screens are 176 wide.
-    pub width: f32,
-    pub height: f32,
-    pub slots: Vec<Option<[f32; 2]>>,
-    pub inventory_y: f32,
-    /// The inventory's left column (vanilla's is 8).
-    pub inventory_x: f32,
-    /// The mod draws the title and the "Inventory" label itself
-    /// (`native_screen_draw`); Horizon leaves them out.
-    pub own_labels: bool,
-}
-
-/// The open screen, for the screen hooks (`native_screen_render_post`, the
-/// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
-/// `native_screen_mouse_scrolled_pre`, and the key ones
-/// `native_screen_key_pressed_pre` and `native_screen_char_typed_pre`): what
-/// it is, its menu and title, where its container panel is, how many slots its
-/// menu has, and where the mouse and the frame's partial tick are.
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug)]
-pub struct NativeScreenView<'a> {
-    /// One id per `Screen` (`Screen::id`): `inventory`, `creative`, `paused`,
-    /// `stats`, `options`, `win`… Stable across releases, so a mod can match
-    /// on it. Every container, station and mod window draws on the inventory
-    /// screen and so reports `inventory`: tell them apart by `menu` and
-    /// `title` (both None on a window the client opened itself) and by
-    /// `slots`.
-    pub id: &'static str,
-    /// The type id of the menu the server opened for this screen
-    /// (`minecraft:generic_9x3`, `minecraft:furnace`, a mod's own id; a mount's
-    /// inventory is `horizon:mount<n>`). None on a screen without one (the
-    /// client's own inventory, creative, the pause menu, stats…) and for a
-    /// menu type the client does not know.
-    pub menu: Option<&'a str>,
-    /// The title the server gave the open menu, if it has one: the component
-    /// itself, not a copy (`.plain()` it to draw, `chars()` for the styles).
-    /// None when the server gave none, on a screen the client opened, and
-    /// while playing.
-    pub title: Option<&'a Text>,
-    /// The screen's container panel in GUI pixels, `[x, y, width, height]`;
-    /// the whole window for a screen with none. The panel is where the game
-    /// draws the window: 176 wide for most, wider for the merchant and the
-    /// beacon, a mod screen's own size for a mod's.
-    pub rect: [f32; 4],
-    /// The slots the open menu has, as `Game::slots` counts them: the player
-    /// inventory's 36, then the container's, the station's, the mod screen's
-    /// or the crafting grid's (a screen with no menu of its own still counts
-    /// the inventory menu's). Counted, not listed.
-    pub slots: usize,
-    /// The pointer in GUI pixels (`Screen.mouseX`, `mouseY`, from the
-    /// window's top left), as `native_cursor` gives it: for hover highlights.
-    pub mouse: [f32; 2],
-    /// This frame's partial tick (`getGameTimeDeltaPartialTick(false)`, 0 to
-    /// 1): what the screen draws animation against.
-    pub partial_tick: f32,
-}
-
 /// The mod screen open on this client: the block it is for, the key its
 /// slots are under, the window id of its menu, and the menu's data slots as
 /// the server sent them.
@@ -1465,40 +1253,6 @@ pub(crate) struct NativePlayer {
     pub(crate) dimension: &'static str,
 }
 
-/// The world's clock as a client mod reads it (`native_clock`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct NativeClock {
-    /// Ticks since the world was created (`Level.getGameTime`).
-    pub(crate) game_time: i64,
-    /// The time of day in ticks (`Level.getOverworldClockTime`): 0 at sunrise, 24000 a
-    /// day. It keeps counting past 24000 (`/time add`, days going by), so take
-    /// it modulo 24000 for the hour; `/time set` can make it negative.
-    pub(crate) day_time: i64,
-}
-
-/// A native mod as Options > Mods lists it (`native_mods`).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct NativeMod {
-    /// Its id: its settings folder and its keys' lines.
-    pub(crate) id: String,
-    /// `Name 1.0`.
-    pub(crate) title: String,
-    pub(crate) description: String,
-    /// Its keys: name, label and default key (`key.keyboard.z`). The page
-    /// lists them first; `native_mod_key` reads the player's choice.
-    pub(crate) keys: Vec<[String; 3]>,
-}
-
-/// An item the panel shows (`native_panel_items`): its id
-/// (`minecraft:diamond`), a count (1 draws none) and its components beyond
-/// the item's own, in vanilla's item syntax, or "".
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct NativeStack {
-    pub(crate) item: String,
-    pub(crate) count: u32,
-    pub(crate) components: String,
-}
-
 /// How the panel lays out a recipe of `native_panel_recipes`.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1531,39 +1285,6 @@ pub(crate) struct NativeRecipeView {
     pub(crate) note: String,
     /// The action button beside it: none, enabled, or shown greyed.
     pub(crate) action: Option<bool>,
-}
-
-/// What the player did on a native mod's panel (`native_panel_event`).
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum NativePanelEvent {
-    /// A click on an item of the panel, by its index in
-    /// `native_panel_items`' list.
-    Clicked { index: u32, right: bool },
-    /// The search box's text, each time the player changes it.
-    Search(String),
-    /// A key (`key.keyboard.r`; compare it with `native_mod_key`) went down
-    /// while the pointer was on an item: a slot of the screen's, or the
-    /// panel's.
-    Key { key: String, stack: NativeStack },
-    /// A click on a slot of a recipe the panel shows: the recipe's index in
-    /// `native_panel_recipes`' list and the slot's in it (the results come
-    /// after the slots), and the stack it showed then.
-    SlotClicked {
-        recipe: u32,
-        slot: u32,
-        stack: NativeStack,
-        right: bool,
-    },
-    /// The action button of the recipe at this index.
-    Action(u32),
-    /// The player turned the recipes' page: the index of the first recipe
-    /// now shown.
-    Page(u32),
-    /// The recipe page's back button.
-    Back,
-    /// The player picked the tab at this index.
-    Tab(u32),
 }
 
 /// An item of [`NativeRecipes::items`], by its index there, with a count
@@ -1694,6 +1415,138 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
+    /// The open screen as a native mod sees it (`NativeScreenView`): its id,
+    /// the open menu's type and title, its slot count, and its panel's
+    /// rectangle, with the mouse and the partial tick. `screen` is the screen
+    /// drawn this frame, which `NativeScreenView.id` comes from. Borrowed:
+    /// nothing is copied per frame.
+    pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> NativeScreenView<'_> {
+        NativeScreenView {
+            id: screen.id(),
+            menu: self.remote_menu_type().filter(|m| !m.is_empty()),
+            title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
+            rect: self.screen_rect(batch, screen),
+            slots: self.slot_count(),
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        }
+    }
+
+    /// The open screen's container panel in GUI pixels (`screen`'s, the one
+    /// this frame draws), or the whole window for a screen with none
+    /// (`NativeScreenView.rect`).
+    pub(super) fn screen_rect(&self, batch: &HudBatch, screen: Screen) -> [f32; 4] {
+        if screen != Screen::Inventory && screen != Screen::Creative {
+            return [0.0, 0.0, batch.width, batch.height];
+        }
+        // The window the game itself draws (`container_image`): the merchant
+        // and the beacon are wider and shifted, creative is its own size.
+        let image = self.container_image(batch);
+        [
+            image.left as f32,
+            image.top as f32,
+            image.width as f32,
+            image.height as f32,
+        ]
+    }
+
+    /// A screen the native mods' input hooks are for is open: the window has a
+    /// renderer, `Screen::Playing` is behind it (so not the title screen, nor a
+    /// book, a sign editor, a server dialog or a prompt drawn over gameplay)
+    /// and no connect or world load is in progress. The one gate they all ask
+    /// before they fire.
+    pub(super) fn screen_hooks_open(&self) -> bool {
+        self.renderer.is_some()
+            && self.screen != Screen::Playing
+            && !self.screen_over_playing()
+            && !self.remote_loading()
+    }
+
+    /// The open screen as an input hook sees it (`NativeScreenView`), or None
+    /// when `screen_hooks_open` says no screen is. `screen.mouse` is the
+    /// pointer the hook's event is at, so a hook takes no position, and
+    /// `partial_tick` is the clock's fraction at this event, not a frame's.
+    /// The `HudBatch` built here is only what `screen.rect` needs: the
+    /// window's GUI scale, no allocation.
+    pub(super) fn screen_view_now(&self) -> Option<NativeScreenView<'_>> {
+        if !self.screen_hooks_open() {
+            return None;
+        }
+        let renderer = self.renderer.as_ref()?;
+        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        Some(self.screen_view(&batch, self.screen))
+    }
+
+    /// Whether the key press `key` over the open screen went no further
+    /// (`native_screen_key_pressed_pre`): what `handle_window_event` and the
+    /// control socket's `key` command both ask before a screen acts on a key.
+    /// False when no screen of the hooks' is open, and for a key with no
+    /// vanilla name.
+    pub(super) fn screen_key_pressed(&self, key: KeyCode, repeat: bool) -> bool {
+        let Some(name) = keybinds::key_name(key) else {
+            return false;
+        };
+        let Some(screen) = self.screen_view_now() else {
+            return false;
+        };
+        let mut canceled = false;
+        self.native_screen_key_pressed_pre(
+            &screen,
+            name,
+            repeat,
+            super::glfw_modifiers(self.modifiers),
+            &mut canceled,
+        );
+        canceled
+    }
+
+    /// Text on its way to a text box after the open screen's character hooks
+    /// (`native_screen_char_typed_pre` per printable character): the cancelled
+    /// characters are gone and every other one stays, control characters
+    /// included (a text box reads Backspace, Delete and the like as keys).
+    /// `None` when none of them is left to type.
+    pub(super) fn screen_text_typed(&self, text: &str) -> Option<String> {
+        let Some(screen) = self.screen_view_now() else {
+            return Some(text.to_owned());
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        screen_text_hooked(text, |c| {
+            let mut canceled = false;
+            self.native_screen_char_typed_pre(&screen, c, modifiers, &mut canceled);
+            canceled
+        })
+    }
+
+    /// A key press's characters (`ScreenEvent.CharacterTyped.Pre`, vanilla's
+    /// `KeyboardHandler.charTyped`), dispatched once the screen has acted on
+    /// the key: GLFW's char callback comes after its key callback, so the
+    /// characters go to the screen that is open now — a key that closed the
+    /// screen leaves none to hear them, as vanilla's closed screen hears
+    /// nothing, and one that moved the focus types into the box it moved to.
+    /// Each printable one is offered to `native_screen_char_typed_pre`; the
+    /// survivors go to the focused text box, control characters (keys) gone.
+    pub(super) fn screen_chars_typed(&mut self, text: Option<&str>) {
+        let Some(text) = text else {
+            return;
+        };
+        let Some(screen) = self.screen_view_now() else {
+            return;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        let Some(text) = chars_to_type(text, |c| {
+            let mut canceled = false;
+            self.native_screen_char_typed_pre(&screen, c, modifiers, &mut canceled);
+            canceled
+        }) else {
+            return;
+        };
+        // A held edit modifier makes a shortcut of the key, not text.
+        if !self.types_text() {
+            return;
+        }
+        // `Err` only says no text box of the screen takes the characters.
+        let _ = self.type_chars_into_screen(&text);
+    }
     /// A dropped item's vertical move clipped. Collision response has run and
     /// block effects and pickup are still ahead. The owner lends the active
     /// stack and supplies the block from `Entity.getOnPosLegacy`.
@@ -1864,7 +1717,6 @@ impl Game<'_> {
     /// there: the single player server thread, a dedicated server).
     pub(super) fn native_tick(&mut self) {
         super::android_bundled::native_tick(self);
-        self.native_process_tasks();
         mod_api::dispatch_tick(self, mod_api::mods());
     }
 
@@ -1889,16 +1741,7 @@ impl Game<'_> {
         lights: &mut Vec<NativeColoredLight>,
     ) {
         super::android_bundled::native_visuals(self, rims, lights);
-        // Each trait mod fills lists of its own, bounded on their own; what is already
-        // here, from bundles' injections, shares one budget.
-        let (mut own_rims, mut own_lights) = (std::mem::take(rims), std::mem::take(lights));
-        self.budget_visuals(&mut own_rims, &mut own_lights, rims, lights);
-        let mods = mod_api::mods();
-        for index in 0..mods.len() {
-            let one = &mods[index..=index];
-            mod_api::dispatch_visuals(self, one, &mut own_rims, &mut own_lights);
-            self.budget_visuals(&mut own_rims, &mut own_lights, rims, lights);
-        }
+        mod_api::dispatch_visuals(self, mod_api::mods(), rims, lights);
     }
 
     /// At most 32 pairs of already-loaded base and transparent overlay sprites.
@@ -6815,7 +6658,7 @@ impl Game<'_> {
         cancel: &mut bool,
         replies: &mut Vec<Text>,
     ) {
-        mod_api::dispatch_console_line(self, mod_api::mods(), source, line, replies, cancel);
+        mod_api::dispatch_console_line(self, mod_api::mods(), source, line, cancel, replies);
     }
 
     /// A plugin channel message from a player's client
@@ -8312,7 +8155,6 @@ impl Game<'_> {
         &mut self,
         dimension: &str,
         center: [f64; 3],
-        source: Option<(u32, &str)>,
         blocks: &mut Vec<[i32; 3]>,
     ) {
         mod_api::dispatch_explosion_detonate(
@@ -8320,7 +8162,6 @@ impl Game<'_> {
             mod_api::mods(),
             dimension,
             center,
-            source,
             blocks,
         );
     }
@@ -8756,7 +8597,7 @@ impl Game<'_> {
     pub(super) fn native_inventory_changed(
         &mut self,
         uuid: u128,
-        kind: crate::mod_api::NativeInventoryKind,
+        kind: NativeInventoryKind,
     ) {
         mod_api::dispatch_inventory_changed(self, mod_api::mods(), uuid, kind);
     }
@@ -11510,6 +11351,108 @@ fn box_meets(b: &horizon_core::geometry::Aabb, min: [f64; 3], max: [f64; 3]) -> 
         && hi.y > min[1]
         && lo.z < max[2]
         && hi.z > min[2]
+}
+
+pub(super) fn block_contact(
+    dimension: &str,
+    event: horizon_client::block_contact::Event<'_>,
+    damage: &mut f32,
+) {
+    use horizon_client::block_contact::Event;
+    match event {
+        Event::StepOn(c) => Game::native_block_step_on(
+            dimension,
+            c.entity,
+            c.kind,
+            c.state,
+            [c.position.x, c.position.y, c.position.z],
+        ),
+        Event::Inside(c) => Game::native_block_entity_inside(
+            dimension,
+            c.entity,
+            c.kind,
+            c.state,
+            [c.position.x, c.position.y, c.position.z],
+        ),
+        Event::FallOn(c, distance) => Game::native_block_fall_on(
+            dimension,
+            c.entity,
+            c.kind,
+            c.state,
+            [c.position.x, c.position.y, c.position.z],
+            distance,
+            damage,
+        ),
+    }
+}
+
+/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether
+/// it canceled the hit. Its one caller.
+pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
+    let (entity, kind, source) = hurt_server_args(hurting);
+    let HurtSource {
+        damage_type,
+        causing,
+        direct,
+    } = source;
+    let mut canceled = false;
+    Game::native_living_incoming_damage(
+        entity,
+        kind,
+        damage_type,
+        causing,
+        direct,
+        amount,
+        &mut canceled,
+    );
+    canceled
+}
+
+/// `native_living_incoming_damage`'s entity, entity type and source for a hit.
+fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
+    match hurting {
+        Hurting::Player(entity, source) => (entity, "minecraft:player", source),
+        Hurting::Mob(mob, damage) => (mob.id as i32, mob.kind.id.as_str(), mob_source(damage)),
+        Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
+    }
+}
+
+/// A mob's damage as its `DamageSource`: the causing entity is known when it
+/// is a mob, and is the direct one too when it deals the damage itself.
+fn mob_source(damage: &Damage) -> HurtSource<'static> {
+    let causing = match damage.attacker {
+        Some(Who::Mob(id)) => id as i32,
+        _ => 0,
+    };
+    let melee = super::creatures::melee(damage.kind);
+    HurtSource {
+        damage_type: super::creatures::source_damage_type(*damage),
+        causing,
+        direct: if melee { causing } else { 0 },
+    }
+}
+
+/// Whether `id` is a sound event's id, `namespace:path` as `Identifier`
+/// allows: the namespace of `[a-z0-9_.-]`, the path also with `/`.
+fn sound_id(id: &str) -> bool {
+    let Some((namespace, path)) = id.split_once(':') else {
+        return false;
+    };
+    let allowed = |c: char, slash: bool| {
+        c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c) || (slash && c == '/')
+    };
+    !namespace.is_empty()
+        && !path.is_empty()
+        && namespace.chars().all(|c| allowed(c, false))
+        && path.chars().all(|c| allowed(c, true))
+}
+
+fn dimension_id(dimension: LevelDimension) -> &'static str {
+    match dimension {
+        LevelDimension::Overworld => "minecraft:overworld",
+        LevelDimension::Nether => "minecraft:the_nether",
+        LevelDimension::End => "minecraft:the_end",
+    }
 }
 
 #[cfg(test)]

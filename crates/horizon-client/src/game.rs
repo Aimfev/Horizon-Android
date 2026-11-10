@@ -486,6 +486,8 @@ struct Options {
     session_file: Option<String>,
     /// `--session-stdin`: the session file's JSON comes on standard input instead.
     session_stdin: bool,
+    pub(crate) disabled_mods: Vec<String>,
+    pub(crate) enabled_mods: Vec<String>,
 }
 /// `--in-frame`, `--no-server-thread` and `HORIZON_SERVER_THREAD=0` are deprecated:
 /// the in-frame world is unmaintained, gets no fixes and will be removed soon.
@@ -634,6 +636,8 @@ impl Options {
             quick_play: None,
             session_file: std::env::var("HORIZON_SESSION_FILE").ok(),
             session_stdin: false,
+            disabled_mods: Vec::new(),
+            enabled_mods: Vec::new(),
         };
         while let Some(arg) = args.next() {
             match arg.as_str() {

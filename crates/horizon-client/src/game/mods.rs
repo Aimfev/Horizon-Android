@@ -571,6 +571,7 @@ fn not_built(dir: &std::path::Path, built: &str, rows: &[mod_list::Installed]) -
                 description: String::new(),
                 problem: Some(mod_list::NOT_BUILT.to_owned()),
                 dev: false,
+                has_settings: false,
                 native: None,
             });
         }
@@ -648,9 +649,7 @@ impl Game<'_> {
                 g.reload_datapacks(true);
             }
         };
-        if let Some(server) = &self.integrated {
-            server.post(reload);
-        } else if self.remote.is_none() {
+        if self.remote.is_none() {
             reload(self);
         }
     }

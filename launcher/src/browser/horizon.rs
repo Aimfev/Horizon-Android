@@ -316,11 +316,16 @@ pub fn trust_and_capabilities(id: &str) -> Vec<String> {
     let Some(p) = index.project(id) else {
         return Vec::new();
     };
-    let mut lines = vec![trust_label(p.trust).into()];
-    if p.kind == index::Kind::Mod {
-        if let Some(v) = p.versions.first() {
-            lines.extend(horizon_mods::describe_capabilities(&v.capabilities));
-        }
+    let mut lines = vec![if official(p) {
+        "Made by Horizon".to_owned()
+    } else {
+        format!(
+            "Made by {}. Not made or endorsed by the Horizon project ({POLICY})",
+            p.authors.join(", ")
+        )
+    }];
+    if p.key.is_some() {
+        lines.push("Signed by its author: the launcher checks the signature".to_owned());
     }
     if p.kind == index::Kind::NativeMod {
         lines.push(
