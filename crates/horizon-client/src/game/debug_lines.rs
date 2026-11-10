@@ -62,6 +62,12 @@ impl Game<'_> {
                     }
                 }
                 "fps" => self.debug_fps_line(d),
+                #[cfg(target_os = "android")]
+                "game_version" => d.priority(format!(
+                    "Minecraft {v} ({v}/horizon android 1.0.1)",
+                    v = horizon_client::save::VERSION_NAME
+                )),
+                #[cfg(not(target_os = "android"))]
                 "game_version" => d.priority(format!(
                     "Minecraft {v} ({v}/horizon)",
                     v = horizon_client::save::VERSION_NAME
