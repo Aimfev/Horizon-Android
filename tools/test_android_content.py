@@ -17,6 +17,7 @@ edition = "2024"
 [workspace]
 [dependencies]
 horizon-mods = { path = "../../../crates/horizon-mods", default-features = false, features = ["index"] }
+horizon-port-pack = { path = "../../../crates/horizon-port-pack" }
 serde_json = "1"
 sha2 = "0.10"
 ureq = { version = "2", default-features = false, features = ["tls"] }
