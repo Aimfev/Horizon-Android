@@ -261,7 +261,7 @@ impl AnimState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub(super) enum Action {
     Page(Page),
     SettingsCat(SettingsCategory),
@@ -661,7 +661,7 @@ fn draw_setting_card(
         SettingControl::Toggle(on, action) => {
             let rect = [x + w - 122.0, y + (h - 38.0) * 0.5, 108.0, 38.0];
             list_targets.push((rect, action));
-            let switch_t = anim.step_switch(&format!("{action:?}"), on, 0.016);
+            let switch_t = anim.step_switch(title, on, 0.016);
             toggle(ui, targets, rect, on, action, switch_t);
         }
         SettingControl::Button(label, action, accent) => {
