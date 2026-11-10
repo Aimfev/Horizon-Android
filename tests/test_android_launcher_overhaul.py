@@ -1345,5 +1345,58 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("fn draw_compiler_page(", lp_rs)
 
 
+
+    def test_true_compiler_mod_manager_and_jetpack_compose_material_you_google_sans(self) -> None:
+        # 1. Verify Google Sans TTF fonts are baked into crates/horizon-theme/fonts and loaded in ui_theme.rs
+        for font_name in [
+            "GoogleSans-Regular.ttf",
+            "GoogleSans-Medium.ttf",
+            "GoogleSans-SemiBold.ttf",
+            "GoogleSans-Bold.ttf",
+        ]:
+            fp = ROOT / "crates/horizon-theme/fonts" / font_name
+            self.assertTrue(fp.is_file() and fp.stat().st_size > 50_000, font_name)
+        theme_lib = _read_repo_file("crates/horizon-theme/src/lib.rs")
+        self.assertIn('pub const GOOGLE_SANS_FONT: &str = "Google Sans";', theme_lib)
+        self.assertIn("pub const GOOGLE_SANS_REGULAR: &[u8]", theme_lib)
+        self.assertIn("pub const GOOGLE_SANS_MEDIUM: &[u8]", theme_lib)
+        self.assertIn("pub const GOOGLE_SANS_SEMIBOLD: &[u8]", theme_lib)
+        self.assertIn("pub const GOOGLE_SANS_BOLD: &[u8]", theme_lib)
+
+        ui_theme = _read_repo_file("crates/horizon-client/src/ui_theme.rs")
+        self.assertIn("f(horizon_theme::fonts::GOOGLE_SANS_REGULAR)", ui_theme)
+        self.assertIn("f(horizon_theme::fonts::GOOGLE_SANS_MEDIUM)", ui_theme)
+        self.assertIn("f(horizon_theme::fonts::GOOGLE_SANS_SEMIBOLD)", ui_theme)
+        self.assertIn("pub fn m3_tonal_card(", ui_theme)
+
+        # 2. Verify True Compiler & Full 10-File horizon-mixins Bundle Generation + Unified .hmod (#5865) + Native .so Builder
+        jt_rs = _read_repo_file("crates/horizon-client/src/jar_transpiler.rs")
+        self.assertIn("pub const DEFAULT_HORIZON_REV: &str =", jt_rs)
+        self.assertIn("pub const DEFAULT_MIXINS_REV: &str =", jt_rs)
+        self.assertIn("pub fn generate_full_mixin_bundle_files(", jt_rs)
+        self.assertIn("pub fn build_native_mods_payload(", jt_rs)
+        self.assertIn("horizon_mods::index::native::Bundle::read(", jt_rs)
+
+        cat_rs = _read_repo_file("crates/horizon-client/src/android/catalog.rs")
+        self.assertIn("NativeSoBuild,", cat_rs)
+        self.assertIn('Self::NativeSoBuild => "Native .so Build"', cat_rs)
+        self.assertIn("pub fn run_native_so_build(&mut self, home: &Path)", cat_rs)
+        self.assertIn("fn resolve_and_port_modrinth_deps_recursive(", cat_rs)
+        self.assertIn('.join("checks-1")', cat_rs)
+
+        # 3. Verify Jetpack Compose Material You Dashboard (Hero Split Button, 2-Column Bento Grid, Single Discord/GitHub, Stadium Nav Rail)
+        lp_rs = _read_repo_file("crates/horizon-client/src/android/launcher_pages.rs")
+        self.assertIn("ui.m3_tonal_card(content_x, card_y, content_w, hero_h, 18.0, true);", lp_rs)
+        self.assertIn('"Mod Loader & Compiler"', lp_rs)
+        self.assertIn('"Open Compiler"', lp_rs)
+        self.assertIn('"Browse Mods"', lp_rs)
+        self.assertIn('"Build Native .so"', lp_rs)
+
+        compose_kt = _read_repo_file("packaging/android/compose/HorizonComposeLauncher.kt")
+        self.assertIn("val GoogleSansFontFamily", compose_kt)
+        self.assertIn("fun HorizonComposeLauncherApp(", compose_kt)
+        self.assertIn("fun AnimatedMaterialYouAuroraBackground(", compose_kt)
+
+
 if __name__ == "__main__":
     unittest.main()

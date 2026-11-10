@@ -384,14 +384,21 @@ pub enum CompilerMode {
     JarMod,
     Modpack,
     DataPackUpgrade,
+    NativeSoBuild,
 }
 impl CompilerMode {
-    pub const ALL: [Self; 3] = [Self::JarMod, Self::Modpack, Self::DataPackUpgrade];
+    pub const ALL: [Self; 4] = [
+        Self::JarMod,
+        Self::Modpack,
+        Self::DataPackUpgrade,
+        Self::NativeSoBuild,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::JarMod => "Java .jar -> Horizon",
             Self::Modpack => "Modpack (.mrpack)",
             Self::DataPackUpgrade => "26.3 Data Pack",
+            Self::NativeSoBuild => "Native .so Build",
         }
     }
 }
@@ -2488,7 +2495,62 @@ impl Catalog {
     /// - If `compiler_query` is a local path inside the profile or absolute path, ports that file directly.
     /// - Otherwise searches Modrinth for the mod/modpack slug or title, downloads the `.jar` / `.mrpack`,
     ///   and runs `horizon_port_pack::android_port::port_jar_natively` + `transpile_jar_to_horizon_mods_with_progress`.
+    pub fn run_native_so_build(&mut self, home: &Path) {
+        let game = self.config.game_home(home);
+        match horizon_client::jar_transpiler::build_native_mods_payload(&game) {
+            Ok((payload, meta)) => {
+                let mod_count = meta["mods"].as_array().map(|a| a.len()).unwrap_or(0);
+                let mods_list = meta["mods"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                let perms_list = meta["permissions"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                self.compiler_logs = vec![
+                    format!(
+                        "Validated & bundled {mod_count} native mod(s) ({} bytes): [{mods_list}]",
+                        payload.len()
+                    ),
+                    format!(
+                        "Target ABI: arm64-v8a • Horizon rev {} • Mixins rev {} • Hooks API 415",
+                        &horizon_client::jar_transpiler::DEFAULT_HORIZON_REV[..10],
+                        &horizon_client::jar_transpiler::DEFAULT_MIXINS_REV[..10],
+                    ),
+                    if perms_list.is_empty() {
+                        "Permissions: none required (sandboxed native hooks)".into()
+                    } else {
+                        format!("Permissions recorded in build.json: {perms_list}")
+                    },
+                    "Wrote native/compiled-local/build.json & bundles.bin — ready for HorizonActivity / NativeMods.java.".into(),
+                ];
+                self.status = format!(
+                    "Built native mod bundle ({mod_count} mods: {mods_list})!"
+                );
+                self.refresh(home);
+            }
+            Err(e) => {
+                self.status = format!("Native .so bundle build failed: {e}");
+            }
+        }
+    }
+
     pub fn run_compiler_from_query(&mut self, home: &Path) {
+        if self.compiler_mode == CompilerMode::NativeSoBuild && self.compiler_query.trim().is_empty() {
+            self.run_native_so_build(home);
+            return;
+        }
         let q = self.compiler_query.trim().to_owned();
         if q.is_empty() {
             self.status = "Enter a Modrinth mod name/slug or pick a local .jar / .mrpack file first.".into();
@@ -2989,30 +3051,19 @@ pub fn install_modrinth_jar_with_port_pack(
         return Ok((count.max(1), None, logs));
     }
 
-    // Automatically port required Modrinth dependencies (depth 1) with horizon-port-pack
-    for req_id in version.required.iter().take(3) {
-        if let Ok(dep_proj) = source.project(req_id)
-            && dep_proj.kind == Kind::Mod
-            && dep_proj.id != project.id
-        {
-            if let Ok(dep_vers) = source.versions(&dep_proj)
-                && let Some(dep_v) = browser::pick(Kind::Mod, &dep_vers, true)
-                    .or_else(|| dep_vers.iter().find(|v| v.file().is_some()))
-                && let Some(dep_file) = dep_v.file()
-                && dep_file.name.to_ascii_lowercase().ends_with(".jar")
-            {
-                let dep_dl_title = format!("Downloading required dependency {}...", dep_proj.title);
-                if let Ok(dep_path) = source.fetch(dep_file, &staging, &|f| progress(&dep_dl_title, 0.55 + f * 0.10)) {
-                    let dep_slug = horizon_client::jar_transpiler::sanitize_mod_id(&dep_proj.slug);
-                    let dep_target = home.join("horizon-mods").join(format!("{dep_slug}.jar"));
-                    let _ = std::fs::rename(&dep_path, &dep_target);
-                    if let Ok(dep_info) = horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&dep_target, home) {
-                        logs.push(format!("Ported required dependency: {} ({})", dep_info.title, dep_info.id));
-                    }
-                }
-            }
-        }
-    }
+    // Automatically resolve and port required Modrinth dependencies recursively (up to depth 3)
+    let mut visited_deps = std::collections::BTreeSet::new();
+    visited_deps.insert(project.id.clone());
+    resolve_and_port_modrinth_deps_recursive(
+        source,
+        &version.required,
+        home,
+        &staging,
+        1,
+        &mut visited_deps,
+        &mut logs,
+        progress,
+    );
 
     let slug: String = project
         .slug
@@ -3091,6 +3142,23 @@ pub fn install_modrinth_jar_with_port_pack(
     }
 
     let (algo, hash) = file.checksum().unwrap_or(("SHA-1", ""));
+    if !hash.is_empty()
+        && let Some(ref pp) = port_result
+        && pp.check_json_path.is_file()
+    {
+        let checks_cache_dir = home.join("mod-browser").join("checks-1");
+        let _ = std::fs::create_dir_all(&checks_cache_dir);
+        let safe_hash: String = hash
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if !safe_hash.is_empty() {
+            let _ = std::fs::copy(
+                &pp.check_json_path,
+                checks_cache_dir.join(format!("{safe_hash}.json")),
+            );
+        }
+    }
     let mut installed = Installed::load(home);
     installed
         .entries
@@ -3117,6 +3185,79 @@ pub fn install_modrinth_jar_with_port_pack(
         1.0,
     );
     Ok((1, port_result, logs))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_and_port_modrinth_deps_recursive(
+    source: &dyn Source,
+    required_ids: &[String],
+    home: &Path,
+    staging: &Path,
+    depth: usize,
+    visited: &mut std::collections::BTreeSet<String>,
+    logs: &mut Vec<String>,
+    progress: &dyn Fn(&str, f32),
+) {
+    if depth > 3 {
+        return;
+    }
+    for req_id in required_ids.iter().take(4) {
+        if !visited.insert(req_id.clone()) {
+            continue;
+        }
+        let Ok(dep_proj) = source.project(req_id) else {
+            continue;
+        };
+        if dep_proj.kind != Kind::Mod {
+            continue;
+        }
+        let Ok(dep_vers) = source.versions(&dep_proj) else {
+            continue;
+        };
+        let Some(dep_v) = browser::pick(Kind::Mod, &dep_vers, true)
+            .or_else(|| dep_vers.iter().find(|v| v.file().is_some()))
+        else {
+            continue;
+        };
+        if !dep_v.required.is_empty() {
+            resolve_and_port_modrinth_deps_recursive(
+                source,
+                &dep_v.required,
+                home,
+                staging,
+                depth + 1,
+                visited,
+                logs,
+                progress,
+            );
+        }
+        let Some(dep_file) = dep_v.file() else {
+            continue;
+        };
+        if !dep_file.name.to_ascii_lowercase().ends_with(".jar") {
+            continue;
+        }
+        let dep_dl_title = format!(
+            "Downloading required dependency {} (depth {depth})...",
+            dep_proj.title
+        );
+        if let Ok(dep_path) =
+            source.fetch(dep_file, staging, &|f| progress(&dep_dl_title, 0.55 + f * 0.10))
+        {
+            let dep_slug = horizon_client::jar_transpiler::sanitize_mod_id(&dep_proj.slug);
+            let dep_target = home.join("horizon-mods").join(format!("{dep_slug}.jar"));
+            let _ = std::fs::create_dir_all(home.join("horizon-mods"));
+            let _ = std::fs::rename(&dep_path, &dep_target);
+            if let Ok(dep_info) =
+                horizon_client::jar_transpiler::transpile_jar_to_horizon_mods(&dep_target, home)
+            {
+                logs.push(format!(
+                    "Ported required dependency (depth {depth}): {} ({})",
+                    dep_info.title, dep_info.id
+                ));
+            }
+        }
+    }
 }
 
 fn lookup_modrinth_by_name(title: &str, kind: Kind) -> Option<Project> {

@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 pub const FONT: &str = "Bricolage Grotesque";
+pub const GOOGLE_SANS_FONT: &str = "Google Sans";
 pub const MONO: &str = "Geist Mono";
 pub mod night;
 
@@ -35,6 +36,11 @@ pub mod fonts {
     pub const BRICOLAGE_BOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Bold.ttf");
     pub const BRICOLAGE_DISPLAY_BOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesqueDisplay-Bold.ttf");
+    /// Google Sans geometric UI faces for Jetpack Compose Material You Android UI.
+    pub const GOOGLE_SANS_REGULAR: &[u8] = include_bytes!("../fonts/GoogleSans-Regular.ttf");
+    pub const GOOGLE_SANS_MEDIUM: &[u8] = include_bytes!("../fonts/GoogleSans-Medium.ttf");
+    pub const GOOGLE_SANS_SEMIBOLD: &[u8] = include_bytes!("../fonts/GoogleSans-SemiBold.ttf");
+    pub const GOOGLE_SANS_BOLD: &[u8] = include_bytes!("../fonts/GoogleSans-Bold.ttf");
 }
 
 /// The launcher's pixel icons: Pixelarticons (MIT, `icons/pixel/LICENSE-pixelarticons.txt`), 24

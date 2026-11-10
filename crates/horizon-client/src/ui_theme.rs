@@ -159,11 +159,16 @@ struct Fonts {
 impl Fonts {
     fn load() -> Self {
         let f = |b: &'static [u8]| FontRef::try_from_slice(b).expect("bundled font");
+        let _fallback_bricolage = (
+            f(horizon_theme::fonts::BRICOLAGE_REGULAR),
+            f(horizon_theme::fonts::BRICOLAGE_MEDIUM),
+            f(horizon_theme::fonts::BRICOLAGE_SEMIBOLD),
+        );
         Self {
             faces: [
-                f(horizon_theme::fonts::BRICOLAGE_REGULAR),
-                f(horizon_theme::fonts::BRICOLAGE_MEDIUM),
-                f(horizon_theme::fonts::BRICOLAGE_SEMIBOLD),
+                f(horizon_theme::fonts::GOOGLE_SANS_REGULAR),
+                f(horizon_theme::fonts::GOOGLE_SANS_MEDIUM),
+                f(horizon_theme::fonts::GOOGLE_SANS_SEMIBOLD),
                 f(horizon_theme::fonts::GEIST_MONO),
             ],
         }
@@ -2634,18 +2639,19 @@ impl<'a> Ui<'a> {
         }
     }
 
-    /// Paints the active Material 3 Expressive theme background with a smooth 60fps animating
-    /// ambient tonal aurora & architectural horizon backdrop over `[x, y, w, h]` dp.
+    /// Paints the active Jetpack Compose Material You (Material 3 Expressive 2026) theme background
+    /// with a smooth 60fps animating dynamic tonal mesh & ambient glow orbs over `[x, y, w, h]` dp.
     pub fn draw_theme_background(&mut self, x: f32, y: f32, w: f32, h: f32, theme: &ResolvedTheme) {
         let t = motion::ambient_time();
-        let wave_a = (t * 0.65).sin() * 0.5 + 0.5;
-        let wave_b = (t * 0.42 + 1.35).cos() * 0.5 + 0.5;
-        let shift = (t * 0.52).sin() * 0.08;
+        let wave_a = (t * 0.72).sin() * 0.5 + 0.5;
+        let wave_b = (t * 0.48 + 1.35).cos() * 0.5 + 0.5;
+        let wave_c = (t * 0.36 + 2.40).sin() * 0.5 + 0.5;
+        let shift = (t * 0.55).sin() * 0.09;
 
         if theme.is_gradient {
-            let start_c = lerp_color(theme.gradient_start, theme.accent, 0.08 * wave_a);
-            let end_c = lerp_color(theme.gradient_end, theme.gradient_mid, 0.14 * wave_b);
-            let mid_c = lerp_color(theme.gradient_mid, theme.accent, 0.06 * (1.0 - wave_a));
+            let start_c = lerp_color(theme.gradient_start, theme.accent, 0.22 * wave_a);
+            let end_c = lerp_color(theme.gradient_end, theme.gradient_mid, 0.26 * wave_b);
+            let mid_c = lerp_color(theme.gradient_mid, theme.accent, 0.16 * (1.0 - wave_a));
             let mid_pos = (theme.gradient_mid_pos + shift).clamp(0.20, 0.80);
             let mid = theme.use_three_stops.then_some((mid_pos, mid_c));
             self.fill_gradient(
@@ -2657,18 +2663,23 @@ impl<'a> Ui<'a> {
                 start_c,
                 end_c,
                 mid,
-                20,
+                22,
             );
         } else {
             let top_tint = lerp_color(
                 theme.bg_solid,
-                lerp_color(theme.gradient_start, theme.accent, 0.12 * wave_a),
-                0.48,
+                lerp_color(theme.gradient_start, theme.accent, 0.28 * wave_a),
+                0.68,
+            );
+            let mid_tint = lerp_color(
+                theme.bg_solid,
+                theme.gradient_mid,
+                0.42 + 0.18 * wave_c,
             );
             let bot_tint = lerp_color(
                 theme.bg_solid,
-                lerp_color(theme.gradient_end, theme.gradient_mid, 0.16 * wave_b),
-                0.56,
+                lerp_color(theme.gradient_end, theme.accent, 0.22 * wave_b),
+                0.64,
             );
             let mid_pos = (0.48 + shift).clamp(0.25, 0.75);
             self.fill_gradient(
@@ -2679,30 +2690,30 @@ impl<'a> Ui<'a> {
                 GradientDirection::Vertical,
                 top_tint,
                 bot_tint,
-                Some((mid_pos, theme.bg_solid)),
-                16,
+                Some((mid_pos, mid_tint)),
+                20,
             );
         }
 
-        // Material 3 Expressive animated tonal aurora ribbons (zero texture overhead, 60fps smooth)
-        let ribbon_alpha_1 = if theme.is_light { 0.055 } else { 0.045 };
-        let ribbon_alpha_2 = if theme.is_light { 0.040 } else { 0.032 };
-        let band1_h = (h * 0.28).max(48.0);
-        let band1_y = y + (h - band1_h) * (0.18 + 0.14 * wave_a);
+        // Jetpack Compose Material You Expressive animated tonal aurora ribbons & ambient glow orbs
+        let ribbon_alpha_1 = if theme.is_light { 0.14 } else { 0.16 };
+        let ribbon_alpha_2 = if theme.is_light { 0.09 } else { 0.11 };
+        let band1_h = (h * 0.34).max(56.0);
+        let band1_y = y + (h - band1_h) * (0.14 + 0.18 * wave_a);
         self.fill_gradient(
             x,
             band1_y,
             w,
             band1_h,
             GradientDirection::Horizontal,
-            color::with_alpha(theme.accent, ribbon_alpha_1 * (0.6 + 0.4 * wave_b)),
+            color::with_alpha(theme.accent, ribbon_alpha_1 * (0.65 + 0.35 * wave_b)),
             color::with_alpha(theme.gradient_mid, ribbon_alpha_2),
-            Some((0.5 + shift * 0.8, color::with_alpha(theme.accent, ribbon_alpha_1))),
-            8,
+            Some((0.46 + shift * 0.85, color::with_alpha(theme.accent, ribbon_alpha_1 * 0.85))),
+            10,
         );
 
-        let band2_h = (h * 0.24).max(40.0);
-        let band2_y = y + (h - band2_h) * (0.72 - 0.12 * wave_b);
+        let band2_h = (h * 0.28).max(46.0);
+        let band2_y = y + (h - band2_h) * (0.74 - 0.16 * wave_b);
         self.fill_gradient(
             x,
             band2_y,
@@ -2710,9 +2721,56 @@ impl<'a> Ui<'a> {
             band2_h,
             GradientDirection::Horizontal,
             color::with_alpha(theme.gradient_start, ribbon_alpha_2),
-            color::with_alpha(theme.accent, ribbon_alpha_1 * (0.6 + 0.4 * wave_a)),
+            color::with_alpha(theme.accent, ribbon_alpha_1 * (0.60 + 0.40 * wave_a)),
             None,
-            6,
+            8,
+        );
+
+        // Drifting Material You tonal ambient orbs (top-right primary glow + bottom-left secondary glow)
+        let orb1_w = (w * 0.38).clamp(160.0, 340.0);
+        let orb1_h = (h * 0.42).clamp(120.0, 240.0);
+        let orb1_x = x + (w - orb1_w) * (0.82 - 0.14 * wave_a);
+        let orb1_y = y + (h - orb1_h) * (0.08 + 0.12 * wave_b);
+        self.rounded(
+            orb1_x,
+            orb1_y,
+            orb1_w,
+            orb1_h,
+            orb1_h * 0.48,
+            color::with_alpha(theme.accent, if theme.is_light { 0.08 } else { 0.095 }),
+        );
+
+        let orb2_w = (w * 0.34).clamp(140.0, 300.0);
+        let orb2_h = (h * 0.36).clamp(100.0, 210.0);
+        let orb2_x = x + (w - orb2_w) * (0.16 + 0.14 * wave_c);
+        let orb2_y = y + (h - orb2_h) * (0.78 - 0.12 * wave_a);
+        self.rounded(
+            orb2_x,
+            orb2_y,
+            orb2_w,
+            orb2_h,
+            orb2_h * 0.48,
+            color::with_alpha(theme.surface_selected, if theme.is_light { 0.22 } else { 0.28 }),
+        );
+    }
+
+    /// Jetpack Compose Material 3 `ElevatedCard` / `Card(surfaceContainerLow)` with tonal elevation
+    /// and subtle `outlineVariant` keyline (no harsh 1px neon borders).
+    pub fn m3_tonal_card(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, elevated: bool) {
+        let theme = active_theme();
+        let bg = if elevated {
+            theme.surface
+        } else {
+            theme.surface_dim
+        };
+        self.rounded(x, y, w, h, radius, bg);
+        self.border(
+            x,
+            y,
+            w,
+            h,
+            radius,
+            color::with_alpha(theme.border, if elevated { 0.55 } else { 0.38 }),
         );
     }
 
@@ -3520,25 +3578,30 @@ impl LauncherThemeConfig {
         } else {
             blend_rgb(bg_rgb, surf_rgb, 0.50)
         };
+        // Jetpack Compose Material 3 tonal surface container steps:
+        // surface_dim = surfaceContainerLow (elevated above background, never pitch black!)
+        // surface = surfaceContainer
+        // surface_bright = surfaceContainerHigh
+        // surface_selected = secondaryContainer
         let surf_dim_rgb = if is_light {
-            blend_rgb(bg_rgb, 0x000000, 0.04)
+            blend_rgb(bg_rgb, 0xFFFFFF, 0.52)
         } else {
-            blend_rgb(bg_rgb, 0x000000, 0.22)
+            blend_rgb(bg_rgb, surf_rgb, 0.62)
         };
         let surf_bright_rgb = if is_light {
-            blend_rgb(surf_rgb, accent_rgb, 0.10)
+            blend_rgb(surf_rgb, accent_rgb, 0.11)
         } else {
-            blend_rgb(surf_rgb, 0xFFFFFF, 0.07)
+            blend_rgb(surf_rgb, accent_rgb, 0.14)
         };
         let surf_sel_rgb = if is_light {
-            blend_rgb(surf_rgb, accent_rgb, 0.18)
+            blend_rgb(surf_rgb, accent_rgb, 0.22)
         } else {
-            blend_rgb(surf_rgb, accent_rgb, 0.24)
+            blend_rgb(surf_rgb, accent_rgb, 0.28)
         };
         let border_rgb = if is_light {
-            blend_rgb(bg_rgb, 0x1D192B, 0.16)
+            blend_rgb(bg_rgb, accent_rgb, 0.18)
         } else {
-            blend_rgb(surf_rgb, 0xFFFFFF, 0.11)
+            blend_rgb(surf_rgb, accent_rgb, 0.16)
         };
         let border_strong_rgb = if is_light {
             blend_rgb(bg_rgb, 0x1D192B, 0.34)

@@ -23,6 +23,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 const MAX_ZIP_ENTRIES: usize = 4096;
 const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
+pub const DEFAULT_HORIZON_REV: &str = "7c38f33c1ce1fb18ae513c7b60ab2dda178eb282";
+pub const DEFAULT_MIXINS_REV: &str = "ddd9700b21997c95d95ac6ee5ecafe3830cf622a";
 
 fn is_safe_zip_entry_name(name: &str) -> bool {
     !name.is_empty()
@@ -829,7 +831,9 @@ pub fn compile_hnmod_bundle_realtime(
         "id": mod_id,
         "version": version,
         "game": "26.3",
-        "hooks": hooks_ver,
+        "horizon": DEFAULT_HORIZON_REV,
+        "mixins": DEFAULT_MIXINS_REV,
+        "hooks": hooks_ver.max(415),
         "permissions": permissions,
     });
     let compiled_json = serde_json::json!({
@@ -882,15 +886,20 @@ pub fn compile_hnmod_bundle_realtime(
             )
             .map_err(|e| e.to_string())?;
 
-        let has_mixin_toml = existing_files.contains_key(&format!("mixins/{mod_id}/horizon-mixin.toml"));
-        if !has_mixin_toml {
-            let mixin_toml = format!("[mod]\nid = \"{mod_id}\"\nversion = \"{version}\"\n");
-            out_zip
-                .start_file(format!("mixins/{mod_id}/horizon-mixin.toml"), opts)
-                .map_err(|e| e.to_string())?;
-            out_zip
-                .write_all(mixin_toml.as_bytes())
-                .map_err(|e| e.to_string())?;
+        let full_mixins = generate_full_mixin_bundle_files(
+            &mod_id,
+            &title,
+            &version,
+            &description,
+            &[],
+            &[],
+            &features,
+        );
+        for (mpath, mbytes) in full_mixins {
+            if !existing_files.contains_key(&mpath) {
+                out_zip.start_file(&mpath, opts).map_err(|e| e.to_string())?;
+                out_zip.write_all(&mbytes).map_err(|e| e.to_string())?;
+            }
         }
         let mut combined_content_files = Vec::new();
         for (name, bytes) in existing_files {
@@ -910,6 +919,7 @@ pub fn compile_hnmod_bundle_realtime(
             out_zip.write_all(&bytes).map_err(|e| e.to_string())?;
         }
         out_zip.finish().map_err(|e| e.to_string())?;
+        let _ = horizon_mods::index::native::Bundle::read(&hnmod_path)?;
 
         // Combined .hmod support (#5865): if the bundle also carries horizon-mod.toml content,
         // write the validated content .hmod to horizon-mods/<mod_id>.hmod so mod_content loads it!
@@ -1572,7 +1582,44 @@ fn build_hmod_from_jar(
     zip.write_all(horizon_mod_toml.as_bytes())
         .map_err(|e| e.to_string())?;
 
+    // Unified .hmod support (#5865): embed horizon-native.json + mixins/<id>/* so a single .hmod
+    // holds both content and native code and passes both Content::read and Bundle::read!
+    let native_manifest = serde_json::json!({
+        "schema": 1,
+        "id": mod_id,
+        "version": version,
+        "game": "26.3",
+        "horizon": DEFAULT_HORIZON_REV,
+        "mixins": DEFAULT_MIXINS_REV,
+        "hooks": 415,
+        "permissions": []
+    });
+    let native_manifest_bytes =
+        serde_json::to_vec_pretty(&native_manifest).map_err(|e| e.to_string())?;
+    if written_paths.insert("horizon-native.json".to_owned()) {
+        zip.start_file("horizon-native.json", opts)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(&native_manifest_bytes)
+            .map_err(|e| e.to_string())?;
+    }
+    let mixin_files = generate_full_mixin_bundle_files(
+        mod_id,
+        title,
+        version,
+        description,
+        items,
+        blocks,
+        &[],
+    );
+    for (mpath, mbytes) in mixin_files {
+        if written_paths.insert(mpath.clone()) {
+            zip.start_file(&mpath, opts).map_err(|e| e.to_string())?;
+            zip.write_all(&mbytes).map_err(|e| e.to_string())?;
+        }
+    }
+
     zip.finish().map_err(|e| e.to_string())?;
+    let _ = horizon_mods::index::native::Bundle::read(hmod_path)?;
     Ok(())
 }
 
@@ -1594,6 +1641,8 @@ fn build_hnmod_from_jar(
         "id": mod_id,
         "version": version,
         "game": "26.3",
+        "horizon": DEFAULT_HORIZON_REV,
+        "mixins": DEFAULT_MIXINS_REV,
         "hooks": 415,
         "permissions": []
     });
@@ -1638,10 +1687,19 @@ fn build_hnmod_from_jar(
         .map_err(|e| e.to_string())?;
     zip.write_all(&manifest_bytes).map_err(|e| e.to_string())?;
 
-    let mixin_toml = format!("[mod]\nid = \"{mod_id}\"\nversion = \"{version}\"\n");
-    zip.start_file(format!("mixins/{mod_id}/horizon-mixin.toml"), opts)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(mixin_toml.as_bytes()).map_err(|e| e.to_string())?;
+    let mixin_files = generate_full_mixin_bundle_files(
+        mod_id,
+        title,
+        version,
+        description,
+        items,
+        blocks,
+        features,
+    );
+    for (mpath, mbytes) in mixin_files {
+        zip.start_file(&mpath, opts).map_err(|e| e.to_string())?;
+        zip.write_all(&mbytes).map_err(|e| e.to_string())?;
+    }
 
     zip.start_file("src/lib.rs", opts)
         .map_err(|e| e.to_string())?;
@@ -1652,7 +1710,492 @@ fn build_hnmod_from_jar(
     zip.write_all(&compiled_bytes).map_err(|e| e.to_string())?;
 
     zip.finish().map_err(|e| e.to_string())?;
+    let _ = horizon_mods::index::native::Bundle::read(hnmod_path)?;
     Ok(())
+}
+
+/// Generates the complete `horizon-mixins` native bundle files under `mixins/<mod_id>/`
+/// (`horizon-mixin.toml`, `runtime.rs`, `native.rs`, `list.rs`, `settings.rs`, `click.rs`,
+/// `key.rs`, `hud.rs`, `destroy.rs`, `use.rs`) patterned after `native-mods/wrench` and
+/// `packaging/android/real_java_to_hnmod_compiler.py`.
+pub fn generate_full_mixin_bundle_files(
+    mod_id: &str,
+    title: &str,
+    version: &str,
+    description: &str,
+    items: &[String],
+    blocks: &[String],
+    features: &[String],
+) -> BTreeMap<String, Vec<u8>> {
+    let mut files = BTreeMap::new();
+    let mod_mod_name = format!("ported_{mod_id}");
+    let mod_native_name = format!("ported_{mod_id}_native");
+    let safe_title = title.replace('\', "/").replace('"', "'");
+    let safe_version = version.replace('\', "/").replace('"', "'");
+    let safe_desc = description
+        .lines()
+        .next()
+        .unwrap_or("Horizon Native Mod")
+        .replace('\', "/")
+        .replace('"', "'");
+    let first_item = items
+        .first()
+        .map(|i| format!("{mod_id}:{i}"))
+        .unwrap_or_else(|| "minecraft:stick".to_owned());
+    let default_mode = if features.iter().any(|f| f == "veinminer" || f == "treefall") {
+        "vein"
+    } else if features.iter().any(|f| f == "wrench") {
+        "wrench"
+    } else {
+        "all"
+    };
+
+    let mixin_toml = format!(
+        r#"[mod]
+id = "{mod_id}"
+version = "{safe_version}"
+priority = 200
+
+[compatibility]
+horizon_revision = "{DEFAULT_HORIZON_REV}"
+
+[[module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "{mod_mod_name}"
+source = "runtime.rs"
+
+[[module]]
+id = "native"
+file = "crates/horizon-client/src/game.rs"
+name = "{mod_native_name}"
+source = "native.rs"
+
+[[injection]]
+id = "list"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_mods"
+helper = "list.rs"
+bindings = [
+  {{ name = "mods", ty = "&mut Vec<crate::game::native_hooks::NativeMod>", value = "&mut *mods" }},
+]
+
+[[injection]]
+id = "settings"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_settings"
+helper = "settings.rs"
+bindings = [
+  {{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }},
+  {{ name = "mod_id", ty = "&str", value = "mod_id" }},
+  {{ name = "buttons", ty = "&mut Vec<String>", value = "&mut *buttons" }},
+]
+
+[[injection]]
+id = "click"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_settings_click"
+helper = "click.rs"
+bindings = [
+  {{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }},
+  {{ name = "mod_id", ty = "&str", value = "mod_id" }},
+  {{ name = "button", ty = "usize", value = "button" }},
+]
+
+[[injection]]
+id = "key"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_key"
+helper = "key.rs"
+bindings = [
+  {{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }},
+  {{ name = "key", ty = "&str", value = "key" }},
+  {{ name = "pressed", ty = "bool", value = "pressed" }},
+]
+
+[[injection]]
+id = "hud"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_hud"
+helper = "hud.rs"
+bindings = [
+  {{ name = "game", ty = "&crate::game::Game<'_>", value = "&*self" }},
+  {{ name = "shapes", ty = "&mut Vec<crate::game::native_hooks::NativeShape>", value = "&mut *shapes" }},
+]
+
+[[injection]]
+id = "destroy"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_destroy_block"
+helper = "destroy.rs"
+bindings = [
+  {{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }},
+  {{ name = "pos", ty = "[i32; 3]", value = "pos" }},
+  {{ name = "state", ty = "&str", value = "state" }},
+]
+
+[[injection]]
+id = "use"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::Game<'_>::use_item"
+helper = "use.rs"
+bindings = [
+  {{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }},
+]
+"#
+    );
+
+    let runtime_rs = format!(
+        r#"//! Pure logic & settings state for {safe_title} (`{mod_id}`).
+pub const ID: &str = "{mod_id}";
+pub const NAME: &str = "{safe_title}";
+pub const VERSION: &str = "{safe_version}";
+pub const DESC: &str = "{safe_desc}";
+pub const TRIGGER_ITEM: &str = "{first_item}";
+pub const DEFAULT_MODE: &str = "{default_mode}";
+pub const ITEM_COUNT: usize = {item_len};
+pub const BLOCK_COUNT: usize = {block_len};
+
+pub const MODE_SETTING: &str = "mode";
+pub const HUD_SETTING: &str = "hud";
+pub const POWER_SETTING: &str = "power";
+
+pub fn is_hud_on(saved: Option<&str>) -> bool {{
+    !matches!(saved, Some("off"))
+}}
+
+pub fn power_level(saved: Option<&str>) -> usize {{
+    match saved {{
+        Some("16") => 16,
+        Some("64") => 64,
+        _ => 32,
+    }}
+}}
+
+pub fn next_power(saved: Option<&str>) -> &'static str {{
+    match power_level(saved) {{
+        16 => "32",
+        32 => "64",
+        _ => "16",
+    }}
+}}
+
+pub fn mode_label(saved: Option<&str>) -> &'static str {{
+    match saved.unwrap_or(DEFAULT_MODE) {{
+        "vein" => "Vein & Timber Harvest",
+        "wrench" => "Block Rotate & Disassemble",
+        "dash" => "Velocity Dash & Utility",
+        _ => "All Ported Features Active",
+    }}
+}}
+
+pub fn next_mode(saved: Option<&str>) -> &'static str {{
+    match saved.unwrap_or(DEFAULT_MODE) {{
+        "all" => "vein",
+        "vein" => "wrench",
+        "wrench" => "dash",
+        _ => "all",
+    }}
+}}
+
+pub fn is_vein_target(name: &str) -> bool {{
+    name.ends_with("_ore")
+        || name.ends_with("_log")
+        || name.ends_with("_stem")
+        || name.ends_with("_wood")
+        || name == "minecraft:ancient_debris"
+        || name == "minecraft:glowstone"
+}}
+"#,
+        item_len = items.len(),
+        block_len = blocks.len(),
+    );
+
+    let native_rs = format!(
+        r#"//! Engine adapter for {safe_title} (`{mod_id}`), injected into `crates/horizon-client/src/game.rs`.
+use super::{mod_mod_name} as rt;
+use super::{{Game, GuestUse}};
+use horizon_client::command::args::GameMode;
+use horizon_client::first_person::Hand;
+use horizon_client::text::Text;
+use horizon_core::position::BlockPos;
+use horizon_world::chunk::BlockState;
+use horizon_world::level::flags;
+
+impl Game<'_> {{
+    pub(super) fn {mod_id}_settings(&self) -> Vec<String> {{
+        let mode = rt::mode_label(self.native_setting(rt::ID, rt::MODE_SETTING).as_deref());
+        let hud = rt::is_hud_on(self.native_setting(rt::ID, rt::HUD_SETTING).as_deref());
+        let power = rt::power_level(self.native_setting(rt::ID, rt::POWER_SETTING).as_deref());
+        vec![
+            format!("Mode: {{mode}}"),
+            format!("HUD Overlay: {{}}", if hud {{ "ON" }} else {{ "OFF" }}),
+            format!("Vein / Action Limit: {{power}} blocks"),
+        ]
+    }}
+
+    pub(super) fn {mod_id}_settings_click(&self, button: usize) {{
+        match button {{
+            0 => {{
+                let cur = self.native_setting(rt::ID, rt::MODE_SETTING);
+                self.native_set_setting(rt::ID, rt::MODE_SETTING, rt::next_mode(cur.as_deref()));
+            }}
+            1 => {{
+                let on = rt::is_hud_on(self.native_setting(rt::ID, rt::HUD_SETTING).as_deref());
+                self.native_set_setting(rt::ID, rt::HUD_SETTING, if on {{ "off" }} else {{ "on" }});
+            }}
+            2 => {{
+                let cur = self.native_setting(rt::ID, rt::POWER_SETTING);
+                self.native_set_setting(rt::ID, rt::POWER_SETTING, rt::next_power(cur.as_deref()));
+            }}
+            _ => {{}}
+        }}
+    }}
+
+    pub(super) fn {mod_id}_on_key(&mut self, key: &str, pressed: bool) {{
+        if !pressed || self.native_in_menu() || !self.native_on(rt::ID) {{
+            return;
+        }}
+        if key.eq_ignore_ascii_case("key.keyboard.r") || key.eq_ignore_ascii_case("key.keyboard.grave.accent") {{
+            let cur = self.native_setting(rt::ID, rt::MODE_SETTING);
+            let next = rt::next_mode(cur.as_deref());
+            self.native_set_setting(rt::ID, rt::MODE_SETTING, next);
+            let label = rt::mode_label(Some(next));
+            self.titles.set_overlay(Text::literal(format!("{{}}: {{label}}", rt::NAME)), false);
+        }}
+    }}
+
+    pub(super) fn {mod_id}_on_destroy(&mut self, pos: [i32; 3], state: &str) {{
+        if self.remote.is_some() || !self.native_on(rt::ID) {{
+            return;
+        }}
+        let mode = self.native_setting(rt::ID, rt::MODE_SETTING);
+        if !matches!(mode.as_deref().unwrap_or(rt::DEFAULT_MODE), "all" | "vein") {{
+            return;
+        }}
+        let block_name = state.split('[').next().unwrap_or(state);
+        if !rt::is_vein_target(block_name) {{
+            return;
+        }}
+        let limit = rt::power_level(self.native_setting(rt::ID, rt::POWER_SETTING).as_deref());
+        let registry = self.pack.assets.registry;
+        let drop = !self.creative;
+        let mut visited = std::collections::BTreeSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        visited.insert(pos);
+        queue.push_back(pos);
+
+        let mut broken_count = 0usize;
+        while let Some([x, y, z]) = queue.pop_front() {{
+            if broken_count >= limit {{
+                break;
+            }}
+            for dx in -1..=1 {{
+                for dy in -1..=1 {{
+                    for dz in -1..=1 {{
+                        if dx == 0 && dy == 0 && dz == 0 {{
+                            continue;
+                        }}
+                        let next = [x + dx, y + dy, z + dz];
+                        if visited.contains(&next) {{
+                            continue;
+                        }}
+                        let sid = self.world.block(next[0], next[1], next[2]);
+                        let Some(st) = registry.state(sid) else {{ continue }};
+                        if st.name == block_name {{
+                            visited.insert(next);
+                            queue.push_back(next);
+                            let at = BlockPos::new(next[0], next[1], next[2]);
+                            let ok = self.with_level(|b, level, ticks| b.destroy_block(level, ticks, at, drop));
+                            if ok {{
+                                broken_count += 1;
+                                if broken_count >= limit {{
+                                    break;
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        if broken_count > 0 {{
+            let _ = self.process_level_events();
+            self.titles.set_overlay(
+                Text::literal(format!("{{}}: Harvested +{{broken_count}} connected blocks", rt::NAME)),
+                false,
+            );
+        }}
+    }}
+
+    pub(super) fn {mod_id}_on_use(&mut self) -> Option<Option<Hand>> {{
+        if self.remote.is_some()
+            || self.player.is_none()
+            || self.spectator()
+            || !self.native_on(rt::ID)
+        {{
+            return None;
+        }}
+        let mode = self.native_setting(rt::ID, rt::MODE_SETTING);
+        if !matches!(mode.as_deref().unwrap_or(rt::DEFAULT_MODE), "all" | "wrench") {{
+            return None;
+        }}
+        match self.guest_use {{
+            Some(GuestUse::OnBlock(Hand::Main)) => {{}}
+            None if !self.entity_targeted() => {{}}
+            _ => return None,
+        }}
+        if !matches!(self.mode, GameMode::Survival | GameMode::Creative) {{
+            return None;
+        }}
+        let held = self.inventory.get(self.selected).and_then(Option::as_ref)?;
+        if !matches!(&*held.item, "minecraft:stick" | "minecraft:blaze_rod" | "minecraft:amethyst_shard" | rt::TRIGGER_ITEM) {{
+            return None;
+        }}
+        let hit = self.pick()?;
+        let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+        let registry = self.pack.assets.registry;
+        let now = registry.state(state)?;
+        let mut props: std::collections::BTreeMap<String, String> = now
+            .properties
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        let rotated = if let Some(facing) = props.get("facing").cloned() {{
+            let next = match facing.as_str() {{
+                "north" => "east",
+                "east" => "south",
+                "south" => "west",
+                "west" => "north",
+                "up" => "down",
+                "down" => "up",
+                _ => return None,
+            }};
+            props.insert("facing".into(), next.into());
+            true
+        }} else if let Some(axis) = props.get("axis").cloned() {{
+            let next = match axis.as_str() {{
+                "y" => "x",
+                "x" => "z",
+                _ => "y",
+            }};
+            props.insert("axis".into(), next.into());
+            true
+        }} else {{
+            false
+        }};
+
+        if !rotated {{
+            return None;
+        }}
+        let candidate = BlockState {{
+            name: now.name.clone(),
+            properties: props.into_iter().collect(),
+        }};
+        let turned = registry.id(&candidate)?;
+        let at = BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
+        let placed = self.with_level(|b, level, ticks| {{
+            b.can_survive(level, ticks, at, turned)
+                && b.set_block(level, ticks, at, turned, flags::UPDATE_ALL)
+        }});
+        if !placed {{
+            return None;
+        }}
+        let _ = self.process_level_events();
+        self.swing_arm();
+        Some(Some(Hand::Main))
+    }}
+
+    pub(super) fn {mod_id}_draw_hud(&self, shapes: &mut Vec<crate::game::native_hooks::NativeShape>) {{
+        if self.native_in_menu() || !self.native_on(rt::ID) {{
+            return;
+        }}
+        if !rt::is_hud_on(self.native_setting(rt::ID, rt::HUD_SETTING).as_deref()) {{
+            return;
+        }}
+        let mode = rt::mode_label(self.native_setting(rt::ID, rt::MODE_SETTING).as_deref());
+        let label = format!("{{}} [{{mode}}]", rt::NAME);
+        shapes.push(crate::game::native_hooks::NativeShape::Text {{
+            text: label,
+            x: 8.0,
+            y: 8.0,
+            color: 0xFF7DD3FC,
+            scale: 1.0,
+            centered: false,
+            shadow: true,
+        }});
+    }}
+}}
+"#
+    );
+
+    let list_rs = format!(
+        r#"{{
+    mods.push(crate::game::native_hooks::NativeMod {{
+        id: crate::game::{mod_mod_name}::ID.to_owned(),
+        name: crate::game::{mod_mod_name}::NAME.to_owned(),
+        version: crate::game::{mod_mod_name}::VERSION.to_owned(),
+        description: crate::game::{mod_mod_name}::DESC.to_owned(),
+    }});
+}}
+"#
+    );
+    let settings_rs = format!(
+        r#"{{
+    if mod_id == crate::game::{mod_mod_name}::ID {{
+        buttons.extend(game.{mod_id}_settings());
+    }}
+}}
+"#
+    );
+    let click_rs = format!(
+        r#"{{
+    if mod_id == crate::game::{mod_mod_name}::ID {{
+        game.{mod_id}_settings_click(button);
+    }}
+}}
+"#
+    );
+    let key_rs = format!(
+        r#"{{
+    game.{mod_id}_on_key(key, pressed);
+}}
+"#
+    );
+    let hud_rs = format!(
+        r#"{{
+    game.{mod_id}_draw_hud(shapes);
+}}
+"#
+    );
+    let destroy_rs = format!(
+        r#"{{
+    game.{mod_id}_on_destroy(pos, state);
+}}
+"#
+    );
+    let use_rs = format!(
+        r#"{{
+    if let Some(hand) = game.{mod_id}_on_use() {{
+        return hand;
+    }}
+}}
+"#
+    );
+
+    let prefix = format!("mixins/{mod_id}/");
+    files.insert(format!("{prefix}horizon-mixin.toml"), mixin_toml.into_bytes());
+    files.insert(format!("{prefix}runtime.rs"), runtime_rs.into_bytes());
+    files.insert(format!("{prefix}native.rs"), native_rs.into_bytes());
+    files.insert(format!("{prefix}list.rs"), list_rs.into_bytes());
+    files.insert(format!("{prefix}settings.rs"), settings_rs.into_bytes());
+    files.insert(format!("{prefix}click.rs"), click_rs.into_bytes());
+    files.insert(format!("{prefix}key.rs"), key_rs.into_bytes());
+    files.insert(format!("{prefix}hud.rs"), hud_rs.into_bytes());
+    files.insert(format!("{prefix}destroy.rs"), destroy_rs.into_bytes());
+    files.insert(format!("{prefix}use.rs"), use_rs.into_bytes());
+    files
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2253,6 +2796,8 @@ pub fn install_builtin_horizon_mod(
         "id": mod_id,
         "version": version,
         "game": "26.3",
+        "horizon": DEFAULT_HORIZON_REV,
+        "mixins": DEFAULT_MIXINS_REV,
         "hooks": 415,
         "permissions": [],
     });
@@ -2290,6 +2835,20 @@ pub fn install_builtin_horizon_mod(
             )
             .map_err(|e| e.to_string())?;
 
+        let mixin_files = generate_full_mixin_bundle_files(
+            &mod_id,
+            &title,
+            &version,
+            &description,
+            &[],
+            &[],
+            &features,
+        );
+        for (mpath, mbytes) in mixin_files {
+            out_zip.start_file(&mpath, opts).map_err(|e| e.to_string())?;
+            out_zip.write_all(&mbytes).map_err(|e| e.to_string())?;
+        }
+
         out_zip
             .start_file("src/lib.rs", opts)
             .map_err(|e| e.to_string())?;
@@ -2307,6 +2866,7 @@ pub fn install_builtin_horizon_mod(
             .map_err(|e| e.to_string())?;
 
         out_zip.finish().map_err(|e| e.to_string())?;
+        let _ = horizon_mods::index::native::Bundle::read(&hnmod_path)?;
     }
 
     enable_mod_in_profile(profile_dir, &mod_id);
@@ -2323,6 +2883,79 @@ pub fn install_builtin_horizon_mod(
         features,
         port_pack: None,
     })
+}
+
+/// Collects all enabled `.hnmod` and unified `.hmod` native bundles in `profile_dir`,
+/// validates each via `horizon_mods::index::native::Bundle::read`, constructs the
+/// multi-mod binary payload (`[u32 BE len][zip bytes]...`) for `/v1/build`, and writes
+/// `<profile_dir>/native/compiled-local/build.json` (used by `NativeMods.java` & `native_builds.rs`).
+pub fn build_native_mods_payload(profile_dir: &Path) -> Result<(Vec<u8>, serde_json::Value), String> {
+    let on = crate::mod_list::ModList::load(profile_dir);
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for folder in [
+        profile_dir.join(crate::mod_list::NATIVE_DIR),
+        profile_dir.join(crate::mod_list::DIR),
+    ] {
+        if let Ok(rd) = fs::read_dir(&folder) {
+            paths.extend(rd.flatten().map(|e| e.path()));
+        }
+    }
+    paths.retain(|p| horizon_mods::index::native::is_file(p) && horizon_mods::index::native::holds(p));
+    paths.sort();
+
+    let mut seen_ids = BTreeSet::new();
+    let mut mod_ids = Vec::new();
+    let mut permissions = BTreeSet::new();
+    let mut body = Vec::new();
+
+    for path in paths {
+        let Ok(bundle) = horizon_mods::index::native::Bundle::read(&path) else {
+            continue;
+        };
+        let id = bundle.manifest.id.clone();
+        if on.disabled.contains(&id) {
+            continue;
+        }
+        if !seen_ids.insert(id.clone()) {
+            continue;
+        }
+        for p in &bundle.manifest.permissions {
+            permissions.insert(p.clone());
+        }
+        let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        body.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+        body.extend_from_slice(&bytes);
+        mod_ids.push(id);
+    }
+
+    if mod_ids.is_empty() {
+        let info = install_builtin_horizon_mod("wrench", profile_dir)?;
+        let bytes = fs::read(&info.hnmod_path).map_err(|e| e.to_string())?;
+        body.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+        body.extend_from_slice(&bytes);
+        mod_ids.push(info.id);
+    }
+
+    let perms_vec: Vec<String> = permissions.into_iter().collect();
+    let build_meta = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "game": "26.3",
+        "horizon": DEFAULT_HORIZON_REV,
+        "mixins": DEFAULT_MIXINS_REV,
+        "hooks": 415,
+        "mods": mod_ids,
+        "permissions": perms_vec,
+        "payload_bytes": body.len(),
+    });
+
+    let local_build_dir = profile_dir.join("native").join("compiled-local");
+    let _ = fs::create_dir_all(&local_build_dir);
+    if let Ok(json_bytes) = serde_json::to_vec_pretty(&build_meta) {
+        let _ = fs::write(local_build_dir.join("build.json"), json_bytes);
+    }
+    let _ = fs::write(local_build_dir.join("bundles.bin"), &body);
+
+    Ok((body, build_meta))
 }
 
 pub fn title_case_id(id: &str) -> String {

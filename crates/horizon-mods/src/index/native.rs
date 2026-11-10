@@ -228,7 +228,12 @@ impl Bundle {
         for name in files.keys().filter(|n| {
             !matches!(
                 n.as_str(),
-                MANIFEST | "src/lib.rs" | "horizon-compiled.json" | "icon.png"
+                MANIFEST
+                    | "src/lib.rs"
+                    | "horizon-compiled.json"
+                    | "icon.png"
+                    | "mod.toml"
+                    | "horizon-content.json"
             )
         }) {
             let Some(rest) = name.strip_prefix(&prefix) else {
