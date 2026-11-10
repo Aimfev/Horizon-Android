@@ -9,7 +9,7 @@
 use crate::{
     carry,
     check::{self, Check, Verdict},
-    events, jar, pipeline, report, upgrade,
+    events, import, jar, pipeline, report, upgrade,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -229,7 +229,6 @@ pub fn port_modpack_natively(
     profile_dir: &Path,
     progress: &dyn Fn(&str, f32),
 ) -> Result<(import::Pack, Vec<report::Row>, usize), String> {
-    use crate::import;
     let stem = pack_path
         .file_stem()
         .and_then(|s| s.to_str())

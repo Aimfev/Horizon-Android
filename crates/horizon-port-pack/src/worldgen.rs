@@ -126,7 +126,8 @@ const ELEMENTS: [(&str, &str); 3] = [
 ];
 
 /// What carry-over did to a mod's worldgen files.
-#[derive(Debug, Default, serde::Serialize)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Upgrade {
     /// Files rewritten to vanilla types.
     pub mapped: usize,

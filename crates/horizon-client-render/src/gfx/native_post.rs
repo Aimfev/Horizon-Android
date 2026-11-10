@@ -1130,6 +1130,12 @@ pub fn frame_inputs(
             let k = super::native_shadow::distortion(s.distance, s.resolution);
             2.0 * s.distance / s.resolution.max(1) as f32 * (1.0 - k)
         }),
+        hdr: 0,
+        headroom: 1.0,
+        paper_white: 80.0,
+        peak: 80.0,
+        black_level: 0.0,
+        padding: [0; 3],
     }
 }
 

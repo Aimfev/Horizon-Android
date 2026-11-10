@@ -239,8 +239,13 @@ fn vertex_shim(material_source: &str, vertex_stage: Option<&CheckedStage>) -> St
         out += &horizon_shader_api::inputs::VERTEX_INPUT.wgsl();
     }
     if let Some(vs) = vertex_stage {
-        let v_prelude = StageKind::Vertex.prelude();
-        let m_prelude = StageKind::Material.prelude();
+        let api = if material_source.contains("0.2 prelude") {
+            horizon_shader_api::Api::V0_2
+        } else {
+            horizon_shader_api::Api::V0_1
+        };
+        let v_prelude = StageKind::Vertex.prelude(api);
+        let m_prelude = StageKind::Material.prelude(api);
         let v_after = vs.source.strip_prefix(&v_prelude).unwrap_or(&vs.source);
         let m_after = material_source
             .strip_prefix(&m_prelude)

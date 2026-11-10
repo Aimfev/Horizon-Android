@@ -4,7 +4,7 @@
 //! definitions, and each blockstate gets a vanilla template guessed from its
 //! properties until the oracle's facts replace the guess.
 use crate::{jar::JarInfo, oracle::Facts};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -75,7 +75,8 @@ fn result_before_1_20_5(recipe: &Value) -> bool {
     r.get("item").is_some() && r.get("id").is_none()
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Report {
     /// Made for 1.20 or older ([`old_layout`]): its data files were carried under 1.21's
     /// folder names, their JSON as it was.

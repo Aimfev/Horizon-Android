@@ -2,7 +2,7 @@
 //! frame's WGSL layout is the uploaded struct's, and
 //! docs/api/shaders-reference.md is up to date. Rewrite the reference with
 //! `HORIZON_WRITE_DOCS=1 cargo test -p horizon-shader-api --test reference`.
-use horizon_shader_api::{Frame, Pack, StageKind, compose, reference};
+use horizon_shader_api::{Api, Frame, Pack, StageKind, compose, reference};
 use std::path::Path;
 
 const DOC: &str = "docs/api/shaders-reference.md";
@@ -36,27 +36,33 @@ fn vanilla(kind: StageKind) -> &'static str {
             "fn weather(input: WeatherInput) -> vec4<f32> { return input.color; }\n"
         }
         StageKind::Post => "fn post(input: PostInput) -> vec4<f32> { return input.color; }\n",
+        StageKind::Tonemap => "fn tonemap(input: TonemapInput) -> vec3<f32> { return input.color; }\n",
     }
 }
 
 #[test]
 fn every_stage_compiles_with_vanilla_s_function() {
-    for kind in StageKind::ALL {
-        let text = format!("{}{}{}", kind.prelude(), vanilla(kind), kind.entries());
-        let module = validate(&text);
-        assert!(
-            module
-                .entry_points
-                .iter()
-                .all(|e| e.name.starts_with("horizon_")),
-            "{kind:?}"
-        );
+    for api in [Api::V0_1, Api::V0_2] {
+        for kind in StageKind::ALL {
+            if api == Api::V0_1 && kind == StageKind::Tonemap {
+                continue;
+            }
+            let text = format!("{}{}{}", kind.prelude(api), vanilla(kind), kind.entries(api));
+            let module = validate(&text);
+            assert!(
+                module
+                    .entry_points
+                    .iter()
+                    .all(|e| e.name.starts_with("horizon_")),
+                "{kind:?} {api:?}"
+            );
+        }
     }
 }
 
 #[test]
 fn the_frame_s_wgsl_layout_is_the_uploaded_struct_s() {
-    let text = format!("{}{}", StageKind::Sky.prelude(), vanilla(StageKind::Sky));
+    let text = format!("{}{}", StageKind::Sky.prelude(Api::V0_1), vanilla(StageKind::Sky));
     let module = validate(&text);
     let (_, ty) = module
         .types
