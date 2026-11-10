@@ -739,6 +739,7 @@ impl Game<'_> {
                     description: m.description.clone(),
                     problem: None,
                     dev,
+                    has_settings: false,
                     native: None,
                 }
             })
@@ -783,8 +784,8 @@ impl Game<'_> {
     }
     pub(super) fn merge_remote_tree(&mut self) {}
     pub(super) fn sync_mods(&mut self) {
-        self.options.disabled_mods = self.settings.mods.disabled.clone();
-        self.options.enabled_mods = self.settings.mods.enabled.clone();
+        self.options.disabled_mods = self.settings.mods.disabled.iter().cloned().collect();
+        self.options.enabled_mods = self.settings.mods.enabled.iter().cloned().collect();
         self.sync_native_switches();
         self.switch_mods();
         #[cfg(target_os = "android")]

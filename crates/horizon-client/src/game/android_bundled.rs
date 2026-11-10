@@ -122,18 +122,18 @@ mod smartf3_settings;
 mod smartf3_click;
 
 #[derive(Clone, Debug)]
-struct DynamicHnmod {
-    id: String,
-    title: String,
-    description: String,
-    features: BTreeSet<String>,
-    custom_buttons: Vec<String>,
-    items: Vec<String>,
-    blocks: Vec<String>,
-    keys: Vec<[String; 3]>,
-    commands: Vec<String>,
-    zoom_held: bool,
-    vein_key_held: bool,
+pub(crate) struct DynamicHnmod {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) description: String,
+    pub(crate) features: BTreeSet<String>,
+    pub(crate) custom_buttons: Vec<String>,
+    pub(crate) items: Vec<String>,
+    pub(crate) blocks: Vec<String>,
+    pub(crate) keys: Vec<[String; 3]>,
+    pub(crate) commands: Vec<String>,
+    pub(crate) zoom_held: bool,
+    pub(crate) vein_key_held: bool,
 }
 
 #[derive(Default)]
