@@ -1730,13 +1730,13 @@ pub fn generate_full_mixin_bundle_files(
     let mut files = BTreeMap::new();
     let mod_mod_name = format!("ported_{mod_id}");
     let mod_native_name = format!("ported_{mod_id}_native");
-    let safe_title = title.replace('\', "/").replace('"', "'");
-    let safe_version = version.replace('\', "/").replace('"', "'");
+    let safe_title = title.replace('\\', "/").replace('"', "'");
+    let safe_version = version.replace('\\', "/").replace('"', "'");
     let safe_desc = description
         .lines()
         .next()
         .unwrap_or("Horizon Native Mod")
-        .replace('\', "/")
+        .replace('\\', "/")
         .replace('"', "'");
     let first_item = items
         .first()
