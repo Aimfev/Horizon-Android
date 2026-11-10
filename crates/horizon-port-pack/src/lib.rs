@@ -1,3 +1,4 @@
+pub mod android_port;
 //! Port a Java modpack to Horizon (`docs/modpacks.md`): the steps behind the
 //! `horizon-port-pack` command, and the launcher's "Import modpack".
 //!

@@ -1403,7 +1403,7 @@ impl<'a> Ui<'a> {
     ) -> ([f32; 4], [f32; 4]) {
         let theme = active_theme();
         let gap = 3.0;
-        let trail_w = (ui.measure_or_estimate(self, Face::SemiBold, 12.5, trail_label) + 34.0)
+        let trail_w = (Self::measure_or_estimate(self, Face::SemiBold, 12.5, trail_label) + 34.0)
             .clamp(84.0, (total_w * 0.40).max(88.0));
         let lead_w = (total_w - trail_w - gap).max(96.0);
         let lead_r = [x, y, lead_w, h];

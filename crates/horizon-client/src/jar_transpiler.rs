@@ -57,6 +57,7 @@ pub struct TranspiledModInfo {
     pub items: Vec<String>,
     pub blocks: Vec<String>,
     pub features: Vec<String>,
+    pub port_pack: Option<horizon_port_pack::android_port::AndroidPortResult>,
 }
 
 /// Sanitizes a raw string into a valid Horizon mod ID (`[a-z0-9_]{1,64}`).
@@ -838,7 +839,7 @@ pub fn compile_hnmod_bundle_realtime(
         "description": description,
         "compiled": true,
         "abi": "horizon-inproc-v2",
-        "hooks_api": 80,
+        "hooks_api": 415,
         "features": features,
         "custom_buttons": parsed_buttons,
         "items": [],
@@ -949,6 +950,7 @@ pub fn compile_hnmod_bundle_realtime(
         items: Vec::new(),
         blocks: Vec::new(),
         features,
+        port_pack: None,
     })
 }
 
@@ -960,6 +962,24 @@ pub fn transpile_jar_to_horizon_mods(
     jar_path: &Path,
     profile_dir: &Path,
 ) -> Result<TranspiledModInfo, String> {
+    transpile_jar_to_horizon_mods_with_progress(jar_path, profile_dir, &|_, _| {})
+}
+
+/// Runs the full native `horizon-port-pack` pipeline (`check::check`, `carry::carry`, `classes::census`,
+/// `events::report`) on `jar_path` and synthesizes both the carried-over `.hmod` content package
+/// (`<profile_dir>/horizon-mods/<id>/` + `<id>.hmod`) and the real-time `.hnmod` native hook bundle
+/// (`<profile_dir>/horizon-native-mods/<id>.hnmod`).
+pub fn transpile_jar_to_horizon_mods_with_progress(
+    jar_path: &Path,
+    profile_dir: &Path,
+    progress: &dyn Fn(&str, f32),
+) -> Result<TranspiledModInfo, String> {
+    let port_pack_res = horizon_port_pack::android_port::port_jar_natively(
+        jar_path,
+        profile_dir,
+        progress,
+    )
+    .ok();
     let jar_bytes =
         fs::read(jar_path).map_err(|e| format!("Could not read {}: {e}", jar_path.display()))?;
     let mut jar = ZipArchive::new(Cursor::new(&jar_bytes))
@@ -1271,6 +1291,18 @@ pub fn transpile_jar_to_horizon_mods(
     fs::create_dir_all(&native_mods_dir)
         .map_err(|e| format!("create horizon-native-mods/: {e}"))?;
 
+    if let Some(ref pp) = port_pack_res {
+        if !pp.mod_id.is_empty() && (mod_id == "custom_java_mod" || mod_id.is_empty()) {
+            mod_id = sanitize_mod_id(&pp.mod_id);
+        }
+        if !pp.name.trim().is_empty() && title == fallback_stem {
+            title = pp.name.clone();
+        }
+        if !pp.version.trim().is_empty() && version == "1.0.0" {
+            version = pp.version.clone();
+        }
+    }
+
     let hmod_path = mods_dir.join(format!("{mod_id}.hmod"));
     build_hmod_from_jar(
         &hmod_path,
@@ -1283,6 +1315,7 @@ pub fn transpile_jar_to_horizon_mods(
         &blocks_vec,
         &lang_en,
         &asset_entries,
+        port_pack_res.as_ref().map(|pp| pp.carry_dir.as_path()),
     )?;
 
     // 4. Build <profile_dir>/horizon-native-mods/<mod_id>.hnmod (Native Hook + In-Process Runtime Bundle)
@@ -1325,6 +1358,7 @@ pub fn transpile_jar_to_horizon_mods(
         items: items_vec,
         blocks: blocks_vec,
         features,
+        port_pack: port_pack_res,
     })
 }
 
@@ -1346,12 +1380,48 @@ fn build_hmod_from_jar(
     blocks: &[String],
     lang_en: &BTreeMap<String, String>,
     asset_entries: &[(String, Vec<u8>)],
+    port_pack_carry_dir: Option<&Path>,
 ) -> Result<(), String> {
     let file = File::create(hmod_path).map_err(|e| format!("create {}: {e}", hmod_path.display()))?;
     let mut zip = ZipWriter::new(file);
     let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
     let mut written_paths = BTreeSet::new();
+
+    // First, include all files carried over by `horizon-port-pack` (upgraded 26.3 recipes, loot tables,
+    // worldgen, block declarations `data/<id>/horizon/block/*.json`, item declarations, blockstates, models)
+    if let Some(carry_dir) = port_pack_carry_dir
+        && carry_dir.is_dir()
+    {
+        fn collect_carry(
+            root: &Path,
+            cur: &Path,
+            out: &mut Vec<(String, Vec<u8>)>,
+        ) {
+            let Ok(entries) = fs::read_dir(cur) else { return };
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    collect_carry(root, &p, out);
+                } else if let Ok(rel) = p.strip_prefix(root)
+                    && let Ok(bytes) = fs::read(&p)
+                {
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    if rel_str != "horizon-mod.toml" && rel_str != "mod.toml" {
+                        out.push((rel_str, bytes));
+                    }
+                }
+            }
+        }
+        let mut carried_files = Vec::new();
+        collect_carry(carry_dir, carry_dir, &mut carried_files);
+        for (rel_path, bytes) in carried_files {
+            if valid_hmod_rel_path(&rel_path) && written_paths.insert(rel_path.clone()) {
+                zip.start_file(&rel_path, opts).map_err(|e| e.to_string())?;
+                zip.write_all(&bytes).map_err(|e| e.to_string())?;
+            }
+        }
+    }
 
     for (raw_path, bytes) in asset_entries {
         let remapped = if let Some(ns) = primary_ns {
@@ -1524,7 +1594,7 @@ fn build_hnmod_from_jar(
         "id": mod_id,
         "version": version,
         "game": "26.3",
-        "hooks": 80,
+        "hooks": 415,
         "permissions": []
     });
     let manifest_bytes =
@@ -1549,7 +1619,7 @@ fn build_hnmod_from_jar(
         "description": description,
         "compiled": true,
         "abi": "horizon-inproc-v2",
-        "hooks_api": 80,
+        "hooks_api": 415,
         "features": features,
         "items": items,
         "blocks": blocks,
@@ -2123,13 +2193,7 @@ pub fn all_horizon_catalog_mods() -> Vec<(&'static str, &'static str, &'static s
 /// Unpacks and installs a `.hpack` Horizon Modpack (`horizon-modpack.toml` + `overrides/`) into `profile_dir`.
 pub fn install_hpack_modpack(hpack_path: &Path, profile_dir: &Path) -> Result<usize, String> {
     let pack = horizon_mods::modpack::Modpack::read(hpack_path)?;
-    for (rel, bytes) in &pack.overrides {
-        let dest = profile_dir.join(rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        fs::write(&dest, bytes).map_err(|e| e.to_string())?;
-    }
+    let _ = horizon_mods::modpack::Modpack::extract_overrides(hpack_path, profile_dir);
     let mut installed_count = 0usize;
     let mut on = crate::mod_list::ModList::load(profile_dir);
     for pm in &pack.manifest.mods {
@@ -2189,7 +2253,7 @@ pub fn install_builtin_horizon_mod(
         "id": mod_id,
         "version": version,
         "game": "26.3",
-        "hooks": 80,
+        "hooks": 415,
         "permissions": [],
     });
     let compiled_json = serde_json::json!({
@@ -2199,7 +2263,7 @@ pub fn install_builtin_horizon_mod(
         "description": description,
         "compiled": true,
         "abi": "horizon-inproc-v2",
-        "hooks_api": 80,
+        "hooks_api": 415,
         "features": features,
         "custom_buttons": [],
         "items": [],
@@ -2257,6 +2321,7 @@ pub fn install_builtin_horizon_mod(
         items: Vec::new(),
         blocks: Vec::new(),
         features,
+        port_pack: None,
     })
 }
 

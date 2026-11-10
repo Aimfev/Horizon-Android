@@ -31,7 +31,7 @@ impl Kind {
         let lower = name.to_ascii_lowercase();
         match self {
             Self::Mods => {
-                lower.ends_with(".hmod") || lower.ends_with(".hnmod") || lower.ends_with(".jar") || lower.ends_with(".hpack")
+                lower.ends_with(".hmod") || lower.ends_with(".hnmod") || lower.ends_with(".jar") || lower.ends_with(".hpack") || lower.ends_with(".mrpack")
             }
             Self::Packs => lower.ends_with(".zip"),
             Self::Shaders => lower.ends_with(".zip") || lower.ends_with(".hshader"),
@@ -116,6 +116,7 @@ pub fn validate(
         manifest |= raw == "horizon-mod.toml"
             || raw == "horizon-native.json"
             || raw == "horizon-modpack.toml"
+            || raw == "modrinth.index.json"
             || raw == "fabric.mod.json"
             || raw == "quilt.mod.json"
             || raw == "META-INF/neoforge.mods.toml"
@@ -183,6 +184,19 @@ pub fn read_mod_archive_id(path: &Path, original_name: &str) -> crate::Result<(S
     let has_native_json = zip.by_name("horizon-native.json").is_ok();
     let has_hmod_toml = zip.by_name("horizon-mod.toml").is_ok();
     let has_hpack_toml = zip.by_name("horizon-modpack.toml").is_ok();
+
+    let has_mrpack_json = zip.by_name("modrinth.index.json").is_ok();
+    if lower.ends_with(".mrpack") || has_mrpack_json {
+        let pack = horizon_port_pack::import::import(path)
+            .map_err(|e| format!("Invalid Modrinth modpack (.mrpack): {e}"))?;
+        let slug: String = pack
+            .name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+            .collect();
+        let clean = slug.trim_matches('_').to_owned();
+        return Ok((if clean.is_empty() { "modpack".into() } else { clean }, "mrpack"));
+    }
 
     if lower.ends_with(".hpack") || has_hpack_toml {
         let pack = horizon_mods::modpack::Modpack::read(path)

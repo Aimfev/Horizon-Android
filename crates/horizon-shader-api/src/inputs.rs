@@ -54,16 +54,20 @@ wgsl_types! {
     [[f32; 4]; 8] => "array<vec4<f32>, 8>",
 }
 
-/// A uniform struct: the Rust type the renderer uploads, and its WGSL.
+/// A uniform struct: the Rust type the renderer uploads, and its WGSL. `pad` names a trailing
+/// field in Rust only, which fills the struct out to WGSL's size (a multiple of its 16-byte
+/// alignment), since `Pod` allows no implicit padding.
 macro_rules! uniform {
     ($(#[doc = $doc:literal])* $name:ident {
         $($(#[doc = $fdoc:literal])* $field:ident: $ty:ty,)*
-    }) => {
+    } $(pad $pad:ident: $pad_ty:ty)?) => {
         $(#[doc = $doc])*
         #[repr(C)]
         #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
         pub struct $name {
             $($(#[doc = $fdoc])* pub $field: $ty,)*
+            $(/// Not in the WGSL: zeros up to its size.
+            pub $pad: $pad_ty,)?
         }
 
         impl $name {
@@ -200,6 +204,36 @@ uniform! {
         /// The ground one shadow texel covers at the map's centre, in blocks (for a bias that
         /// scales with it); 0 without a shadow map.
         shadow_center_texel: f32,
+        /// 1 while the output is HDR, else 0.
+        hdr: u32,
+        /// The peak over paper white: the brightest value the display shows (Apple's EDR
+        /// headroom, Android's HDR/SDR ratio). 1 in SDR. It changes while the game runs (the
+        /// system's SDR white, a calibration, another display), so read it every frame.
+        headroom: f32,
+        /// Paper white in nits; a nominal 80 in SDR.
+        paper_white: f32,
+        /// The peak brightness in nits; a nominal 80 in SDR, as `paper_white`.
+        peak: f32,
+        /// The display's black in nits (HDR's Black Level); 0 in SDR.
+        black_level: f32,
+    } pad padding: [u32; 3]
+}
+
+impl Frame {
+    /// The fields 0.1's prelude declares: the struct up to `shadow_center_texel`, a prefix of
+    /// the buffer the renderer uploads.
+    pub const FIELDS_0_1: usize = 49;
+
+    /// `Frame` as the line's prelude declares it.
+    pub fn line(api: crate::Api) -> Struct {
+        let fields = match api {
+            crate::Api::V0_1 => &Self::WGSL.fields[..Self::FIELDS_0_1],
+            crate::Api::V0_2 => Self::WGSL.fields,
+        };
+        Struct {
+            fields,
+            ..Self::WGSL
+        }
     }
 }
 
@@ -218,24 +252,6 @@ pub const POST_INPUT: Struct = Struct {
         pixel: "vec2<f32>" = "The pixel's centre, in pixels from the top left of what the pass draws (the world's size; the window's for the last pass).",
         color: "vec4<f32>" = "The previous pass's colour here (the world's picture for the first pass).",
         depth: "f32" = "The world's depth here, reversed: 0 is the sky.",
-    },
-};
-
-/// The vertex stage's input: one corner of a block's surface.
-pub const VERTEX_INPUT: Struct = Struct {
-    name: "VertexInput",
-    doc: "One corner of a block's surface, for `fn vertex(input: VertexInput) -> vec3<f32>`, which returns where it is drawn (camera-relative, in blocks; `input.position` where it stays).",
-    fields: fields! {
-        position: "vec3<f32>" = "The corner, camera-relative, in blocks (`+ frame.camera_position` for the world's).",
-        uv: "vec2<f32>" = "The texture coordinate inside the block's sprite.",
-        material: "u32" = "The `[[materials]]` id of the block's sprite (0 when none matches).",
-        light: "vec2<f32>" = "Block and sky light, 0..1.",
-        tint: "vec4<f32>" = "The vertex colour (biome tint, face shade, ambient occlusion); alpha 1.",
-        face: "u32" = "For a fluid, the face of the block the corner is on (as `MaterialInput.face`), else 0.",
-        fluid: "u32" = "1 on a fluid's surface (water or lava), else 0.",
-        block_position: "vec3<f32>" = "The corner inside its 16×16×16 section, 0..16, before the section's offset is added.",
-        tags: "u32" = "The pack's sprite tags this quad's sprite has: bit i for the manifest's i-th `[[tags]]`.",
-        emission: "f32" = "How strongly the block itself shines, 0..1, by its kind of light; 0 for most blocks.",
     },
 };
 
@@ -260,25 +276,20 @@ pub const MATERIAL_INPUT: Struct = Struct {
         normal: "vec3<f32>" = "The surface's geometric normal, a unit vector in world axes, facing the camera. A normal within about 3.6 degrees of an axis is that axis exactly, so distant block faces do not shimmer; flowing water's slopes are steeper and keep theirs.",
         tangent: "vec4<f32>" = "The surface's tangent: xyz the unit direction in world axes along which `uv.x` grows, w the sign (1 or -1) that makes `cross(normal, tangent.xyz) * tangent.w` the direction `uv.y` grows along (down the texture). With `normal` it turns a normal map's normals into world axes.",
         colored_light: "vec3<f32>" = "The frame's coloured lights at this point (`[[particle_lights]]`, held and dropped items in their `[[lights]]` colour while dynamic lights are on, and mods' visual lights), 0..1, to light the surface with as the pack likes; 0 where none reaches.",
-        displaced: "f32" = "How much of the surface's relief came from `[displacement]`, 0..1 (0 without `[displacement]`).",
+        displaced: "f32" = "How much of the relief `[displacement]` gave this point as geometry, 0..1: 1 near the camera, where the surface already lies where `displacement` put it (`position` is that point; a parallax effect would count its depth twice), easing to 0 at `[displacement] distance`; always 0 without `[displacement]`.",
     },
 };
 
-/// Input to an optional `fn displacement(input: DisplacementInput) -> f32` in the material stage.
-pub const DISPLACEMENT_INPUT: Struct = Struct {
-    name: "DisplacementInput",
-    doc: "One corner of a subdivided terrain grid near the camera, for `fn displacement(input: DisplacementInput) -> f32`.",
+/// What the material stage returns.
+pub const SURFACE: Struct = Struct {
+    name: "Surface",
+    doc: "What `material` returns. Vanilla's own is `albedo * tint * vec4(lightmap, 1.0)`; \
+          Horizon then applies the alpha test (cutout and translucent) and fog.",
     fields: fields! {
-        position: "vec3<f32>" = "The point, camera-relative, in blocks.",
-        uv: "vec2<f32>" = "The texture coordinate inside the block's sprite.",
-        material: "u32" = "The `[[materials]]` id of the block's sprite (0 when none matches).",
-        tags: "u32" = "The pack's sprite tags this surface's sprite has: bit i for the manifest's i-th `[[tags]]`.",
-        normal: "vec3<f32>" = "The face's geometric normal, a unit vector in world axes.",
-        height: "f32" = "The LabPBR normal map's height (alpha) here, 0..1 (1 at the top).",
+        color: "vec4<f32>" = "The lit colour, 0..1, with its alpha.",
     },
 };
 
-/// What the post stage's `surface_at` returns for a pixel of the screen.
 pub const SURFACE_DATA: Struct = Struct {
     name: "SurfaceData",
     doc: "The solid terrain's surface at a pixel, for `surface_at`, as the material stage's `set_surface` left it.",
@@ -311,6 +322,34 @@ pub const SKY_INPUT: Struct = Struct {
     },
 };
 
+/// The input of the material stage's `displacement`, under `[displacement]`.
+pub const DISPLACEMENT_INPUT: Struct = Struct {
+    name: "DisplacementInput",
+    doc: "One corner of the grid a block face near the camera is cut into, for `fn displacement(input: DisplacementInput) -> f32` (`[displacement]`), which returns how deep below the face, in blocks, the surface lies at `height`.",
+    fields: fields! {
+        position: "vec3<f32>" = "The corner on the flat face, camera-relative, in blocks.",
+        normal: "vec3<f32>" = "The face's normal, a unit vector in world axes.",
+        uv: "vec2<f32>" = "The texture coordinate inside the block's sprite (as `MaterialInput.uv`).",
+        material: "u32" = "The `[[materials]]` id of the block texture (0 when none matches).",
+        height: "f32" = "A LabPBR height, 0..1 (1 the top of the relief): the normal map's alpha here, or the texture's average height (what the face's edges are pinned to).",
+    },
+};
+
+/// The vertex stage's input: one corner of a block's surface.
+pub const VERTEX_INPUT: Struct = Struct {
+    name: "VertexInput",
+    doc: "One corner of a block's surface, for `fn vertex(input: VertexInput) -> vec3<f32>`, which returns where it is drawn (camera-relative, in blocks; `input.position` where it stays).",
+    fields: fields! {
+        position: "vec3<f32>" = "The corner, camera-relative, in blocks (`+ frame.camera_position` for the world's).",
+        uv: "vec2<f32>" = "The texture coordinate inside the block's sprite.",
+        material: "u32" = "The `[[materials]]` id of the block's sprite (0 when none matches).",
+        light: "vec2<f32>" = "Block and sky light, 0..1.",
+        tint: "vec4<f32>" = "The vertex colour (biome tint, face shade, ambient occlusion); alpha 1.",
+        face: "u32" = "For a fluid, the face of the block the corner is on (as `MaterialInput.face`), else 0.",
+        fluid: "u32" = "1 on a fluid's surface (water or lava), else 0.",
+    },
+};
+
 /// The weather stage's input: one point of a rain or snow streak.
 pub const WEATHER_INPUT: Struct = Struct {
     name: "WeatherInput",
@@ -324,7 +363,6 @@ pub const WEATHER_INPUT: Struct = Struct {
     },
 };
 
-
 /// The tonemap stage's input (0.2): one pixel of the window.
 pub const TONEMAP_INPUT: Struct = Struct {
     name: "TonemapInput",
@@ -336,13 +374,6 @@ pub const TONEMAP_INPUT: Struct = Struct {
     },
 };
 
-impl Frame {
-    pub const FIELDS_0_1: usize = 49;
-    pub fn line(_api: crate::Api) -> Struct {
-        Self::WGSL
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,9 +381,18 @@ mod tests {
     #[test]
     fn frame_fields_carry_their_docs() {
         let wgsl = Frame::WGSL;
-        assert_eq!(wgsl.fields.len(), 49);
+        assert_eq!(wgsl.fields.len(), 54);
         assert!(wgsl.fields.iter().all(|f| !f.doc.trim().is_empty()));
-        assert_eq!(std::mem::size_of::<Frame>(), 6 * 64 + 15 * 16 + 8 * 16);
+        // 0.1's 49 fields, then 0.2's five and the padding to a multiple of 16.
+        assert_eq!(
+            std::mem::size_of::<Frame>(),
+            6 * 64 + 15 * 16 + 8 * 16 + 2 * 16
+        );
+        assert_eq!(Frame::OFFSETS[Frame::FIELDS_0_1], 6 * 64 + 15 * 16 + 8 * 16);
+        assert_eq!(
+            Frame::line(crate::Api::V0_1).fields.len(),
+            Frame::FIELDS_0_1
+        );
         assert!(
             wgsl.wgsl()
                 .contains("    camera_position: vec3<f32>,\n    time: f32,\n")

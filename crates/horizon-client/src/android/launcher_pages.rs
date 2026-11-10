@@ -254,6 +254,10 @@ pub(super) enum Action {
     CancelCatalogDownload,
     Search,
     ShaderSource(crate::shader_catalog::Origin),
+    ModSource(crate::shader_catalog::Origin),
+    SetCompilerMode(crate::catalog::CompilerMode),
+    CompilerRunQuery,
+    CompilerPortLocal(usize),
     Field(&'static str),
     FinishNameEdit,
     Install(usize),
@@ -784,6 +788,7 @@ fn page_icon(page: Page) -> Icon {
         Page::Mods => Icon::Mods,
         Page::Packs => Icon::Packs,
         Page::Shaders => Icon::Shaders,
+        Page::Compiler => Icon::Terminal,
         Page::Installed => Icon::Installed,
         Page::Settings => Icon::Settings,
         Page::Skins => Icon::Skins,
@@ -1850,6 +1855,24 @@ impl Launcher {
                     );
                     self.targets.push((rect, Action::ShaderSource(origin)));
                 }
+            } else if page == Page::Mods {
+                use crate::shader_catalog::Origin;
+                let seg_w = 104.0;
+                let group_x = content_x + content_w - seg_w * 2.0 - 3.0;
+                for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
+                    let rx = group_x + i as f32 * (seg_w + 3.0);
+                    let rect = [rx, header_y - 2.0, seg_w, 30.0];
+                    let active = self.catalog.config.mod_source == origin;
+                    ui.m3_connected_segment(
+                        rect,
+                        i,
+                        2,
+                        origin.source().label(),
+                        active,
+                        Some(Icon::Mods),
+                    );
+                    self.targets.push((rect, Action::ModSource(origin)));
+                }
             }
 
             // Search bar + Search button + Open folder / Import file pills
@@ -1926,7 +1949,9 @@ impl Launcher {
                 );
             }
 
-            let bundled: Vec<_> = if page == Page::Mods {
+            let bundled: Vec<_> = if page == Page::Mods
+                && self.catalog.config.mod_source == crate::shader_catalog::Origin::Horizon
+            {
                 let query = self.catalog.query.trim().to_lowercase();
                 horizon_client::mod_list::ANDROID_BUNDLED
                     .into_iter()
@@ -1952,7 +1977,8 @@ impl Launcher {
                             .any(|(id, _, _)| *id == p.id))
                 })
                 .collect();
-            let is_horizon_paged = page == Page::Mods
+            let is_horizon_paged = (page == Page::Mods
+                && self.catalog.config.mod_source == crate::shader_catalog::Origin::Horizon)
                 || (page == Page::Shaders
                     && self.catalog.config.shader_source == crate::shader_catalog::Origin::Horizon);
             let total_horizon_items = bundled.len() + catalog_rows.len();
@@ -2280,6 +2306,8 @@ impl Launcher {
                 my3_muted(),
                 &fitted_page_info,
             );
+        } else if page == Page::Compiler {
+            self.draw_compiler_page(&mut ui, content_x, content_w, h, compact, slide_y);
         } else if page == Page::Installed {
             self.draw_installed(&mut ui, content_x, content_w, h, compact, slide_y);
         } else {
@@ -2602,6 +2630,236 @@ impl Launcher {
     /// View 1: `InstalledSubTab::Library` (Search, Category Filter Pills, Sort, Rich M3 Cards)
     /// View 2: `InstalledSubTab::FileManager` (Real filesystem manager with Back/Forward history,
     /// Breadcrumbs, Multi-select, Copy/Cut/Paste, Import, Export, Rename, New Folder, Delete, Details)
+    /// Material 3 Expressive `horizon-port-pack` Native Porting & Compiler Workbench (`Page::Compiler`).
+    fn draw_compiler_page(
+        &mut self,
+        ui: &mut Ui,
+        content_x: f32,
+        content_w: f32,
+        h: f32,
+        compact: bool,
+        slide_y: f32,
+    ) {
+        use crate::catalog::CompilerMode;
+        use horizon_client::content_files::Kind;
+
+        let header_y = 60.0 + slide_y;
+        ui.text(
+            Face::SemiBold,
+            18.5,
+            content_x,
+            header_y + 2.0,
+            my3_text(),
+            if compact {
+                "Port Pack Compiler"
+            } else {
+                "horizon-port-pack & Native Compiler"
+            },
+        );
+
+        // Top-right 3-segment Material 2026 Connected Button Group for CompilerMode
+        let seg_w = if compact { 92.0 } else { 118.0 };
+        let group_x = content_x + content_w - seg_w * 3.0 - 6.0;
+        for (i, mode) in CompilerMode::ALL.into_iter().enumerate() {
+            let rx = group_x + i as f32 * (seg_w + 3.0);
+            let rect = [rx, header_y - 1.0, seg_w, 30.0];
+            let active = self.catalog.compiler_mode == mode;
+            ui.m3_connected_segment(
+                rect,
+                i,
+                3,
+                mode.label(),
+                active,
+                Some(Icon::Terminal),
+            );
+            self.targets.push((rect, Action::SetCompilerMode(mode)));
+        }
+
+        // Row 1: Modrinth Slug / URL / File Path Input + "Port / Compile" CTA + "+ Pick .jar / .mrpack"
+        let row1_y = 96.0 + slide_y;
+        let pick_w = if compact { 88.0 } else { 108.0 };
+        let run_w = if compact { 96.0 } else { 118.0 };
+        let field_w = (content_w - pick_w - run_w - 14.0).max(100.0);
+        let hint = match self.catalog.compiler_mode {
+            CompilerMode::JarMod => "Modrinth mod slug/URL (e.g. appleskin) or .jar path...",
+            CompilerMode::Modpack => "Modrinth modpack slug/URL or local .mrpack path...",
+            CompilerMode::DataPackUpgrade => "Enter 1.21 / 26.2 data pack path to upgrade to 26.3...",
+        };
+        let query_r = ui.text_field(
+            content_x,
+            row1_y,
+            field_w,
+            34.0,
+            "",
+            &self.catalog.compiler_query,
+            hint,
+            self.catalog.editing == Some("compiler_query"),
+        );
+        self.targets.push((query_r, Action::Field("compiler_query")));
+
+        button(
+            ui,
+            &mut self.targets,
+            [content_x + field_w + 7.0, row1_y, run_w, 34.0],
+            "Port & Compile",
+            Action::CompilerRunQuery,
+            true,
+        );
+        button(
+            ui,
+            &mut self.targets,
+            [content_x + field_w + run_w + 14.0, row1_y, pick_w, 34.0],
+            "+ Pick .jar",
+            Action::Import(Kind::Mods),
+            false,
+        );
+
+        // Row 2: Live `horizon-port-pack` Diagnostic & Coverage Card
+        let diag_y = 136.0 + slide_y;
+        let diag_h = 96.0;
+        ui.rounded(content_x, diag_y, content_w, diag_h, 12.0, my3_surface());
+        ui.border(content_x, diag_y, content_w, diag_h, 12.0, my3_accent());
+
+        if let Some(ref res) = self.catalog.last_port_result {
+            let verdict_str = format!("{} • {}", res.loader.to_uppercase(), res.verdict.label());
+            let vw = (ui.measure(Face::SemiBold, 10.5, &verdict_str) + 18.0).clamp(72.0, 168.0);
+            let vx = content_x + content_w - vw - 12.0;
+            ui.rounded(vx, diag_y + 10.0, vw, 22.0, 6.0, my3_accent_soft());
+            ui.border(vx, diag_y + 10.0, vw, 22.0, 6.0, my3_accent());
+            ui.centered_fit(
+                Face::SemiBold,
+                10.0,
+                [vx + 4.0, diag_y + 10.0, vw - 8.0, 22.0],
+                my3_accent(),
+                &verdict_str,
+            );
+
+            let hdr = format!("{} ({} v{})", res.name, res.mod_id, res.version);
+            let fit_hdr = ui.fit_text(Face::SemiBold, 14.5, &hdr, (content_w - vw - 36.0).max(80.0));
+            ui.text(Face::SemiBold, 14.5, content_x + 14.0, diag_y + 8.0, my3_text(), &fit_hdr);
+
+            let fit_sum = ui.fit_text(Face::Regular, 11.5, &res.summary, content_w - 28.0);
+            ui.text(Face::Regular, 11.5, content_x + 14.0, diag_y + 30.0, my3_muted(), &fit_sum);
+
+            // 4 Metric Chips (Blocks, Items, 26.3 Recipes, Hooks/Classes)
+            let metrics = [
+                format!("Blocks: {}", res.blocks_ported),
+                format!("Items: {}", res.items_ported),
+                format!("26.3 Recipes: {}", res.recipes_upgraded),
+                format!(
+                    "Hooks: {} • Classes: {}",
+                    res.mapped_hooks.len(),
+                    res.classes_scanned
+                ),
+            ];
+            let chip_gap = 6.0;
+            let chip_w = ((content_w - 28.0 - chip_gap * 3.0) / 4.0).max(54.0);
+            let chip_y = diag_y + 52.0;
+            for (idx, m_lbl) in metrics.iter().enumerate() {
+                let cx = content_x + 14.0 + idx as f32 * (chip_w + chip_gap);
+                ui.rounded(cx, chip_y, chip_w, 20.0, 6.0, my3_card_bg());
+                ui.border(cx, chip_y, chip_w, 20.0, 6.0, my3_card_border());
+                ui.centered_fit(
+                    Face::Medium,
+                    10.0,
+                    [cx + 3.0, chip_y, chip_w - 6.0, 20.0],
+                    my3_accent(),
+                    m_lbl,
+                );
+            }
+
+            let log_line = self
+                .catalog
+                .compiler_logs
+                .last()
+                .map(String::as_str)
+                .unwrap_or("Carried over into horizon-mods/ & horizon-native-mods/");
+            let fit_log = ui.fit_text(Face::Mono, 10.2, log_line, content_w - 28.0);
+            ui.text(Face::Mono, 10.2, content_x + 14.0, diag_y + 76.0, my3_text(), &fit_log);
+        } else {
+            ui.rounded(content_x + 14.0, diag_y + 12.0, 38.0, 38.0, 10.0, my3_accent_soft());
+            ui.icon(Icon::Terminal, content_x + 23.0, diag_y + 21.0, 20.0, my3_accent());
+            ui.text(
+                Face::SemiBold,
+                14.5,
+                content_x + 62.0,
+                diag_y + 10.0,
+                my3_text(),
+                "Native horizon-port-pack Pipeline (In-Process Android)",
+            );
+            let sub = "Carries over 1.21+ blocks, items, fluids, 26.3 recipes, loot tables & worldgen + synthesizes Hook API 415.";
+            let fit_sub = ui.fit_text(Face::Regular, 11.5, sub, content_w - 76.0);
+            ui.text(Face::Regular, 11.5, content_x + 62.0, diag_y + 31.0, my3_muted(), &fit_sub);
+
+            for (i, line) in self.catalog.compiler_logs.iter().take(2).enumerate() {
+                let fit_l = ui.fit_text(Face::Mono, 10.5, line, content_w - 28.0);
+                ui.text(
+                    Face::Mono,
+                    10.5,
+                    content_x + 14.0,
+                    diag_y + 54.0 + i as f32 * 18.0,
+                    my3_accent(),
+                    &fit_l,
+                );
+            }
+        }
+
+        // Row 3: Scrollable Local Profile Mods & Port Queue
+        let list_top = diag_y + diag_h + 8.0;
+        let list_bottom = h - 42.0;
+        let mod_items: Vec<(usize, crate::catalog::LocalItem)> = self
+            .catalog
+            .local
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter(|(_, item)| item.kind == Kind::Mods)
+            .collect();
+
+        let row_h = 58.0;
+        let total_h = mod_items.len() as f32 * row_h;
+        let max_scroll = (total_h - (list_bottom - list_top)).max(0.0);
+        self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+        self.list_view = Some([list_top, list_bottom, max_scroll]);
+
+        ui.set_clip(Some([
+            content_x - 2.0,
+            list_top,
+            content_w + 4.0,
+            (list_bottom - list_top).max(1.0),
+        ]));
+        for (row_idx, (orig_idx, item)) in mod_items.into_iter().enumerate() {
+            let y = list_top + row_idx as f32 * row_h - self.catalog.scroll;
+            let card_h = 52.0;
+            let port_btn_r = [content_x + content_w - 118.0, y + 9.0, 106.0, 34.0];
+            self.list_targets
+                .push((port_btn_r, Action::CompilerPortLocal(orig_idx)));
+            if y + card_h < list_top || y > list_bottom {
+                continue;
+            }
+            ui.rounded(content_x, y, content_w, card_h, 12.0, my3_card_bg());
+            ui.border(content_x, y, content_w, card_h, 12.0, my3_card_border());
+            ui.rounded(content_x + 10.0, y + 8.0, 36.0, 36.0, 9.0, my3_accent_soft());
+            ui.icon(Icon::Mods, content_x + 19.0, y + 17.0, 18.0, my3_accent());
+
+            let max_tw = (content_w - 190.0).max(70.0);
+            let fit_t = ui.fit_text(Face::SemiBold, 13.8, &item.title, max_tw);
+            ui.text(Face::SemiBold, 13.8, content_x + 56.0, y + 7.0, my3_text(), &fit_t);
+            let fit_s = ui.fit_text(Face::Regular, 11.0, &item.subtitle, max_tw);
+            ui.text(Face::Regular, 11.0, content_x + 56.0, y + 27.0, my3_muted(), &fit_s);
+
+            button(
+                ui,
+                &mut self.targets,
+                port_btn_r,
+                "Port / Inspect",
+                Action::CompilerPortLocal(orig_idx),
+                true,
+            );
+        }
+        ui.set_clip(None);
+    }
+
     fn draw_installed(
         &mut self,
         ui: &mut Ui,
@@ -6908,6 +7166,24 @@ impl Launcher {
                 self.catalog.scroll = 0.0;
                 self.catalog.browse(&self.home);
             }
+            Some(Action::ModSource(origin)) => {
+                self.catalog.config.mod_source = origin;
+                self.catalog.config.save(&self.home)?;
+                self.catalog.offset = 0;
+                self.catalog.scroll = 0.0;
+                self.catalog.browse(&self.home);
+            }
+            Some(Action::SetCompilerMode(mode)) => {
+                self.catalog.compiler_mode = mode;
+                self.anim.trigger_page_transition();
+            }
+            Some(Action::CompilerRunQuery) => {
+                crate::platform::hide();
+                self.catalog.run_compiler_from_query(&self.home);
+            }
+            Some(Action::CompilerPortLocal(idx)) => {
+                self.catalog.run_compiler_on_local(&self.home, idx);
+            }
             Some(Action::OpenFolder(kind)) => {
                 crate::platform::hide();
                 let rel_dir = match kind {
@@ -7182,6 +7458,7 @@ impl Launcher {
                     "theme_grad_mid" => &self.catalog.config.theme.gradient_mid_hex,
                     "theme_grad_end" => &self.catalog.config.theme.gradient_end_hex,
                     "installed_search" => &self.catalog.installed_query,
+                    "compiler_query" => &self.catalog.compiler_query,
                     "fm_rename" | "fm_new_folder" => &self.catalog.fm_input_text,
                     _ => &self.catalog.query,
                 };
@@ -7189,7 +7466,9 @@ impl Launcher {
             }
             Some(Action::Install(i)) => self.catalog.install(&self.home, i),
             Some(Action::Next) => {
-                let is_horizon_paged = self.catalog.page == Page::Mods
+                let is_horizon_paged = (self.catalog.page == Page::Mods
+                    && self.catalog.config.mod_source
+                        == crate::shader_catalog::Origin::Horizon)
                     || (self.catalog.page == Page::Shaders
                         && self.catalog.config.shader_source
                             == crate::shader_catalog::Origin::Horizon);
@@ -7234,7 +7513,9 @@ impl Launcher {
                 if self.catalog.offset >= crate::catalog::CATALOG_PAGE_SIZE {
                     self.catalog.offset -= crate::catalog::CATALOG_PAGE_SIZE;
                     self.catalog.scroll = 0.0;
-                    let is_horizon_paged = self.catalog.page == Page::Mods
+                    let is_horizon_paged = (self.catalog.page == Page::Mods
+                        && self.catalog.config.mod_source
+                            == crate::shader_catalog::Origin::Horizon)
                         || (self.catalog.page == Page::Shaders
                             && self.catalog.config.shader_source
                                 == crate::shader_catalog::Origin::Horizon);

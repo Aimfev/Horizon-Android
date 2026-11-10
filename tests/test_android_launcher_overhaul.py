@@ -1107,15 +1107,15 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("game.inventory.get(game.selected).and_then(Option::as_ref).cloned()", bundled_rs)
 
         catalog_rs = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
-        self.assertNotIn("Page::Compiler", catalog_rs)
+        self.assertIn("Page::Compiler", catalog_rs)
         self.assertIn("pub const CATALOG_PAGE_SIZE: usize = 10;", catalog_rs)
         self.assertIn("pub max_fps_unlocked_v2: bool,", catalog_rs)
         self.assertIn("settings.horizon.battery = self.battery_perf_mode;", catalog_rs)
-        self.assertIn("if !self.page.is_catalog() {", catalog_rs)
+        self.assertIn("if !self.page.is_catalog() && self.page != Page::Compiler {", catalog_rs)
 
         lp_rs = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
-        self.assertNotIn("draw_compiler_page", lp_rs)
-        self.assertNotIn("Action::ModSource", lp_rs)
+        self.assertIn("draw_compiler_page", lp_rs)
+        self.assertIn("Action::ModSource", lp_rs)
         self.assertIn("if page == Page::Shaders {", lp_rs)
         self.assertIn("Page {page_num} of {total_pages}", lp_rs)
 
@@ -1270,7 +1270,7 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("pub struct NativeFluidStack", mod_api_rs)
         self.assertIn("pub enum WorldHold", mod_api_rs)
         self.assertIn("pub struct WorldWarp", mod_api_rs)
-        self.assertTrue("pub const NATIVE_HOOKS_API: u32 = 415;" in nh_rs or "pub(crate) const NATIVE_HOOKS_API: u32 = 415;" in nh_rs)
+        self.assertIn("pub(crate) const NATIVE_HOOKS_API: u32 = 415;", nh_rs)
         self.assertIn("pub const HORIZON_CATALOG_MODS: [(&str, &str, &str, u64); 24]", jt_rs)
         self.assertIn("pub const HORIZON_LIBRARY_MODS: [(&str, &str, &str, u64); 36]", jt_rs)
         self.assertIn("pub fn all_horizon_catalog_mods()", jt_rs)
@@ -1301,6 +1301,48 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("browser::images::load_cached_rgba_by_id(", catalog_rs)
         self.assertIn("browser::images::fetch_rgba_fast(", catalog_rs)
         self.assertIn("browser::modrinth::icons(&modrinth_missing)", catalog_rs)
+
+
+
+    def test_horizon_port_pack_native_android_modrinth_jar_and_compiler_tab(self) -> None:
+        # 1. Verify horizon-port-pack native Android execution module
+        pp_lib = _read_repo_file("crates/horizon-port-pack/src/lib.rs")
+        self.assertIn("pub mod android_port;", pp_lib)
+        android_port = _read_repo_file("crates/horizon-port-pack/src/android_port.rs")
+        self.assertIn("pub struct AndroidPortResult", android_port)
+        self.assertIn("pub fn port_jar_natively(", android_port)
+        self.assertIn("pub fn port_modpack_natively(", android_port)
+        self.assertIn("pub fn upgrade_datapack_natively(", android_port)
+        self.assertIn("pub fn package_carry_dir_to_hmod(", android_port)
+        self.assertIn("check::check(jar_path, &port_work_dir)", android_port)
+        self.assertIn("events::report(jar_path, events::CATALOG)", android_port)
+
+        # 2. Verify jar_transpiler.rs runs horizon_port_pack::android_port::port_jar_natively
+        jt_rs = _read_repo_file("crates/horizon-client/src/jar_transpiler.rs")
+        self.assertIn("pub port_pack: Option<horizon_port_pack::android_port::AndroidPortResult>,", jt_rs)
+        self.assertIn("pub fn transpile_jar_to_horizon_mods_with_progress(", jt_rs)
+        self.assertIn("horizon_port_pack::android_port::port_jar_natively(", jt_rs)
+
+        # 3. Verify Modrinth source restoration & automatic .jar / .mrpack detection + porting
+        cat_rs = _read_repo_file("crates/horizon-client/src/android/catalog.rs")
+        self.assertNotIn("config.mod_source = crate::shader_catalog::Origin::Horizon;", cat_rs)
+        self.assertIn("Page::Mods => self.config.mod_source.source(),", cat_rs)
+        self.assertIn("} else if page == Page::Mods && source == browser::SourceId::Modrinth {", cat_rs)
+        self.assertIn("pub fn install_modrinth_jar_with_port_pack(", cat_rs)
+        self.assertIn('if lower_fname.ends_with(".mrpack") || project.kind == Kind::Modpack {', cat_rs)
+        self.assertIn("horizon_port_pack::android_port::port_modpack_natively(&downloaded, home, progress)", cat_rs)
+
+        # 4. Verify Compiler Tab (Page::Compiler, CompilerMode, draw_compiler_page, run_compiler_from_query)
+        self.assertIn("pub enum CompilerMode", cat_rs)
+        self.assertIn("Page::Compiler => \"Compiler\"", cat_rs)
+        self.assertIn("pub fn run_compiler_from_query(&mut self, home: &Path)", cat_rs)
+        self.assertIn("pub fn run_compiler_on_local(&mut self, home: &Path, index: usize)", cat_rs)
+        lp_rs = _read_repo_file("crates/horizon-client/src/android/launcher_pages.rs")
+        self.assertIn("Action::ModSource(origin)", lp_rs)
+        self.assertIn("Action::SetCompilerMode(mode)", lp_rs)
+        self.assertIn("Action::CompilerRunQuery", lp_rs)
+        self.assertIn("Action::CompilerPortLocal(orig_idx)", lp_rs)
+        self.assertIn("fn draw_compiler_page(", lp_rs)
 
 
 if __name__ == "__main__":

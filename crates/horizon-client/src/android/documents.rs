@@ -861,6 +861,23 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 let mut on = horizon_client::mod_list::ModList::load(profile_root);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id.clone());
+                if ext == "mrpack" {
+                    if let Ok((pack, rows, count)) = horizon_port_pack::android_port::port_modpack_natively(
+                        &dest,
+                        profile_root,
+                        &|stage_msg, p| set_progress("Porting .mrpack Modpack...", stage_msg, Some(p)),
+                    ) {
+                        imported(
+                            format!(
+                                "horizon-port-pack: Ported '{}' ({count} mods carried over from {} files)!",
+                                pack.name,
+                                rows.len()
+                            ),
+                            Kind::Mods,
+                        );
+                        return Ok(());
+                    }
+                }
                 if ext == "hpack" {
                     if let Ok(count) = horizon_client::jar_transpiler::install_hpack_modpack(&dest, profile_root) {
                         imported(
@@ -1043,7 +1060,19 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 let mut on = horizon_client::mod_list::ModList::load(&request.home);
                 on.disabled.remove(&mod_id);
                 on.enabled.insert(mod_id);
-                if ext == "hpack"
+                if ext == "mrpack"
+                    && let Ok((pack, rows, count)) = horizon_port_pack::android_port::port_modpack_natively(
+                        &target,
+                        &request.home,
+                        &|stage_msg, p| set_progress("Porting .mrpack Modpack...", stage_msg, Some(p)),
+                    )
+                {
+                    transpiled_msg = Some(format!(
+                        "horizon-port-pack: Ported '{}' ({count} mods carried over from {} files) — ready in game!",
+                        pack.name,
+                        rows.len()
+                    ));
+                } else if ext == "hpack"
                     && let Ok(count) = horizon_client::jar_transpiler::install_hpack_modpack(&target, &request.home)
                 {
                     transpiled_msg = Some(format!(

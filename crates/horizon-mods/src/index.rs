@@ -674,7 +674,7 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
             let m = pack.manifest;
             // Players get only what the game draws without a switch, and a line that may
             // still change in any release would break the packs listed for it.
-            if m.api != horizon_shader_api::Api::V0_1.as_str() {
+            if m.api != horizon_shader_api::Api::V0_1 {
                 return Err(format!(
                     "it is written for shader API {}, which is experimental: the registry takes \
                      such packs once the game draws them without a switch",
