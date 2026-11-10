@@ -47,6 +47,7 @@ pub fn markdown() -> String {
             StageKind::Vertex => "[vertex]",
             StageKind::Material => "[material]",
             StageKind::Weather => "[weather]",
+            StageKind::Tonemap => "[tonemap]",
         };
         out += &format!("| {} | `{key}` | `{}` |\n", kind.name(), kind.signature());
     }
