@@ -133,17 +133,6 @@ pub fn socks(spec: &str) -> bool {
     )
 }
 
-/// Whether `spec` names a SOCKS proxy, which these downloads don't go through: `ureq` reads a
-/// SOCKS address happily and only fails when it connects through it.
-pub fn socks(spec: &str) -> bool {
-    matches!(
-        spec.split_once("://")
-            .map(|(s, _)| s.to_ascii_lowercase())
-            .as_deref(),
-        Some("socks" | "socks4" | "socks4a" | "socks5" | "socks5h")
-    )
-}
-
 /// Whether `url` is reached without the proxy: a local address, or a host `NO_PROXY` names. The
 /// launcher asks this of its own requests, so both reach the same hosts directly.
 pub fn direct(url: &str) -> bool {
