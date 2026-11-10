@@ -1720,7 +1720,13 @@ pub(super) fn native_tick(game: &mut Game<'_>) {
                             p.y + 1.5,
                             p.z + yaw_rad.cos() as f64 * 0.35,
                         ];
-                        let _ = game.native_spawn_particle("minecraft:item", at, [0.0, 0.04, 0.0]);
+                        game.particles.add(
+                            &horizon_client::particles::ParticleOptions::simple(
+                                horizon_client::particles::ParticleType::BlockCrumble,
+                            ),
+                            at,
+                            [0.0, 0.02, 0.0],
+                        );
                     }
                 }
             }
@@ -1786,9 +1792,9 @@ pub(super) fn native_camera_shake(game: &Game<'_>, partial: f32, shake: &mut Nat
     }) {
         let pct = setting_u32(game, &mb_mod.id, "intensity", 50);
         let mult = (pct as f32 / 100.0).clamp(0.1, 1.0);
-        if let Some(p) = game.player.as_ref() {
-            let dyaw = p.yaw - p.prev_yaw;
-            let dpitch = p.pitch - p.prev_pitch;
+        if game.player.is_some() {
+            let dyaw = game.yaw - game.rope_rot_old.0;
+            let dpitch = game.pitch - game.rope_rot_old.1;
             shake.yaw += dyaw * 0.08 * mult;
             shake.pitch += dpitch * 0.08 * mult;
             shake.roll += (dyaw * 0.04 * mult).clamp(-0.5, 0.5);
