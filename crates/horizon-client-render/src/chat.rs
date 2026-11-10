@@ -1262,10 +1262,28 @@ impl ChatScreen {
             }
         } else if !command.chars().all(char::is_whitespace) {
             let partial = &command[..cursor_b];
-            let mut builder = SuggestionsBuilder::new(partial, last_word_index(partial));
+            let last_idx = last_word_index(partial);
+            let word = &partial[last_idx..];
+            let mut builder = SuggestionsBuilder::new(partial, last_idx);
             // ClientSuggestionProvider.getCustomTabSuggestions: the players
-            // and the server's custom chat completions.
-            builder.suggest_matching(c.registries.custom_tab_suggestions());
+            // and the server's custom chat completions, plus @user mentions.
+            if word.starts_with('@') {
+                let name_prefix = &word[1..];
+                for player in c.registries.custom_tab_suggestions() {
+                    if name_prefix.is_empty()
+                        || player.to_lowercase().starts_with(&name_prefix.to_lowercase())
+                    {
+                        builder.suggest(format!("@{player}"));
+                    }
+                }
+                for sel in ["@p", "@a", "@e", "@r", "@s"] {
+                    if sel.starts_with(word) {
+                        builder.suggest((*sel).to_owned());
+                    }
+                }
+            } else {
+                builder.suggest_matching(c.registries.custom_tab_suggestions());
+            }
             let (range, list) = merge_suggestions(partial, builder.out);
             self.awaiting = None;
             self.pending = Some((range.0, list));

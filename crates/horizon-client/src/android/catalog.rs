@@ -135,7 +135,7 @@ impl Default for Config {
             cache_budget_mib: 0,
             device: crate::device_preferences::Settings::default(),
             shader_source: crate::shader_catalog::Origin::default(),
-            mod_source: crate::shader_catalog::Origin::default(),
+            mod_source: crate::shader_catalog::Origin::Horizon,
             ui_scale_percent: 0,
             super_perf_mode: false,
             battery_perf_mode: false,
@@ -231,6 +231,7 @@ impl Config {
             let _ = config.save(home);
         }
         config.name = truncate_player_name(&config.name);
+        config.mod_source = crate::shader_catalog::Origin::Horizon;
         config.theme.sanitize();
         horizon_client::ui_theme::set_active_theme(config.theme.resolve());
         horizon_client::ui_theme::motion::set_reduced_motion(

@@ -1204,7 +1204,7 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("pub fn snap_button_to_neighbors_and_grid(", touch_ui)
         self.assertIn("(Some(Icon::Crosshair), grid_lbl, 74.0, true, tc.settings.snap_to_grid)", touch_ui)
         self.assertIn('"Snap to Grid & Neighbor Buttons: ON"', touch_ui)
-        self.assertIn("let ew = (ww - 24.0 - 20.0) / 3.0;", touch_ui)
+        self.assertIn("let ew = (ww - 24.0 - 30.0) / 4.0;", touch_ui)
         self.assertIn("let bw = (ww - 24.0 - 30.0) / 4.0;", touch_ui)
 
         # 4. New Bricolage Grotesque font, toned-down Material 3 radii, animated background & M3 downloading screen

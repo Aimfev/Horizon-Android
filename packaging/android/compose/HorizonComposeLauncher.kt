@@ -411,7 +411,7 @@ private fun HorizonPlayDashboard(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "CHANGELOG — MINECRAFT 26.3 • HORIZON ANDROID v1.0.0",
+                            text = "CHANGELOG — MINECRAFT 26.3 • HORIZON ANDROID v1.0.1",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                         )

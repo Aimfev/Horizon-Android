@@ -6221,8 +6221,8 @@ pub fn draw_hud_editor(
                             );
                         }
                     } else {
-                        let ew = (ww - 24.0 - 20.0) / 3.0;
-                        for slot in 0..3 {
+                        let ew = (ww - 24.0 - 30.0) / 4.0;
+                        for slot in 0..4 {
                             let ex = wx + 12.0 + slot as f32 * (ew + 10.0);
                             let tok_name = if let Some(idx) = ed.selected_custom {
                                 tc.settings
@@ -8205,8 +8205,8 @@ pub fn touch_hud_editor(
                             return false;
                         }
                     } else {
-                        let ew = (ww - 24.0 - 20.0) / 3.0;
-                        for slot in 0..3 {
+                        let ew = (ww - 24.0 - 30.0) / 4.0;
+                        for slot in 0..4 {
                             let ex = wx + 12.0 + slot as f32 * (ew + 10.0);
                             if inside([ex, body_y, ew, 42.0]) {
                                 if ed.selected_custom.is_none() {

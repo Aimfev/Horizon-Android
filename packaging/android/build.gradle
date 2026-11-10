@@ -16,7 +16,7 @@ android {
         minSdk providers.gradleProperty('minSdk').getOrElse('28').toInteger()
         targetSdk 35
         versionCode providers.gradleProperty('devVersionCode').getOrElse('30').toInteger()
-        versionName '1.0.0' + (providers.gradleProperty('devVersionCode').isPresent() ? '-dev.' + providers.gradleProperty('devBuild').get() : '')
+        versionName '1.0.1' + (providers.gradleProperty('devVersionCode').isPresent() ? '-dev.' + providers.gradleProperty('devBuild').get() : '')
         ndk { abiFilters providers.gradleProperty('abi').get() }
     }
     signingConfigs {

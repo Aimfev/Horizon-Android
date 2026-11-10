@@ -1227,6 +1227,24 @@ pub(super) fn native_settings(game: &mut Game<'_>, mod_id: &str, buttons: &mut V
         return;
     }
 
+    if m.features.contains("eating_animation") {
+        let enabled = setting_bool(game, mod_id, "enabled", true);
+        let particles = setting_bool(game, mod_id, "particles", true);
+        let dynamic_bites = setting_bool(game, mod_id, "dynamic_bites", true);
+        buttons.push(format!("Eating & Food Animations: {}", on_off(enabled)));
+        buttons.push(format!("Food Crumbs & Particles: {}", on_off(particles)));
+        buttons.push(format!("Dynamic Bite Chunks: {}", on_off(dynamic_bites)));
+        return;
+    }
+
+    if m.features.contains("motion_blur") {
+        let enabled = setting_bool(game, mod_id, "enabled", true);
+        let pct = setting_u32(game, mod_id, "intensity", 50);
+        buttons.push(format!("Motion Blur: {}", on_off(enabled)));
+        buttons.push(format!("Blur Intensity: {pct}%"));
+        return;
+    }
+
     if !m.custom_buttons.is_empty() {
         for (idx, lbl) in m.custom_buttons.iter().enumerate() {
             let key = format!("opt_{idx}");
@@ -1517,6 +1535,35 @@ pub(super) fn native_settings_click(game: &mut Game<'_>, mod_id: &str, button: u
         return;
     }
 
+    if features.contains("eating_animation") {
+        match button {
+            0 => {
+                toggle_setting_bool(game, mod_id, "enabled", true);
+            }
+            1 => {
+                toggle_setting_bool(game, mod_id, "particles", true);
+            }
+            2 => {
+                toggle_setting_bool(game, mod_id, "dynamic_bites", true);
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    if features.contains("motion_blur") {
+        match button {
+            0 => {
+                toggle_setting_bool(game, mod_id, "enabled", true);
+            }
+            1 => {
+                cycle_u32(game, mod_id, "intensity", &[25, 50, 75, 100], 50);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     if !custom_buttons.is_empty() {
         let key = format!("opt_{button}");
         toggle_setting_bool(game, mod_id, &key, true);
@@ -1658,6 +1705,27 @@ pub(super) fn native_tick(game: &mut Game<'_>) {
             }
         }
 
+        let has_eat_anim = guard.mods.values().any(|m| {
+            game.native_on(&m.id)
+                && (m.features.contains("eating_animation") || m.features.contains("eatinganimation"))
+                && setting_bool(game, &m.id, "enabled", true)
+        });
+        if has_eat_anim && game.using.is_some() {
+            if let Some(held) = game.mod_held_item_id() {
+                if estimate_food_values(&held).is_some() && game.ticks % 4 == 0 {
+                    if let Some(p) = game.native_player() {
+                        let yaw_rad = p.yaw.to_radians();
+                        let at = [
+                            p.x - yaw_rad.sin() as f64 * 0.35,
+                            p.y + 1.5,
+                            p.z + yaw_rad.cos() as f64 * 0.35,
+                        ];
+                        let _ = game.native_spawn_particle("minecraft:item", at, [0.0, 0.04, 0.0]);
+                    }
+                }
+            }
+        }
+
         let has_thunder_mod = guard.mods.values().any(|m| {
             game.native_on(&m.id)
                 && m.features.contains("immersive_thunder")
@@ -1709,6 +1777,24 @@ pub(super) fn native_camera_shake(game: &Game<'_>, partial: f32, shake: &mut Nat
     let Ok(guard) = runtime().lock() else {
         return;
     };
+
+    // Motion blur / Camera smoothing simulation
+    if let Some(mb_mod) = guard.mods.values().find(|m| {
+        game.native_on(&m.id)
+            && m.features.contains("motion_blur")
+            && setting_bool(game, &m.id, "enabled", true)
+    }) {
+        let pct = setting_u32(game, &mb_mod.id, "intensity", 50);
+        let mult = (pct as f32 / 100.0).clamp(0.1, 1.0);
+        if let Some(p) = game.player.as_ref() {
+            let dyaw = p.yaw - p.prev_yaw;
+            let dpitch = p.pitch - p.prev_pitch;
+            shake.yaw += dyaw * 0.08 * mult;
+            shake.pitch += dpitch * 0.08 * mult;
+            shake.roll += (dyaw * 0.04 * mult).clamp(-0.5, 0.5);
+        }
+    }
+
     if guard.thunder_rumble_ticks == 0 {
         return;
     }

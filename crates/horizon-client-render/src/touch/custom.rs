@@ -10,6 +10,8 @@ pub struct CustomButton {
     #[serde(default)]
     pub third_key: String,
     #[serde(default)]
+    pub fourth_key: String,
+    #[serde(default)]
     pub custom_label: String,
     #[serde(default)]
     pub always_visible: bool,
@@ -21,6 +23,7 @@ impl CustomButton {
             key,
             second_key: String::new(),
             third_key: String::new(),
+            fourth_key: String::new(),
             custom_label: String::new(),
             always_visible: false,
             layouts: [Placement::new(
@@ -58,12 +61,14 @@ impl CustomButton {
         self.key = token;
         self.second_key.clear();
         self.third_key.clear();
+        self.fourth_key.clear();
     }
     pub fn event_slot(&self, slot: usize) -> &str {
         match slot {
             0 => &self.key,
             1 => &self.second_key,
-            _ => &self.third_key,
+            2 => &self.third_key,
+            _ => &self.fourth_key,
         }
     }
     pub fn set_event_slot(&mut self, slot: usize, token: String) {
@@ -85,7 +90,7 @@ impl CustomButton {
                     self.second_key = token;
                 }
             }
-            _ => {
+            2 => {
                 if (self.key.is_empty() || self.key == "key.keyboard.unknown")
                     && !token.is_empty()
                     && token != "key.keyboard.unknown"
@@ -93,6 +98,16 @@ impl CustomButton {
                     self.key = token;
                 } else {
                     self.third_key = token;
+                }
+            }
+            _ => {
+                if (self.key.is_empty() || self.key == "key.keyboard.unknown")
+                    && !token.is_empty()
+                    && token != "key.keyboard.unknown"
+                {
+                    self.key = token;
+                } else {
+                    self.fourth_key = token;
                 }
             }
         }
@@ -142,16 +157,14 @@ impl CustomButton {
     }
     pub fn active_tokens(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for t in [&self.key, &self.second_key, &self.third_key] {
+        for t in [&self.key, &self.second_key, &self.third_key, &self.fourth_key] {
             if !t.is_empty()
                 && t != "key.keyboard.unknown"
                 && Self::valid_token(t)
-                && !out.contains(t)
             {
                 out.push(t.clone());
             }
         }
-        out.sort_by_key(|t| Self::token_dispatch_priority(t));
         out
     }
     pub fn label(&self) -> String {
@@ -352,6 +365,7 @@ impl TouchControls {
     }
     fn release_custom_finger_key(&mut self, id: u64) {
         self.passthrough_fingers.remove(&id);
+        self.custom_swipe_btn.remove(&id);
         let Some(tokens) = self.custom_fingers.remove(&id) else {
             return;
         };
@@ -414,15 +428,7 @@ impl TouchControls {
 
         let mut to_emit = Vec::with_capacity(active.len());
         for tok in &active {
-            let held_elsewhere = self
-                .custom_fingers
-                .iter()
-                .any(|(&fid, other)| fid != id && other.contains(tok))
-                || self.latched_custom.contains(tok);
-            let is_instant_slot = CustomButton::token_dispatch_priority(tok) == 0;
-            if !held_elsewhere || is_instant_slot {
-                to_emit.push((tok.clone(), true));
-            }
+            to_emit.push((tok.clone(), true));
         }
         self.custom_fingers.insert(id, active);
         self.custom_events.extend(to_emit);
@@ -552,19 +558,7 @@ impl TouchControls {
             .map(String::as_str)
     }
     pub fn custom_button_held(&self, index: usize) -> bool {
-        if self.custom_swipe_btn.values().any(|&idx| idx == index) {
-            return true;
-        }
-        let Some(btn) = self.settings.custom_buttons.get(index) else {
-            return false;
-        };
-        let active = btn.active_tokens();
-        !active.is_empty()
-            && active.iter().all(|tok| {
-                self.custom_fingers
-                    .values()
-                    .any(|held| held.contains(tok))
-            })
+        self.custom_swipe_btn.values().any(|&idx| idx == index)
     }
     pub fn custom_button_toggled(&self, index: usize) -> bool {
         let Some(btn) = self.settings.custom_buttons.get(index) else {

@@ -587,9 +587,23 @@ pub fn infer_features_from_id_and_signals(
     {
         features.insert("light_overlay".to_owned());
     }
-    if id_low == "eatinganimation" || combined.contains("eatinganimation") {
+    if id_low == "eatinganimation"
+        || id_low.contains("food")
+        || id_low.contains("eat")
+        || combined.contains("eatinganimation")
+        || combined.contains("foodanimation")
+        || combined.contains("notenoughanimations")
+    {
+        features.insert("eating_animation".to_owned());
         features.insert("eatinganimation".to_owned());
         features.insert("hud_overlay".to_owned());
+    }
+    if id_low.contains("motionblur")
+        || id_low.contains("motion_blur")
+        || combined.contains("motionblur")
+        || combined.contains("motion_blur")
+    {
+        features.insert("motion_blur".to_owned());
     }
     if combined.contains("thunder")
         || combined.contains("lightning")
