@@ -1323,22 +1323,22 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("pub fn transpile_jar_to_horizon_mods_with_progress(", jt_rs)
         self.assertIn("horizon_port_pack::android_port::port_jar_natively(", jt_rs)
 
-        # 3. Verify Modrinth source restoration & automatic .jar / .mrpack detection + porting
+        # 3. Verify Mod source restricted to Horizon, while Shaders retains Modrinth option
         cat_rs = _read_repo_file("crates/horizon-client/src/android/catalog.rs")
-        self.assertNotIn("config.mod_source = crate::shader_catalog::Origin::Horizon;", cat_rs)
-        self.assertIn("Page::Mods => self.config.mod_source.source(),", cat_rs)
-        self.assertIn("} else if page == Page::Mods && source == browser::SourceId::Modrinth {", cat_rs)
+        self.assertIn("Page::Mods => browser::SourceId::Horizon,", cat_rs)
+        self.assertIn("Page::Shaders => self.config.shader_source.source(),", cat_rs)
         self.assertIn("pub fn install_modrinth_jar_with_port_pack(", cat_rs)
         self.assertIn('if lower_fname.ends_with(".mrpack") || project.kind == Kind::Modpack {', cat_rs)
         self.assertIn("horizon_port_pack::android_port::port_modpack_natively(&downloaded, home, progress)", cat_rs)
 
-        # 4. Verify Compiler Tab (Page::Compiler, CompilerMode, draw_compiler_page, run_compiler_from_query)
+        # 4. Verify Compiler Tab removed from Page::ALL navigation, while backend types remain
         self.assertIn("pub enum CompilerMode", cat_rs)
         self.assertIn("Page::Compiler => \"Compiler\"", cat_rs)
+        self.assertIn("pub const ALL: [Self; 7] =", cat_rs)
         self.assertIn("pub fn run_compiler_from_query(&mut self, home: &Path)", cat_rs)
         self.assertIn("pub fn run_compiler_on_local(&mut self, home: &Path, index: usize)", cat_rs)
         lp_rs = _read_repo_file("crates/horizon-client/src/android/launcher_pages.rs")
-        self.assertIn("Action::ModSource(origin)", lp_rs)
+        self.assertIn("Action::ShaderSource(origin)", lp_rs)
         self.assertIn("Action::SetCompilerMode(mode)", lp_rs)
         self.assertIn("Action::CompilerRunQuery", lp_rs)
         self.assertIn("Action::CompilerPortLocal(orig_idx)", lp_rs)
@@ -1387,8 +1387,8 @@ class LauncherOverhaulTests(unittest.TestCase):
         # 3. Verify Jetpack Compose Material You Dashboard (Hero Split Button, 2-Column Bento Grid, Single Discord/GitHub, Stadium Nav Rail)
         lp_rs = _read_repo_file("crates/horizon-client/src/android/launcher_pages.rs")
         self.assertIn("ui.m3_tonal_card(content_x, card_y, content_w, hero_h, 18.0, true);", lp_rs)
-        self.assertIn('"Mod Loader & Compiler"', lp_rs)
-        self.assertIn('"Open Compiler"', lp_rs)
+        self.assertIn('"Horizon Mod Engine"', lp_rs)
+        self.assertIn('"Installed Mods"', lp_rs)
         self.assertIn('"Browse Mods"', lp_rs)
         self.assertIn('"Build Native .so"', lp_rs)
 
