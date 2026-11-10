@@ -8165,7 +8165,7 @@ fn custom_background_poll(home: &std::path::Path) {
 /// colours reduced to 12 bits so neighbouring cells merge into long runs).
 fn decode_custom_gif(
     path: &std::path::Path,
-) -> Result<horizon_client::ui_theme::CustomBackground, String> {
+) -> std::result::Result<horizon_client::ui_theme::CustomBackground, String> {
     use image::{AnimationDecoder, imageops};
     const COLS: u32 = 80;
     const ROWS: u32 = 45;
