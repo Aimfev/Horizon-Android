@@ -576,7 +576,6 @@ pub type NativeDispensed = (Option<ItemStack>, i32);
 
 /// What dropped the items heard by the `loot_drops` hook.
 #[derive(Clone, Copy, Debug)]
-#[non_exhaustive]
 pub struct NativeLootDrops<'a> {
     pub table: &'a str,
     pub dimension: &'a str,
@@ -591,7 +590,6 @@ pub struct NativeLootDrops<'a> {
 
 /// The open screen, for the screen hooks.
 #[derive(Clone, Copy, Debug)]
-#[non_exhaustive]
 pub struct NativeScreenView<'a> {
     pub id: &'static str,
     pub menu: Option<&'a str>,
@@ -724,7 +722,6 @@ impl NativeCommand {
 
 /// Which `Game` observes the phase; a mirror `Game` never fires.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum NativeAuthority {
     LocalAuthoritative,
     IntegratedServer,
@@ -734,7 +731,7 @@ pub enum NativeAuthority {
 
 /// One open attempt of one world; it rejects a previous open's commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct NativeWorldEpoch(u64);
+pub struct NativeWorldEpoch(pub u64);
 
 impl NativeWorldEpoch {
     #[doc(hidden)]
@@ -788,7 +785,7 @@ impl LevelRef {
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NativeTickId(u64);
+pub struct NativeTickId(pub u64);
 
 impl NativeTickId {
     #[doc(hidden)]
@@ -803,7 +800,6 @@ impl NativeTickId {
 /// The world phases (`native_world_lifecycle`'s `phase`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
-#[non_exhaustive]
 pub enum WorldPhase {
     WorldOpenReady,
     WorldOpenFailed,
@@ -813,7 +809,6 @@ pub enum WorldPhase {
 
 /// The tick phases carry whether the world runs, including frozen steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum ServerTickPhase {
     ServerTickStart { world_running: bool },
     ServerTickEnd { world_running: bool },
@@ -821,7 +816,6 @@ pub enum ServerTickPhase {
 
 /// Context for every world lifecycle phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct NativeLifecycleContext {
     pub authority: NativeAuthority,
     pub epoch: NativeWorldEpoch,

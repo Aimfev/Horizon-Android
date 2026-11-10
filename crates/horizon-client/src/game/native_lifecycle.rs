@@ -10,22 +10,10 @@ use super::{Game, execution_role::ExecutionRole};
 /// launch), so the counter is process-wide.
 static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
-/// Which `Game` observes the phase; a mirror `Game` never fires.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum NativeAuthority {
-    LocalAuthoritative,
-    IntegratedServer,
-    DedicatedServer,
-    RemoteClient,
-}
-
-/// One open attempt of one world; it rejects a previous open's commands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct NativeWorldEpoch(u64);
-
-/// Non-paused authoritative server ticks since open (not game or frame time).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct NativeTickId(u64);
+pub(super) use horizon_client::mod_api::{
+    NativeAuthority, NativeLifecycleContext, NativeTickId, NativeWorldEpoch, ServerTickPhase,
+    WorldPhase,
+};
 
 /// Internal state for deciding which events can fire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,39 +21,6 @@ enum OpenState {
     Opening,
     Ready,
     Closing,
-}
-
-/// The world phases (`native_world_lifecycle`'s `phase`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-/// The phase names are the hook log's stable vocabulary (the Debug text
-/// the mixins write); keep them despite the shared prefix.
-#[allow(clippy::enum_variant_names)]
-pub(super) enum WorldPhase {
-    WorldOpenReady,
-    /// The open failed; `error_text` is the engine's own error text.
-    WorldOpenFailed,
-    WorldCloseFinal,
-    /// The server loop or final save failed; `error_text` carries the error.
-    WorldCloseFailed,
-}
-
-/// The tick phases carry whether the world runs, including frozen steps.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ServerTickPhase {
-    ServerTickStart { world_running: bool },
-    ServerTickEnd { world_running: bool },
-}
-
-/// Context for every world lifecycle phase.
-/// `authority` is the server role. LocalAuthoritative and RemoteClient never
-/// fire today. `epoch` identifies the open attempt, including failed opens;
-/// the same epoch identifies its ready, final-close, or failed-close event.
-/// `tick` counts non-paused server ticks since the world opened.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct NativeLifecycleContext {
-    pub(super) authority: NativeAuthority,
-    pub(super) epoch: NativeWorldEpoch,
-    pub(super) tick: NativeTickId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,8 +38,8 @@ impl OpenAttempt {
     fn context(&self) -> NativeLifecycleContext {
         NativeLifecycleContext {
             authority: self.authority,
-            epoch: NativeWorldEpoch(self.epoch),
-            tick: NativeTickId(self.ticks),
+            epoch: NativeWorldEpoch::new(self.epoch),
+            tick: NativeTickId::new(self.ticks),
         }
     }
 }

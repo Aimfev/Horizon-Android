@@ -280,7 +280,7 @@ use super::{
     native_server::{NativeCommand as _, NativeServerPlayer as _},
 };
 use horizon_assets::item_model::StackView;
-use horizon_client::mod_api::{
+pub(crate) use horizon_client::mod_api::{
     self, AttachmentResult, Attachments, BiomeColors, BlockProperties, ClientboundPlayPacket,
     EntityDataValue, EquipmentSlot, Holder, HudMode, ItemEnergyBuffer, LayerDefinition,
     ModEnergyBuffer, Music, MusicLayer, NativeBlockRim, NativeBossBar, NativeCamera,
@@ -3131,6 +3131,11 @@ impl Game<'_> {
         entity: &ModBlockEntity,
         draw: &mut BlockEntityDraw,
     ) {
+        let mut api_draw = horizon_client::mod_api::BlockEntityDraw {
+            partial: draw.partial,
+            game_time: draw.game_time,
+            light: draw.light,
+        };
         mod_api::dispatch_block_entity_submit(
             self,
             mod_api::mods(),
@@ -3138,8 +3143,9 @@ impl Game<'_> {
             block,
             state,
             entity,
-            draw,
+            &mut api_draw,
         );
+        draw.light = api_draw.light;
     }
 
     /// Where the mod block entity at `pos` draws, for culling
@@ -3198,7 +3204,13 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         drawn: &mut bool,
     ) {
-        mod_api::dispatch_mob_submit(self, mod_api::mods(), mob, draw, drawn);
+        let mut api_draw = horizon_client::mod_api::BlockEntityDraw {
+            partial: draw.partial,
+            game_time: draw.game_time,
+            light: draw.light,
+        };
+        mod_api::dispatch_mob_submit(self, mod_api::mods(), mob, &mut api_draw, drawn);
+        draw.light = api_draw.light;
     }
 
     /// Whether a mod listens to `native_player_submit` or `native_mob_layer`: a
@@ -3224,7 +3236,13 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         drawn: &mut bool,
     ) {
-        mod_api::dispatch_player_submit(self, mod_api::mods(), player, who, draw, drawn);
+        let mut api_draw = horizon_client::mod_api::BlockEntityDraw {
+            partial: draw.partial,
+            game_time: draw.game_time,
+            light: draw.light,
+        };
+        mod_api::dispatch_player_submit(self, mod_api::mods(), player, who, &mut api_draw, drawn);
+        draw.light = api_draw.light;
     }
 
     /// A layer on every mob and player in view, once a frame after its
@@ -3242,7 +3260,13 @@ impl Game<'_> {
         who: Option<&NativePlayerRender<'_>>,
         draw: &mut BlockEntityDraw,
     ) {
-        mod_api::dispatch_mob_layer(self, mod_api::mods(), mob, who, draw);
+        let mut api_draw = horizon_client::mod_api::BlockEntityDraw {
+            partial: draw.partial,
+            game_time: draw.game_time,
+            light: draw.light,
+        };
+        mod_api::dispatch_mob_layer(self, mod_api::mods(), mob, who, &mut api_draw);
+        draw.light = api_draw.light;
     }
 
     /// Icons a mod puts on map `map` each time it is drawn: held, in an
@@ -9739,7 +9763,7 @@ impl Game<'_> {
     /// turned off does nothing (check this first in each hook) until the
     /// launcher's next build leaves it out.
     pub(super) fn native_on(&self, mod_id: &str) -> bool {
-        !self.options.disabled_mods.contains(mod_id)
+        !self.options.disabled_mods.iter().any(|m| m == mod_id)
             && super::android_bundled::native_on_check(self, mod_id)
     }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
