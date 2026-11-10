@@ -294,6 +294,16 @@ pub(super) fn content_root(
             }
         }
     }
+    #[cfg(target_os = "android")]
+    for root in super::android_bundled::candidate_profile_roots() {
+        for sub in [mod_list::DIR, "mods", mod_list::NATIVE_DIR] {
+            for found in horizon_mods::find(&root.join(sub)) {
+                if !paths.contains(&found) {
+                    paths.push(found);
+                }
+            }
+        }
+    }
     paths.retain(|p| !dev.contains(p));
     paths.extend(dev.iter().cloned());
     let mut known = None;
@@ -313,6 +323,7 @@ pub(super) fn content_root(
             !disabled.contains(&m.id)
         } else {
             enabled.contains(&m.id)
+                || (!disabled.contains(&m.id) && cfg!(target_os = "android"))
         } || dev.contains(path);
         if !on
             || !m.capabilities.contains(&Capability::Registries)
@@ -666,6 +677,16 @@ impl Game<'_> {
                 paths.push(found);
             }
         }
+        #[cfg(target_os = "android")]
+        for root in super::android_bundled::candidate_profile_roots() {
+            for sub in [mod_list::DIR, "mods", mod_list::NATIVE_DIR] {
+                for found in horizon_mods::find(&root.join(sub)) {
+                    if !paths.contains(&found) {
+                        paths.push(found);
+                    }
+                }
+            }
+        }
         paths.retain(|p| !self.mods.dev.contains(p));
         paths.extend(self.mods.dev.iter().cloned());
         let (mut content_ids, mut live_ids) = Default::default();
@@ -676,12 +697,28 @@ impl Game<'_> {
                 let package = match horizon_mods::Package::read(path) {
                     Ok(package) => package,
                     Err(e) => {
+                        #[cfg(target_os = "android")]
+                        if let Some(dyn_mod) = super::android_bundled::parse_dynamic_hnmod(path) {
+                            return mod_list::Installed {
+                                id: dyn_mod.id.clone(),
+                                title: dyn_mod.title.clone(),
+                                description: dyn_mod.description.clone(),
+                                problem: None,
+                                dev: false,
+                                has_settings: false,
+                                native: Some(mod_list::NativePage {
+                                    keys: dyn_mod.keys,
+                                    buttons: dyn_mod.custom_buttons,
+                                }),
+                            };
+                        }
                         return mod_list::Installed {
                             id: String::new(),
                             title: file.into_owned(),
                             description: String::new(),
                             problem: Some(format!("Can't be read: {e}")),
                             dev: false,
+                            has_settings: false,
                             native: None,
                         };
                     }

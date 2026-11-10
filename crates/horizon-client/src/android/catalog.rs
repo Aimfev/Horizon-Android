@@ -415,12 +415,11 @@ pub enum Page {
     Skins,
 }
 impl Page {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 7] = [
         Self::Play,
         Self::Mods,
         Self::Packs,
         Self::Shaders,
-        Self::Compiler,
         Self::Installed,
         Self::Settings,
         Self::Skins,
@@ -1968,7 +1967,7 @@ impl Catalog {
         let source = match self.page {
             Page::Packs => browser::SourceId::Modrinth,
             Page::Shaders => self.config.shader_source.source(),
-            Page::Mods => self.config.mod_source.source(),
+            Page::Mods => browser::SourceId::Horizon,
             _ => browser::SourceId::Horizon,
         };
         let query_offset = if source == browser::SourceId::Horizon {
@@ -1998,13 +1997,6 @@ impl Catalog {
         {
             format!(
                 "{} Horizon Native Shaders (.hshader) — tap Install to activate",
-                items.len()
-            )
-        } else if self.page == Page::Mods
-            && self.config.mod_source == crate::shader_catalog::Origin::Modrinth
-        {
-            format!(
-                "{} Modrinth mods — tap Install to auto-detect .jar & port via horizon-port-pack",
                 items.len()
             )
         } else if self.page == Page::Mods {

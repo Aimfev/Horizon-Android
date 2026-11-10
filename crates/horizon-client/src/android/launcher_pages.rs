@@ -1847,14 +1847,14 @@ impl Launcher {
                     let rt_hdr = ui.fit_text(
                         Face::SemiBold,
                         12.5,
-                        "Mod Loader & Compiler",
+                        "Horizon Mod Engine",
                         right_w - 54.0,
                     );
                     ui.text(Face::SemiBold, 12.5, rx + 48.0, bento_y + 10.0, my3_text(), &rt_hdr);
                     let rt_sub = ui.fit_text(
                         Face::Regular,
                         10.5,
-                        "horizon-port-pack • API 415 • .hnmod/.hmod",
+                        "Official Horizon Mods • In-Process Engine",
                         right_w - 54.0,
                     );
                     ui.text(Face::Regular, 10.5, rx + 48.0, bento_y + 25.0, my3_accent(), &rt_sub);
@@ -1909,8 +1909,8 @@ impl Launcher {
                         &mut ui,
                         &mut self.targets,
                         [rx + 14.0, act_y, act_w, 26.0],
-                        "Open Compiler",
-                        Action::Page(Page::Compiler),
+                        "Installed Mods",
+                        Action::Page(Page::Installed),
                         true,
                     );
                     button(
@@ -1967,24 +1967,6 @@ impl Launcher {
                         Some(Icon::Shaders),
                     );
                     self.targets.push((rect, Action::ShaderSource(origin)));
-                }
-            } else if page == Page::Mods {
-                use crate::shader_catalog::Origin;
-                let seg_w = 104.0;
-                let group_x = content_x + content_w - seg_w * 2.0 - 3.0;
-                for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
-                    let rx = group_x + i as f32 * (seg_w + 3.0);
-                    let rect = [rx, header_y - 2.0, seg_w, 30.0];
-                    let active = self.catalog.config.mod_source == origin;
-                    ui.m3_connected_segment(
-                        rect,
-                        i,
-                        2,
-                        origin.source().label(),
-                        active,
-                        Some(Icon::Mods),
-                    );
-                    self.targets.push((rect, Action::ModSource(origin)));
                 }
             }
 

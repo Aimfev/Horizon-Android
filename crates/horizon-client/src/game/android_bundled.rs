@@ -165,24 +165,36 @@ pub(super) fn native_on_check(game: &Game<'_>, mod_id: &str) -> bool {
     !game.settings.mods.disabled.contains(mod_id)
 }
 
-fn candidate_profile_roots() -> Vec<PathBuf> {
+pub(super) fn candidate_profile_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(parent) = Game::options_path().parent() {
         roots.push(parent.to_path_buf());
     }
     let home = horizon_client::logging::private_home();
     if !roots.iter().any(|r| r == &home) {
-        roots.push(home);
+        roots.push(home.clone());
     }
     if let Ok(cwd) = std::env::current_dir() {
         if !roots.iter().any(|r| r == &cwd) {
-            roots.push(cwd);
+            roots.push(cwd.clone());
+        }
+    }
+    // Also include subdirectories under <home>/profiles/profile-* and <cwd>/profiles/profile-*
+    for base in [&home, &std::env::current_dir().unwrap_or_default()] {
+        let profiles_dir = base.join("profiles");
+        if let Ok(rd) = fs::read_dir(&profiles_dir) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                if p.is_dir() && !roots.contains(&p) {
+                    roots.push(p);
+                }
+            }
         }
     }
     roots
 }
 
-fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
+pub(super) fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
     let bytes = fs::read(path).ok()?;
     let mut zip = zip::ZipArchive::new(Cursor::new(&bytes)).ok()?;
 
@@ -292,7 +304,42 @@ fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
                         description = d;
                     }
                 }
+                if let Some(caps_pos) = s.find("capabilities") {
+                    if let Some(open) = s[caps_pos..].find('[') {
+                        if let Some(close) = s[caps_pos + open..].find(']') {
+                            let array_content = &s[caps_pos + open + 1..caps_pos + open + close];
+                            for item in array_content.split(',') {
+                                let item = item.trim().trim_matches('"').trim_matches('\'').trim();
+                                if !item.is_empty() {
+                                    match item {
+                                        "hud" | "render" => {
+                                            features.insert("hud_overlay".to_owned());
+                                        }
+                                        "tick" => {
+                                            features.insert("tick_hook".to_owned());
+                                        }
+                                        "chat" => {
+                                            features.insert("chat_hook".to_owned());
+                                        }
+                                        "command" => {
+                                            features.insert("command_hook".to_owned());
+                                        }
+                                        "input" => {
+                                            features.insert("input_hook".to_owned());
+                                        }
+                                        "registries" => {
+                                            features.insert("registries".to_owned());
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        } else if name.starts_with("assets/") || name.starts_with("data/") {
+            features.insert("content".to_owned());
         } else if name.ends_with(".rs") || name.ends_with("horizon-mixin.toml") {
             let mut s = String::new();
             if entry.read_to_string(&mut s).is_ok() {
@@ -375,6 +422,10 @@ fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod> {
         keys.push(["zoom".into(), "Zoom key".into(), "key.keyboard.c".into()]);
     }
 
+    if custom_buttons.is_empty() {
+        custom_buttons.push("Active in Game: ON".to_owned());
+    }
+
     if commands.is_empty() {
         commands.push(mod_id.clone());
     }
@@ -454,7 +505,7 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
             };
             for entry in rd.flatten() {
                 let p = entry.path();
-                if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("hnmod")) {
+                if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("hnmod") || e.eq_ignore_ascii_case("hmod")) {
                     hnmod_paths.push((root.clone(), p));
                 }
             }
