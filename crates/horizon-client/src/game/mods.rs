@@ -689,7 +689,10 @@ impl Game<'_> {
         }
         paths.retain(|p| !self.mods.dev.contains(p));
         paths.extend(self.mods.dev.iter().cloned());
-        let (mut content_ids, mut live_ids) = Default::default();
+        let (mut content_ids, mut live_ids): (
+            std::collections::BTreeSet<String>,
+            std::collections::BTreeSet<String>,
+        ) = Default::default();
         self.settings.mods.installed = paths
             .iter()
             .map(|path| {
