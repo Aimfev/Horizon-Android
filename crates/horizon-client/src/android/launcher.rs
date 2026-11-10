@@ -1013,7 +1013,7 @@ impl ApplicationHandler for Launcher {
                 || (self.catalog.page == Page::Skins && self.wardrobe.is_animating())
                 || self
                     .feedback
-                    .is_some_and(|(_, t)| t.elapsed() < Duration::from_millis(180))
+                    .is_some_and(|(_, t)| t.elapsed() < Duration::from_millis(280))
             {
                 16
             } else {

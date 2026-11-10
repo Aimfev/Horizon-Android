@@ -1159,6 +1159,13 @@ impl<'a> Ui<'a> {
 
     /// A filled rectangle with rounded corners (pure, artifact-free geometry).
     pub fn rounded(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
+        let (dy, alpha) = self.stagger_transform(x, y, w, h);
+        let y = y + dy;
+        let color = if alpha < 0.999 {
+            color::with_alpha(color, ((color >> 24) as f32 / 255.0 * alpha).clamp(0.0, 1.0))
+        } else {
+            color
+        };
         self.raw_rounded_px(x, y, w, h, radius, color);
     }
     /// A 1px rounded border.
@@ -1166,6 +1173,13 @@ impl<'a> Ui<'a> {
         if color >> 24 == 0 {
             return;
         }
+        let (dy, alpha) = self.stagger_transform(x, y, w, h);
+        let y = y + dy;
+        let color = if alpha < 0.999 {
+            color::with_alpha(color, ((color >> 24) as f32 / 255.0 * alpha).clamp(0.0, 1.0))
+        } else {
+            color
+        };
         let (x0, y0, x1, y1) = (
             self.px_x(x),
             self.px_y(y),
@@ -1189,6 +1203,13 @@ impl<'a> Ui<'a> {
         if color >> 24 == 0 || size <= 0.0 {
             return;
         }
+        let (dy, alpha) = self.stagger_transform(x, y, size, size);
+        let y = y + dy;
+        let color = if alpha < 0.999 {
+            color::with_alpha(color, ((color >> 24) as f32 / 255.0 * alpha).clamp(0.0, 1.0))
+        } else {
+            color
+        };
         let (x0, y0) = (self.px_x(x), self.px_y(y));
         let px = (size * self.density).round().clamp(8.0, 128.0) as u16;
         let atlas = self.atlas;
@@ -2141,6 +2162,13 @@ impl<'a> Ui<'a> {
         color: u32,
         text: &str,
     ) -> f32 {
+        let (dy, alpha) = self.stagger_transform(x, y, 60.0, line);
+        let y = y + dy;
+        let color = if alpha < 0.999 {
+            color::with_alpha(color, ((color >> 24) as f32 / 255.0 * alpha).clamp(0.0, 1.0))
+        } else {
+            color
+        };
         let px = (size * self.density * 4.0).round() / 4.0;
         let real = color >> 24 != 0;
         let (x0, y0) = (self.px_x(x), self.px_y(y));
@@ -2219,6 +2247,13 @@ impl<'a> Ui<'a> {
         if color >> 24 == 0 || w <= 0.0 || h <= 0.0 {
             return;
         }
+        let (dy, alpha) = self.stagger_transform(x, y, w, h);
+        let y = y + dy;
+        let color = if alpha < 0.999 {
+            color::with_alpha(color, ((color >> 24) as f32 / 255.0 * alpha).clamp(0.0, 1.0))
+        } else {
+            color
+        };
         self.raw_fill(
             self.px_x(x),
             self.px_y(y),
@@ -2242,6 +2277,13 @@ impl<'a> Ui<'a> {
         if color >> 24 == 0 || stroke_w <= 0.0 || w <= 0.0 || h <= 0.0 {
             return;
         }
+        let (dy, alpha) = self.stagger_transform(x, y, w, h);
+        let y = y + dy;
+        let color = if alpha < 0.999 {
+            color::with_alpha(color, ((color >> 24) as f32 / 255.0 * alpha).clamp(0.0, 1.0))
+        } else {
+            color
+        };
         let (x0, y0, x1, y1) = (
             self.px_x(x),
             self.px_y(y),

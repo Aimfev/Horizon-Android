@@ -40,7 +40,17 @@ fn favour() -> bool {
     unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL) != 0 }
 }
 
-#[cfg(not(any(target_vendor = "apple", windows)))]
+#[cfg(target_os = "android")]
+fn favour() -> bool {
+    // On Android, app processes are allowed by Android's SELinux policy and bionic libc
+    // to raise thread priority down to nice -4 (ANDROID_PRIORITY_DISPLAY), prioritizing
+    // the render and server threads onto big performance cores (e.g. Cortex-A75 on Helio G85).
+    unsafe {
+        libc::setpriority(libc::PRIO_PROCESS as _, 0, -4) == 0
+    }
+}
+
+#[cfg(not(any(target_vendor = "apple", windows, target_os = "android")))]
 fn favour() -> bool {
     false
 }
@@ -384,7 +394,7 @@ mod tests {
     #[test]
     fn favouring_a_thread_takes_where_the_os_allows_it() {
         let took = std::thread::spawn(super::favour).join().unwrap();
-        assert_eq!(took, cfg!(any(target_vendor = "apple", windows)));
+        assert_eq!(took, cfg!(any(target_vendor = "apple", windows, target_os = "android")));
         #[cfg(target_vendor = "apple")]
         std::thread::spawn(|| {
             assert!(super::favour());

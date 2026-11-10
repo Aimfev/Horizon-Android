@@ -100,6 +100,7 @@ pub(crate) struct AnimState {
     pub intro_start: Option<std::time::Instant>,
     pub intro_elapsed: f32,
     pub intro_done: bool,
+    pub switches: std::collections::HashMap<String, f32>,
 }
 
 impl Default for AnimState {
@@ -124,6 +125,7 @@ impl Default for AnimState {
             intro_start: Some(std::time::Instant::now()),
             intro_elapsed: 0.0,
             intro_done: false,
+            switches: std::collections::HashMap::new(),
         }
     }
 }
@@ -224,6 +226,21 @@ impl AnimState {
         }
     }
 
+    pub fn step_switch(&mut self, key: &str, on: bool, dt: f32) -> f32 {
+        if horizon_client::ui_theme::motion::reduced_motion() {
+            return if on { 1.0 } else { 0.0 };
+        }
+        let target = if on { 1.0 } else { 0.0 };
+        let entry = self.switches.entry(key.to_string()).or_insert(target);
+        if (*entry - target).abs() > 0.001 {
+            *entry += (target - *entry) * (dt * 16.0).min(1.0);
+            if (*entry - target).abs() < 0.005 {
+                *entry = target;
+            }
+        }
+        *entry
+    }
+
     pub fn is_active(&self) -> bool {
         if !self.intro_done {
             return true;
@@ -240,10 +257,11 @@ impl AnimState {
             || (self.modal_anim > 0.01 && self.modal_anim < 0.99)
             || self.theme_pulse < 0.99
             || self.section_expand.iter().any(|v| *v > 0.01 && *v < 0.99)
+            || self.switches.values().any(|v| *v > 0.005 && *v < 0.995)
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Action {
     Page(Page),
     SettingsCat(SettingsCategory),
@@ -505,6 +523,7 @@ fn toggle(
     rect: [f32; 4],
     on: bool,
     action: Action,
+    switch_t: f32,
 ) {
     let [x, y, w, h] = rect;
     ui.text(
@@ -517,7 +536,7 @@ fn toggle(
     );
     let track_x = x + w - 52.0;
     let track_y = y + (h - 28.0) * 0.5;
-    ui.m3_switch_animated(track_x, track_y, if on { 1.0 } else { 0.0 });
+    ui.m3_switch_animated(track_x, track_y, switch_t);
     if let Some(c) = ui.clip_rect([x, y, w, h]) {
         targets.push((c, action));
     }
@@ -528,6 +547,7 @@ fn draw_setting_card(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
     list_targets: &mut Vec<([f32; 4], Action)>,
+    anim: &mut AnimState,
     x: f32,
     y: f32,
     w: f32,
@@ -641,7 +661,8 @@ fn draw_setting_card(
         SettingControl::Toggle(on, action) => {
             let rect = [x + w - 122.0, y + (h - 38.0) * 0.5, 108.0, 38.0];
             list_targets.push((rect, action));
-            toggle(ui, targets, rect, on, action);
+            let switch_t = anim.step_switch(&format!("{action:?}"), on, 0.016);
+            toggle(ui, targets, rect, on, action, switch_t);
         }
         SettingControl::Button(label, action, accent) => {
             let bw = 176.0f32.min(w * 0.44);
@@ -3244,7 +3265,8 @@ impl Launcher {
                 );
 
                 // Enable/Disable M3 switch + Export & Delete buttons
-                ui.m3_switch(toggle_r[0] + 2.0, y + 17.0, item.enabled);
+                let switch_t = self.anim.step_switch(&format!("local_{}", item.file), item.enabled, 0.016);
+                ui.m3_switch_animated(toggle_r[0] + 2.0, y + 17.0, switch_t);
                 if let Some(c) = ui.clip_rect(toggle_r) {
                     self.targets.push((c, Action::ToggleLocal(orig_idx)));
                 }
@@ -5116,6 +5138,7 @@ impl Launcher {
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
+                        &mut self.anim,
                         content_x,
                         y,
                         content_w,
@@ -5257,6 +5280,7 @@ impl Launcher {
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
+                        &mut self.anim,
                         content_x,
                         y,
                         content_w,
@@ -6295,6 +6319,7 @@ impl Launcher {
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
+                        &mut self.anim,
                         content_x,
                         y,
                         content_w,
@@ -6392,6 +6417,7 @@ impl Launcher {
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
+                        &mut self.anim,
                         content_x,
                         y,
                         content_w,
@@ -6470,6 +6496,7 @@ impl Launcher {
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
+                        &mut self.anim,
                         content_x,
                         y,
                         content_w,
