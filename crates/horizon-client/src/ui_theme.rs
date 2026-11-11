@@ -255,13 +255,195 @@ fn seg_dist(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
     ((px - (ax + t * dx)).powi(2) + (py - (ay + t * dy)).powi(2)).sqrt()
 }
 
+/// The colour Horizon sunset logo as a 96x96 pixel grid, run-length encoded.
+/// Palette entries are `0xRRGGBB`; transparent cells (the rounded corners) are absent.
+const HORIZON_LOGO_GRID: u32 = 96;
+static HORIZON_LOGO_PALETTE: [u32; 18] = [0xFFE6A5, 0xDA9A72, 0x573474, 0x402D6F, 0x3F2972, 0x2F2465, 0x222054, 0x1D1C4E, 0x1B1951, 0x171748, 0x141543, 0x12163A, 0x101439, 0x101337, 0x0E1234, 0x0D102F, 0x0B0E29, 0x03040B];
+/// `(first_row, row_count, first_col, col_count, palette_index)`.
+static HORIZON_LOGO_RUNS: [(u8, u8, u8, u8, u8); 998] = [
+    (0,1,16,2,7), (0,1,18,60,11), (0,1,78,2,7), (1,1,13,1,6), (1,1,14,1,7), (1,1,15,1,11),
+    (1,1,16,1,14), (1,1,17,62,15), (1,1,79,1,14), (1,1,80,1,11), (1,1,81,1,7), (1,1,82,1,6),
+    (2,1,11,1,7), (2,1,12,1,11), (2,1,13,1,13), (2,1,14,68,15), (2,1,82,1,13), (2,1,83,1,11),
+    (2,1,84,1,7), (3,1,9,1,7), (3,1,10,1,10), (3,1,11,1,13), (3,1,12,73,14), (3,1,85,1,10),
+    (3,1,86,1,7), (4,1,8,1,6), (4,1,9,1,11), (4,1,10,76,14), (4,1,86,1,11), (4,1,87,1,6),
+    (5,1,7,1,7), (5,1,8,1,11), (5,1,9,1,14), (5,1,10,1,13), (5,1,11,2,14), (5,1,13,1,13),
+    (5,1,14,2,14), (5,1,16,1,13), (5,1,17,2,14), (5,1,19,1,13), (5,1,20,2,14), (5,1,22,1,13),
+    (5,1,23,2,14), (5,1,25,1,13), (5,1,26,2,14), (5,1,28,1,13), (5,1,29,2,14), (5,1,31,1,13),
+    (5,1,32,2,14), (5,1,34,1,13), (5,1,35,2,14), (5,1,37,1,13), (5,1,38,2,14), (5,1,40,1,13),
+    (5,1,41,2,14), (5,1,43,1,13), (5,1,44,2,14), (5,1,46,1,13), (5,1,47,2,14), (5,1,49,1,13),
+    (5,1,50,2,14), (5,1,52,1,13), (5,1,53,2,14), (5,1,55,1,13), (5,1,56,2,14), (5,1,58,1,13),
+    (5,1,59,2,14), (5,1,61,1,13), (5,1,62,2,14), (5,1,64,1,13), (5,1,65,2,14), (5,1,67,1,13),
+    (5,1,68,2,14), (5,1,70,1,13), (5,1,71,2,14), (5,1,73,1,13), (5,1,74,2,14), (5,1,76,1,13),
+    (5,1,77,2,14), (5,1,79,1,13), (5,1,80,2,14), (5,1,82,1,13), (5,1,83,2,14), (5,1,85,1,13),
+    (5,1,86,1,14), (5,1,87,1,11), (5,1,88,1,7), (6,1,6,1,7), (6,1,7,82,13), (6,1,89,1,7),
+    (7,1,5,1,6), (7,1,6,84,12), (7,1,90,1,6), (8,1,4,1,6), (8,1,5,1,10), (8,1,6,84,12),
+    (8,1,90,1,10), (8,1,91,1,6), (9,1,3,1,6), (9,1,4,1,10), (9,1,5,1,11), (9,1,6,1,12),
+    (9,1,7,2,11), (9,1,9,1,12), (9,1,10,2,11), (9,1,12,1,12), (9,1,13,2,11), (9,1,15,1,12),
+    (9,1,16,2,11), (9,1,18,1,12), (9,1,19,2,11), (9,1,21,1,12), (9,1,22,2,11), (9,1,24,1,12),
+    (9,1,25,2,11), (9,1,27,1,12), (9,1,28,2,11), (9,1,30,1,12), (9,1,31,2,11), (9,1,33,1,12),
+    (9,1,34,2,11), (9,1,36,1,12), (9,1,37,2,11), (9,1,39,1,12), (9,1,40,2,11), (9,1,42,1,12),
+    (9,1,43,2,11), (9,1,45,1,12), (9,1,46,2,11), (9,1,48,1,12), (9,1,49,2,11), (9,1,51,1,12),
+    (9,1,52,2,11), (9,1,54,1,12), (9,1,55,2,11), (9,1,57,1,12), (9,1,58,2,11), (9,1,60,1,12),
+    (9,1,61,2,11), (9,1,63,1,12), (9,1,64,2,11), (9,1,66,1,12), (9,1,67,2,11), (9,1,69,1,12),
+    (9,1,70,2,11), (9,1,72,1,12), (9,1,73,2,11), (9,1,75,1,12), (9,1,76,2,11), (9,1,78,1,12),
+    (9,1,79,2,11), (9,1,81,1,12), (9,1,82,2,11), (9,1,84,1,12), (9,1,85,2,11), (9,1,87,1,12),
+    (9,1,88,2,11), (9,1,90,1,12), (9,1,91,1,10), (9,1,92,1,6), (10,1,3,1,7), (10,1,4,1,10),
+    (10,1,5,2,11), (10,1,7,1,10), (10,1,8,2,11), (10,1,10,1,10), (10,1,11,2,11), (10,1,13,1,10),
+    (10,1,14,2,11), (10,1,16,1,10), (10,1,17,2,11), (10,1,19,1,10), (10,1,20,2,11), (10,1,22,1,10),
+    (10,1,23,2,11), (10,1,25,1,10), (10,1,26,2,11), (10,1,28,1,10), (10,1,29,2,11), (10,1,31,1,10),
+    (10,1,32,2,11), (10,1,34,1,10), (10,1,35,2,11), (10,1,37,1,10), (10,1,38,2,11), (10,1,40,1,10),
+    (10,1,41,2,11), (10,1,43,1,10), (10,1,44,2,11), (10,1,46,1,10), (10,1,47,2,11), (10,1,49,1,10),
+    (10,1,50,2,11), (10,1,52,1,10), (10,1,53,2,11), (10,1,55,1,10), (10,1,56,2,11), (10,1,58,1,10),
+    (10,1,59,2,11), (10,1,61,1,10), (10,1,62,2,11), (10,1,64,1,10), (10,1,65,2,11), (10,1,67,1,10),
+    (10,1,68,2,11), (10,1,70,1,10), (10,1,71,2,11), (10,1,73,1,10), (10,1,74,2,11), (10,1,76,1,10),
+    (10,1,77,2,11), (10,1,79,1,10), (10,1,80,2,11), (10,1,82,1,10), (10,1,83,2,11), (10,1,85,1,10),
+    (10,1,86,2,11), (10,1,88,1,10), (10,1,89,2,11), (10,1,91,1,10), (10,1,92,1,7), (11,1,2,1,6),
+    (11,1,3,90,10), (11,1,93,1,6), (12,1,2,1,7), (12,1,3,90,10), (12,1,93,1,7), (13,1,1,1,5),
+    (13,1,2,1,9), (13,1,3,90,10), (13,1,93,1,9), (13,1,94,1,5), (14,1,1,1,6), (14,1,2,92,10),
+    (14,1,94,1,6), (15,1,1,1,7), (15,1,2,92,9), (15,1,94,1,6), (16,1,0,1,5), (16,1,1,1,7),
+    (16,1,2,92,9), (16,1,94,1,7), (16,1,95,1,5), (17,1,0,1,5), (17,1,1,94,9), (17,1,95,1,5),
+    (18,1,0,1,6), (18,1,1,94,9), (18,1,95,1,6), (19,2,0,1,6), (19,2,1,94,8), (19,2,95,1,6),
+    (21,2,0,1,5), (21,2,1,94,8), (21,2,95,1,5), (23,1,0,1,5), (23,1,1,39,8), (23,1,40,2,6),
+    (23,1,42,1,8), (23,1,43,2,6), (23,1,45,1,8), (23,1,46,2,6), (23,1,48,1,8), (23,1,49,2,6),
+    (23,1,51,1,8), (23,1,52,2,6), (23,1,54,1,8), (23,1,55,1,6), (23,1,56,39,8), (23,1,95,1,5),
+    (24,1,0,1,5), (24,1,1,27,8), (24,1,28,2,6), (24,1,30,1,8), (24,1,31,35,6), (24,1,66,1,8),
+    (24,1,67,1,6), (24,1,68,27,8), (24,1,95,1,5), (25,1,0,1,5), (25,1,1,2,6), (25,1,3,1,8),
+    (25,1,4,2,6), (25,1,6,1,8), (25,1,7,2,6), (25,1,9,1,8), (25,1,10,2,6), (25,1,12,1,8),
+    (25,1,13,2,6), (25,1,15,1,8), (25,1,16,2,6), (25,1,18,1,8), (25,1,19,2,6), (25,1,21,1,8),
+    (25,1,22,2,6), (25,1,24,1,8), (25,1,25,47,6), (25,1,72,1,8), (25,1,73,2,6), (25,1,75,1,8),
+    (25,1,76,2,6), (25,1,78,1,8), (25,1,79,2,6), (25,1,81,1,8), (25,1,82,2,6), (25,1,84,1,8),
+    (25,1,85,2,6), (25,1,87,1,8), (25,1,88,2,6), (25,1,90,1,8), (25,1,91,2,6), (25,1,93,1,8),
+    (25,1,94,1,6), (25,1,95,1,5), (26,2,0,1,5), (26,2,1,94,6), (26,2,95,1,5), (28,1,0,1,5),
+    (28,1,1,33,6), (28,1,34,2,5), (28,1,36,1,6), (28,1,37,20,5), (28,1,57,1,6), (28,1,58,2,5),
+    (28,1,60,1,6), (28,1,61,1,5), (28,1,62,33,6), (28,1,95,1,5), (29,1,0,1,5), (29,1,1,25,6),
+    (29,1,26,43,5), (29,1,69,26,6), (29,1,95,1,5), (30,1,0,1,5), (30,1,1,15,6), (30,1,16,28,5),
+    (30,1,44,1,3), (30,1,45,6,2), (30,1,51,1,3), (30,1,52,28,5), (30,1,80,15,6), (30,1,95,1,5),
+    (31,1,0,3,5), (31,1,3,1,6), (31,1,4,2,5), (31,1,6,1,6), (31,1,7,2,5), (31,1,9,1,6),
+    (31,1,10,30,5), (31,1,40,1,3), (31,1,41,1,2), (31,1,42,12,0), (31,1,54,1,2), (31,1,55,1,3),
+    (31,1,56,28,5), (31,1,84,1,6), (31,1,85,2,5), (31,1,87,1,6), (31,1,88,2,5), (31,1,90,1,6),
+    (31,1,91,2,5), (31,1,93,1,6), (31,1,94,2,5), (32,1,0,38,5), (32,1,38,1,2), (32,1,39,1,1),
+    (32,1,40,16,0), (32,1,56,1,1), (32,1,57,1,2), (32,1,58,38,5), (33,1,0,1,3), (33,1,1,34,5),
+    (33,1,35,1,3), (33,1,36,1,1), (33,1,37,22,0), (33,1,59,1,1), (33,1,60,1,3), (33,1,61,34,5),
+    (33,1,95,1,3), (34,1,0,1,4), (34,1,1,33,5), (34,1,34,1,2), (34,1,35,26,0), (34,1,61,1,2),
+    (34,1,62,33,5), (34,1,95,1,4), (35,1,0,1,4), (35,1,1,31,5), (35,1,32,1,3), (35,1,33,1,1),
+    (35,1,34,28,0), (35,1,62,1,1), (35,1,63,1,3), (35,1,64,31,5), (35,1,95,1,4), (36,1,0,1,4),
+    (36,1,1,30,5), (36,1,31,1,2), (36,1,32,32,0), (36,1,64,1,2), (36,1,65,1,3), (36,1,66,29,5),
+    (36,1,95,1,4), (37,1,0,1,4), (37,1,1,18,5), (37,1,19,3,4), (37,1,22,8,3), (37,1,30,1,2),
+    (37,1,31,34,0), (37,1,65,1,2), (37,1,66,9,3), (37,1,75,20,5), (37,1,95,1,4), (38,1,0,1,3),
+    (38,1,1,12,5), (38,1,13,5,4), (38,1,18,11,3), (38,1,29,1,2), (38,1,30,36,0), (38,1,66,1,2),
+    (38,1,67,11,3), (38,1,78,6,4), (38,1,84,11,5), (38,1,95,1,3), (39,1,0,1,3), (39,1,1,3,5),
+    (39,1,4,11,4), (39,1,15,13,3), (39,1,28,1,2), (39,1,29,38,0), (39,1,67,1,2), (39,1,68,12,3),
+    (39,1,80,12,4), (39,1,92,3,5), (39,1,95,1,3), (40,1,0,1,3), (40,1,1,11,4), (40,1,12,15,3),
+    (40,1,27,1,2), (40,1,28,40,0), (40,1,68,1,2), (40,1,69,15,3), (40,1,84,11,4), (40,1,95,1,3),
+    (41,1,0,1,3), (41,1,1,8,4), (41,1,9,17,3), (41,1,26,1,2), (41,1,27,1,1), (41,1,28,40,0),
+    (41,1,68,1,1), (41,1,69,1,2), (41,1,70,16,3), (41,1,86,9,4), (41,1,95,1,2), (42,1,0,1,2),
+    (42,1,1,4,4), (42,1,5,13,3), (42,1,18,8,2), (42,1,26,1,1), (42,1,27,42,0), (42,1,69,1,1),
+    (42,1,70,8,2), (42,1,78,13,3), (42,1,91,4,4), (42,1,95,1,2), (43,1,0,1,2), (43,1,1,2,4),
+    (43,1,3,8,3), (43,1,11,15,2), (43,1,26,44,0), (43,1,70,14,2), (43,1,84,9,3), (43,1,93,2,4),
+    (43,1,95,1,2), (44,1,0,1,2), (44,1,1,5,3), (44,1,6,19,2), (44,1,25,1,1), (44,1,26,44,0),
+    (44,1,70,1,1), (44,1,71,19,2), (44,1,90,5,3), (44,1,95,1,2), (45,1,0,25,2), (45,1,25,46,0),
+    (45,1,71,25,2), (46,1,0,24,2), (46,1,24,1,1), (46,1,25,46,0), (46,1,71,1,1), (46,1,72,24,2),
+    (47,2,0,24,2), (47,2,24,48,0), (47,2,72,24,2), (49,2,0,23,2), (49,2,23,50,1), (49,2,73,5,2),
+    (49,2,78,17,4), (49,2,95,1,2), (51,2,0,23,2), (51,2,23,50,0), (51,2,73,5,2), (51,2,78,17,4),
+    (51,2,95,1,2), (53,1,0,22,2), (53,1,22,52,1), (53,1,74,4,2), (53,1,78,17,4), (53,1,95,1,2),
+    (54,2,0,12,2), (54,2,12,12,4), (54,2,24,42,1), (54,2,66,29,4), (54,2,95,1,2), (56,2,0,12,2),
+    (56,2,12,12,4), (56,2,24,42,0), (56,2,66,29,4), (56,2,95,1,2), (58,2,0,12,2), (58,2,12,12,4),
+    (58,2,24,42,1), (58,2,66,29,4), (58,2,95,1,2), (60,1,0,1,2), (60,1,1,71,4), (60,1,72,13,2),
+    (60,1,85,10,4), (60,1,95,1,2), (61,3,0,1,2), (61,3,1,71,4), (61,3,72,1,7), (61,3,73,11,10),
+    (61,3,84,1,2), (61,3,85,10,4), (61,3,95,1,2), (64,2,0,1,2), (64,2,1,71,4), (64,2,72,1,7),
+    (64,2,73,11,10), (64,2,84,1,3), (64,2,85,10,4), (64,2,95,1,2), (66,1,0,1,2), (66,1,1,11,4),
+    (66,1,12,1,2), (66,1,13,24,3), (66,1,37,23,4), (66,1,60,1,2), (66,1,61,11,3), (66,1,72,1,7),
+    (66,1,73,11,10), (66,1,84,1,2), (66,1,85,10,3), (66,1,95,1,2), (67,1,0,1,2), (67,1,1,11,4),
+    (67,1,12,1,7), (67,1,13,23,11), (67,1,36,1,3), (67,1,37,23,4), (67,1,60,1,7), (67,1,61,11,11),
+    (67,1,72,1,7), (67,1,73,11,11), (67,1,84,1,7), (67,1,85,10,11), (67,1,95,1,6), (68,3,0,1,2),
+    (68,3,1,11,4), (68,3,12,1,7), (68,3,13,23,11), (68,3,36,1,3), (68,3,37,23,4), (68,3,60,1,7),
+    (68,3,61,11,11), (68,3,72,1,7), (68,3,73,11,11), (68,3,84,1,7), (68,3,85,10,11), (68,3,95,1,7),
+    (71,1,0,1,3), (71,1,1,11,4), (71,1,12,1,9), (71,1,13,23,11), (71,1,36,1,3), (71,1,37,23,4),
+    (71,1,60,1,9), (71,1,61,11,11), (71,1,72,1,9), (71,1,73,11,11), (71,1,84,1,9), (71,1,85,10,11),
+    (71,1,95,1,7), (72,1,0,1,3), (72,1,1,11,6), (72,1,12,1,9), (72,1,13,23,12), (72,1,36,1,5),
+    (72,1,37,23,6), (72,1,60,1,9), (72,1,61,11,12), (72,1,72,1,9), (72,1,73,11,12), (72,1,84,1,9),
+    (72,1,85,10,12), (72,1,95,1,7), (73,1,0,1,7), (73,1,1,11,12), (73,1,12,1,9), (73,1,13,23,12),
+    (73,1,36,1,9), (73,1,37,23,12), (73,1,60,1,9), (73,1,61,11,12), (73,1,72,1,9), (73,1,73,11,12),
+    (73,1,84,1,9), (73,1,85,10,12), (73,1,95,1,7), (74,1,0,1,7), (74,1,1,11,13), (74,1,12,1,9),
+    (74,1,13,23,13), (74,1,36,1,9), (74,1,37,23,13), (74,1,60,1,9), (74,1,61,11,13), (74,1,72,1,9),
+    (74,1,73,11,13), (74,1,84,1,9), (74,1,85,10,13), (74,1,95,1,7), (75,1,0,1,7), (75,1,1,11,13),
+    (75,1,12,1,10), (75,1,13,23,13), (75,1,36,1,10), (75,1,37,23,13), (75,1,60,1,10), (75,1,61,11,13),
+    (75,1,72,1,10), (75,1,73,11,13), (75,1,84,1,10), (75,1,85,10,13), (75,1,95,1,7), (76,1,0,1,7),
+    (76,1,1,1,13), (76,1,2,2,14), (76,1,4,1,13), (76,1,5,2,14), (76,1,7,1,13), (76,1,8,2,14),
+    (76,1,10,1,13), (76,1,11,1,14), (76,1,12,1,10), (76,1,13,1,13), (76,1,14,2,14), (76,1,16,1,13),
+    (76,1,17,2,14), (76,1,19,1,13), (76,1,20,2,14), (76,1,22,1,13), (76,1,23,2,14), (76,1,25,1,13),
+    (76,1,26,2,14), (76,1,28,1,13), (76,1,29,2,14), (76,1,31,1,13), (76,1,32,2,14), (76,1,34,1,13),
+    (76,1,35,1,14), (76,1,36,1,10), (76,1,37,1,13), (76,1,38,2,14), (76,1,40,1,13), (76,1,41,2,14),
+    (76,1,43,1,13), (76,1,44,2,14), (76,1,46,1,13), (76,1,47,2,14), (76,1,49,1,13), (76,1,50,2,14),
+    (76,1,52,1,13), (76,1,53,2,14), (76,1,55,1,13), (76,1,56,2,14), (76,1,58,1,13), (76,1,59,1,14),
+    (76,1,60,1,10), (76,1,61,1,13), (76,1,62,2,14), (76,1,64,1,13), (76,1,65,2,14), (76,1,67,1,13),
+    (76,1,68,2,14), (76,1,70,1,13), (76,1,71,1,14), (76,1,72,1,10), (76,1,73,1,13), (76,1,74,2,14),
+    (76,1,76,1,13), (76,1,77,2,14), (76,1,79,1,13), (76,1,80,2,14), (76,1,82,1,13), (76,1,83,1,14),
+    (76,1,84,1,10), (76,1,85,1,13), (76,1,86,2,14), (76,1,88,1,13), (76,1,89,2,14), (76,1,91,1,13),
+    (76,1,92,2,14), (76,1,94,1,13), (76,1,95,1,7), (77,2,0,1,6), (77,2,1,11,14), (77,2,12,1,11),
+    (77,2,13,23,14), (77,2,36,1,11), (77,2,37,23,14), (77,2,60,1,11), (77,2,61,11,14), (77,2,72,1,11),
+    (77,2,73,11,14), (77,2,84,1,11), (77,2,85,10,14), (77,2,95,1,6), (79,1,0,1,6), (79,1,1,1,13),
+    (79,1,2,10,14), (79,1,12,1,11), (79,1,13,23,14), (79,1,36,1,11), (79,1,37,23,14), (79,1,60,1,11),
+    (79,1,61,11,14), (79,1,72,1,11), (79,1,73,11,14), (79,1,84,1,11), (79,1,85,9,14), (79,1,94,1,13),
+    (79,1,95,1,6), (80,1,1,1,11), (80,1,2,1,14), (80,1,3,1,15), (80,1,4,2,14), (80,1,6,1,15),
+    (80,1,7,2,14), (80,1,9,1,15), (80,1,10,2,14), (80,1,12,1,11), (80,1,13,2,14), (80,1,15,1,15),
+    (80,1,16,2,14), (80,1,18,1,15), (80,1,19,2,14), (80,1,21,1,15), (80,1,22,2,14), (80,1,24,1,15),
+    (80,1,25,2,14), (80,1,27,1,15), (80,1,28,2,14), (80,1,30,1,15), (80,1,31,2,14), (80,1,33,1,15),
+    (80,1,34,2,14), (80,1,36,1,11), (80,1,37,2,14), (80,1,39,1,15), (80,1,40,2,14), (80,1,42,1,15),
+    (80,1,43,2,14), (80,1,45,1,15), (80,1,46,2,14), (80,1,48,1,15), (80,1,49,2,14), (80,1,51,1,15),
+    (80,1,52,2,14), (80,1,54,1,15), (80,1,55,2,14), (80,1,57,1,15), (80,1,58,2,14), (80,1,60,1,11),
+    (80,1,61,2,14), (80,1,63,1,15), (80,1,64,2,14), (80,1,66,1,15), (80,1,67,2,14), (80,1,69,1,15),
+    (80,1,70,2,14), (80,1,72,1,11), (80,1,73,2,14), (80,1,75,1,15), (80,1,76,2,14), (80,1,78,1,15),
+    (80,1,79,2,14), (80,1,81,1,15), (80,1,82,2,14), (80,1,84,1,11), (80,1,85,2,14), (80,1,87,1,15),
+    (80,1,88,2,14), (80,1,90,1,15), (80,1,91,2,14), (80,1,93,1,15), (80,1,94,1,11), (81,1,1,1,7),
+    (81,1,2,10,15), (81,1,12,1,11), (81,1,13,23,15), (81,1,36,1,11), (81,1,37,23,15), (81,1,60,1,11),
+    (81,1,61,11,15), (81,1,72,1,11), (81,1,73,11,15), (81,1,84,1,11), (81,1,85,9,15), (81,1,94,1,7),
+    (82,1,1,1,6), (82,1,2,1,13), (82,1,3,9,15), (82,1,12,1,11), (82,1,13,23,15), (82,1,36,1,11),
+    (82,1,37,23,15), (82,1,60,1,11), (82,1,61,11,15), (82,1,72,1,11), (82,1,73,11,15), (82,1,84,1,11),
+    (82,1,85,8,15), (82,1,93,1,13), (82,1,94,1,6), (83,1,2,1,11), (83,1,3,9,15), (83,1,12,1,11),
+    (83,1,13,23,15), (83,1,36,1,11), (83,1,37,23,15), (83,1,60,1,11), (83,1,61,11,15), (83,1,72,1,11),
+    (83,1,73,11,15), (83,1,84,1,11), (83,1,85,8,15), (83,1,93,1,11), (84,1,2,1,5), (84,1,3,90,11),
+    (84,1,93,1,5), (85,1,3,1,11), (85,1,4,8,15), (85,1,12,1,11), (85,1,13,23,15), (85,1,36,1,11),
+    (85,1,37,23,15), (85,1,60,1,11), (85,1,61,11,15), (85,1,72,1,11), (85,1,73,11,15), (85,1,84,1,11),
+    (85,1,85,7,15), (85,1,92,1,11), (86,1,3,1,6), (86,1,4,1,14), (86,1,5,7,16), (86,1,12,1,11),
+    (86,1,13,23,16), (86,1,36,1,11), (86,1,37,23,16), (86,1,60,1,11), (86,1,61,11,16), (86,1,72,1,11),
+    (86,1,73,11,16), (86,1,84,1,11), (86,1,85,6,16), (86,1,91,1,14), (86,1,92,1,6), (87,1,4,1,7),
+    (87,1,5,1,15), (87,1,6,6,16), (87,1,12,1,11), (87,1,13,23,16), (87,1,36,1,11), (87,1,37,23,16),
+    (87,1,60,1,11), (87,1,61,11,16), (87,1,72,1,11), (87,1,73,11,16), (87,1,84,1,11), (87,1,85,5,16),
+    (87,1,90,1,15), (87,1,91,1,7), (88,1,5,1,7), (88,1,6,6,16), (88,1,12,1,11), (88,1,13,23,16),
+    (88,1,36,1,11), (88,1,37,23,16), (88,1,60,1,11), (88,1,61,11,16), (88,1,72,1,11), (88,1,73,11,16),
+    (88,1,84,1,11), (88,1,85,5,16), (88,1,90,1,7), (89,1,6,1,11), (89,1,7,5,16), (89,1,12,1,11),
+    (89,1,13,23,16), (89,1,36,1,11), (89,1,37,23,16), (89,1,60,1,11), (89,1,61,11,16), (89,1,72,1,11),
+    (89,1,73,11,16), (89,1,84,1,11), (89,1,85,4,16), (89,1,89,1,11), (90,1,7,1,7), (90,1,8,1,15),
+    (90,1,9,3,16), (90,1,12,1,13), (90,1,13,23,16), (90,1,36,1,13), (90,1,37,23,16), (90,1,60,1,13),
+    (90,1,61,11,16), (90,1,72,1,13), (90,1,73,11,16), (90,1,84,1,13), (90,1,85,2,16), (90,1,87,1,15),
+    (90,1,88,1,7), (91,1,8,1,7), (91,1,9,1,15), (91,1,10,2,16), (91,1,12,1,13), (91,1,13,23,16),
+    (91,1,36,1,13), (91,1,37,23,16), (91,1,60,1,13), (91,1,61,11,16), (91,1,72,1,13), (91,1,73,11,16),
+    (91,1,84,1,13), (91,1,85,1,16), (91,1,86,1,15), (91,1,87,1,7), (92,1,9,1,6), (92,1,10,1,11),
+    (92,1,11,1,16), (92,1,12,1,14), (92,1,13,23,16), (92,1,36,1,14), (92,1,37,23,16), (92,1,60,1,14),
+    (92,1,61,11,16), (92,1,72,1,14), (92,1,73,11,16), (92,1,84,2,11), (92,1,86,1,6), (93,1,11,1,6),
+    (93,1,12,1,11), (93,1,13,23,16), (93,1,36,1,14), (93,1,37,23,16), (93,1,60,1,14), (93,1,61,11,16),
+    (93,1,72,1,14), (93,1,73,10,16), (93,1,83,1,11), (93,1,84,1,6), (94,1,13,1,6), (94,1,14,1,11),
+    (94,1,15,1,14), (94,1,16,20,16), (94,1,36,1,14), (94,1,37,23,16), (94,1,60,1,14), (94,1,61,11,16),
+    (94,1,72,1,14), (94,1,73,7,16), (94,1,80,1,14), (94,1,81,1,11), (94,1,82,1,6), (95,1,16,2,7),
+    (95,1,18,18,11), (95,1,36,1,7), (95,1,37,23,11), (95,1,60,1,7), (95,1,61,11,11), (95,1,72,1,7),
+    (95,1,73,5,11), (95,1,78,2,7),
+];
+
 fn icon_hit(icon: Icon, u: f32, v: f32) -> bool {
     match icon {
         Icon::HorizonLogo => {
-            let left_bar = seg_dist(u, v, 0.22, 0.16, 0.22, 0.84) <= 0.095;
-            let right_bar = seg_dist(u, v, 0.78, 0.16, 0.78, 0.84) <= 0.095;
-            let bridge = seg_dist(u, v, 0.22, 0.56, 0.78, 0.42) <= 0.088;
-            left_bar || right_bar || bridge
+            // Single-colour Horizon sunset mark: a half sun with two gaps over a city skyline.
+            let dx = u - 0.50;
+            let dy = v - 0.56;
+            let sun = dy <= 0.0
+                && (dx * dx + dy * dy).sqrt() <= 0.31
+                && !(v >= 0.43 && v < 0.47)
+                && !(v >= 0.50 && v < 0.54);
+            let tower_a = u >= 0.08 && u <= 0.30 && v >= 0.66 && v <= 0.90;
+            let tower_b = u >= 0.34 && u <= 0.66 && v >= 0.72 && v <= 0.90;
+            let tower_c = u >= 0.70 && u <= 0.92 && v >= 0.60 && v <= 0.90;
+            sun || tower_a || tower_b || tower_c
         }
         Icon::ChevronDown => {
             seg_dist(u, v, 0.24, 0.38, 0.50, 0.64) <= 0.075
@@ -1234,13 +1416,35 @@ impl<'a> Ui<'a> {
         }
     }
 
-    /// Draw the stylized two-tone Horizon `H` mark at `(x, y)` in `size x size` dp.
+    /// Draw the colour Horizon sunset logo at `(x, y)` in `size x size` dp.
     pub fn horizon_logo(&mut self, x: f32, y: f32, size: f32) {
-        let theme = active_theme();
-        let primary = theme.accent;
-        let shadow = color::with_alpha(theme.surface_selected, 0.92);
-        self.icon(Icon::HorizonLogo, x, y + 0.5, size, shadow);
-        self.icon(Icon::HorizonLogo, x, y, size, primary);
+        self.draw_horizon_logo_art(x, y, size, 1.0, 1.0);
+    }
+
+    /// Draws the pixel-art Horizon sunset logo. `reveal` (0..1) uncovers it from the
+    /// bottom row up; `alpha` fades the whole mark.
+    pub fn draw_horizon_logo_art(&mut self, x: f32, y: f32, size: f32, alpha: f32, reveal: f32) {
+        let a = alpha.clamp(0.0, 1.0);
+        if a <= 0.01 || size <= 1.0 {
+            return;
+        }
+        let n = HORIZON_LOGO_GRID;
+        let cell = size / n as f32;
+        let first_row = ((1.0 - reveal.clamp(0.0, 1.0)) * n as f32) as u32;
+        for &(r0, rc, c0, cc, pal) in HORIZON_LOGO_RUNS.iter() {
+            let row_end = r0 as u32 + rc as u32;
+            if row_end <= first_row {
+                continue;
+            }
+            let row_start = (r0 as u32).max(first_row);
+            let col_end = c0 as u32 + cc as u32;
+            let x0 = x + c0 as f32 * cell;
+            let x1 = x + col_end as f32 * cell;
+            let y0 = y + row_start as f32 * cell;
+            let y1 = y + row_end as f32 * cell;
+            let rgb = HORIZON_LOGO_PALETTE[pal as usize];
+            self.fill(x0, y0, x1 - x0, y1 - y0, color::with_alpha(color::hex(rgb, 255), a));
+        }
     }
 
     /// The account's real head as a flat 8x8 skin face (no 3D build), so the
@@ -2642,6 +2846,19 @@ impl<'a> Ui<'a> {
     /// Paints the active Jetpack Compose Material You (Material 3 Expressive 2026) theme background
     /// with a smooth 60fps animating dynamic tonal mesh & ambient glow orbs over `[x, y, w, h]` dp.
     pub fn draw_theme_background(&mut self, x: f32, y: f32, w: f32, h: f32, theme: &ResolvedTheme) {
+        // The picture backgrounds replace the Material You tonal mesh entirely.
+        if theme.is_horizon {
+            self.draw_horizon_sunset(x, y, w, h);
+            return;
+        }
+        if theme.is_nightly {
+            self.draw_nightly_sky(x, y, w, h);
+            return;
+        }
+        if theme.is_custom {
+            self.draw_custom_background(x, y, w, h);
+            return;
+        }
         let t = motion::ambient_time();
         let wave_a = (t * 0.72).sin() * 0.5 + 0.5;
         let wave_b = (t * 0.48 + 1.35).cos() * 0.5 + 0.5;
@@ -2754,6 +2971,401 @@ impl<'a> Ui<'a> {
         );
     }
 
+    /// One pixel-art cell block of the Horizon sunset, in grid units.
+    fn horizon_px(&mut self, o: (f32, f32, f32), g: (i32, i32, i32, i32), color: u32) {
+        let (x0, y0, cell) = o;
+        let (gx, gy, gw, gh) = g;
+        if gw <= 0 || gh <= 0 {
+            return;
+        }
+        // Opaque blocks overlap by a hair so rounding never leaves seams.
+        let pad = if color >> 24 == 255 { 0.6 } else { 0.0 };
+        self.fill(
+            x0 + gx as f32 * cell,
+            y0 + gy as f32 * cell,
+            gw as f32 * cell + pad,
+            gh as f32 * cell + pad,
+            color,
+        );
+    }
+
+    /// Animated pixel-art sunset landscape ("Horizon" background) over `[x, y, w, h]` dp:
+    /// banded sky, twinkling stars, a softly bobbing sun, drifting clouds and three
+    /// parallax mountain ranges with pines. Frozen when reduced motion is on.
+    pub fn draw_horizon_sunset(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+        static START: OnceLock<Instant> = OnceLock::new();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let t = if motion::reduced_motion() || motion::launcher_animations_disabled() {
+            0.0
+        } else {
+            START.get_or_init(Instant::now).elapsed().as_secs_f32()
+        };
+
+        const ROWS: i32 = 90;
+        let cell = h / ROWS as f32;
+        let cols = (w / cell).ceil() as i32 + 1;
+        let horizon = (ROWS as f32 * 0.68) as i32;
+        let o = (x, y, cell);
+
+        // Sky: 14 quantized bands, deep purple -> magenta -> orange at the horizon.
+        const SKY: [u32; 4] = [0x1A0B2E, 0x4A2370, 0xC2418A, 0xFF9A4D];
+        const BANDS: i32 = 14;
+        for band in 0..BANDS {
+            let s = band as f32 / (BANDS - 1) as f32 * 3.0;
+            let i = (s.floor() as usize).min(2);
+            let rgb = blend_rgb(SKY[i], SKY[i + 1], s - i as f32);
+            let y0 = band * horizon / BANDS;
+            let y1 = (band + 1) * horizon / BANDS;
+            self.horizon_px(o, (0, y0, cols, y1 - y0), color::hex(rgb, 255));
+        }
+
+        // Stars: fixed pseudo-random spots, each twinkling at its own phase.
+        for i in 0..40u32 {
+            let hsh = i.wrapping_mul(2_654_435_761).rotate_left(13) ^ i.wrapping_mul(40_503);
+            let gx = (hsh % cols.max(1) as u32) as i32;
+            let gy = ((hsh >> 11) % (ROWS as u32 * 45 / 100)) as i32;
+            let phase = (hsh >> 20) as f32 * 0.0061;
+            let a = 0.5 + 0.5 * (t * 1.5 + phase).sin();
+            self.horizon_px(o, (gx, gy, 1, 1), color::hex(0xFFFFFF, (a * 255.0) as u8));
+        }
+
+        // Sun: glow rings, then the pixel disc; the mountains below hide its lower half.
+        let r = (ROWS as f32 * 0.17) as i32;
+        let cx = cols / 2;
+        let cy = horizon - r / 4 + ((t * 0.4).sin() * 2.0) as i32;
+        for (mult, alpha) in [(1.9_f32, 35u8), (1.5, 55)] {
+            let gr = (r as f32 * mult) as i32;
+            for dy in -gr..=0 {
+                let hw = ((gr * gr - dy * dy) as f32).sqrt() as i32;
+                self.horizon_px(o, (cx - hw, cy + dy, hw * 2, 1), color::hex(0xFFB060, alpha));
+            }
+        }
+        for dy in -r..=0 {
+            let hw = ((r * r - dy * dy) as f32).sqrt() as i32;
+            let rgb = blend_rgb(0xFFF3B0, 0xFFB347, (dy + r) as f32 / r as f32);
+            self.horizon_px(o, (cx - hw, cy + dy, hw * 2, 1), color::hex(rgb, 255));
+        }
+
+        // Clouds drifting left to right at different speeds.
+        for i in 0..4i32 {
+            let cw = 14 + i * 5;
+            let span = cols + cw * 2;
+            let drift = (t * (1.2 + i as f32 * 0.5)) as i32;
+            let gx = (i * 53 + drift) % span - cw;
+            let gy = (ROWS as f32 * (0.20 + i as f32 * 0.08)) as i32;
+            let cloud = 0x8A3F9E;
+            self.horizon_px(o, (gx, gy, cw, 1), color::hex(cloud, 150));
+            self.horizon_px(o, (gx + 3, gy - 1, cw - 8, 1), color::hex(cloud, 150));
+            self.horizon_px(o, (gx + 6, gy + 1, cw - 10, 1), color::hex(cloud, 110));
+        }
+
+        // Three parallax mountain ranges (far -> near); pines on the nearest one.
+        const RANGES: [(u32, f32, f32); 3] = [
+            (0x6B3A8C, 0.00, 0.8),
+            (0x3B1D5C, 0.06, 1.8),
+            (0x160A26, 0.12, 3.5),
+        ];
+        for (li, (rgb, drop, speed)) in RANGES.into_iter().enumerate() {
+            let col = color::hex(rgb, 255);
+            let base = horizon + (ROWS as f32 * drop) as i32 - 2;
+            let scroll = (t * speed).floor();
+            let amp = 7.0 + li as f32 * 2.0;
+            let freq = 0.035 + li as f32 * 0.012;
+            let phase = li as f32 * 1.9;
+            let tops: Vec<i32> = (0..cols)
+                .map(|gx| {
+                    let wx = gx as f32 + scroll;
+                    let ridge = amp
+                        * (0.6 * (wx * freq + phase).sin()
+                            + 0.4 * (wx * freq * 2.3 + phase * 1.7).sin());
+                    base - (ridge as i32).max(-3) - 6
+                })
+                .collect();
+            // Merge runs of equal height into one rect to keep the batch small.
+            let mut start = 0usize;
+            while start < tops.len() {
+                let mut end = start + 1;
+                while end < tops.len() && tops[end] == tops[start] {
+                    end += 1;
+                }
+                let top = tops[start];
+                self.horizon_px(o, (start as i32, top, (end - start) as i32, ROWS - top), col);
+                start = end;
+            }
+            if li == 2 {
+                for (gx, top) in tops.iter().enumerate() {
+                    let wx = gx as i32 + scroll as i32;
+                    if wx.rem_euclid(23) == 0 {
+                        let gx = gx as i32;
+                        self.horizon_px(o, (gx, top - 3, 1, 3), col);
+                        self.horizon_px(o, (gx - 1, top - 2, 3, 1), col);
+                        self.horizon_px(o, (gx - 2, top - 1, 5, 1), col);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Animated pixel-art night sky ("Nightly" background) over `[x, y, w, h]` dp: a deep
+    /// banded sky, stars that pulse at random rates (some with a sparkle cross), the odd
+    /// shooting star, a crescent moon inside a faint glowing full moon, clouds drifting
+    /// across it and three dark parallax mountain ranges. Frozen when reduced motion is on.
+    pub fn draw_nightly_sky(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+        static START: OnceLock<Instant> = OnceLock::new();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let t = if motion::reduced_motion() || motion::launcher_animations_disabled() {
+            0.0
+        } else {
+            START.get_or_init(Instant::now).elapsed().as_secs_f32()
+        };
+
+        const ROWS: i32 = 90;
+        let cell = h / ROWS as f32;
+        let cols = (w / cell).ceil() as i32 + 1;
+        let horizon = (ROWS as f32 * 0.72) as i32;
+        let o = (x, y, cell);
+
+        // Sky: 16 quantized bands, near-black navy -> indigo -> violet at the horizon.
+        const SKY: [u32; 4] = [0x04060F, 0x0A1030, 0x1A2058, 0x35307A];
+        const BANDS: i32 = 16;
+        for band in 0..BANDS {
+            let s = band as f32 / (BANDS - 1) as f32 * 3.0;
+            let i = (s.floor() as usize).min(2);
+            let rgb = blend_rgb(SKY[i], SKY[i + 1], s - i as f32);
+            let y0 = band * horizon / BANDS;
+            let y1 = (band + 1) * horizon / BANDS;
+            self.horizon_px(o, (0, y0, cols, y1 - y0), color::hex(rgb, 255));
+        }
+
+        // Stars: fixed pseudo-random spots, each pulsing at its own rate and phase.
+        // Every sixth one flares into a small sparkle cross at the top of its pulse.
+        for i in 0..72u32 {
+            let hsh = i.wrapping_mul(2_654_435_761).rotate_left(13) ^ i.wrapping_mul(40_503);
+            let gx = (hsh % cols.max(1) as u32) as i32;
+            let gy = ((hsh >> 9) % (horizon as u32 * 85 / 100).max(1)) as i32;
+            let phase = ((hsh >> 16) & 0xFF) as f32 * 0.0246;
+            let speed = 0.7 + ((hsh >> 24) & 0x7) as f32 * 0.32;
+            let pulse = (0.5 + 0.5 * (t * speed + phase).sin()).powi(2);
+            let a = (70.0 + 185.0 * pulse) as u8;
+            let tint = match hsh % 3 {
+                0 => 0xFFFFFF_u32,
+                1 => 0xCFE2FF_u32,
+                _ => 0xFFF1C9_u32,
+            };
+            self.horizon_px(o, (gx, gy, 1, 1), color::hex(tint, a));
+            if i % 6 == 0 && pulse > 0.55 {
+                let arm = color::hex(tint, (a as f32 * 0.55) as u8);
+                self.horizon_px(o, (gx - 1, gy, 1, 1), arm);
+                self.horizon_px(o, (gx + 1, gy, 1, 1), arm);
+                self.horizon_px(o, (gx, gy - 1, 1, 1), arm);
+                self.horizon_px(o, (gx, gy + 1, 1, 1), arm);
+            }
+        }
+
+        // A shooting star streaks down-left across the upper sky every nine seconds.
+        let cycle = (t / 9.0).floor();
+        let local = t - cycle * 9.0;
+        if t > 0.0 && local < 1.1 {
+            let p = local / 1.1;
+            let sh = (cycle as u32).wrapping_mul(2_246_822_519).rotate_left(11);
+            let sx = (sh % (cols.max(2) as u32 / 2)) as i32 + cols / 3;
+            let sy = 4 + ((sh >> 8) % 14) as i32;
+            let hx = sx - (p * 28.0) as i32;
+            let hy = sy + (p * 16.0) as i32;
+            for k in 0..7i32 {
+                let fade = (1.0 - k as f32 / 7.0) * (1.0 - p * 0.6);
+                self.horizon_px(o, (hx + k * 2, hy - k, 2, 1), color::hex(0xFFFFFF, (255.0 * fade) as u8));
+            }
+        }
+
+        // Moon: a breathing halo, a faint glowing full disc, then the bright crescent.
+        let r = (ROWS as f32 * 0.115) as i32;
+        let cx = (cols as f32 * 0.72) as i32;
+        let cy = (ROWS as f32 * 0.27) as i32 + ((t * 0.35).sin() * 1.5) as i32;
+        let glow = 0.75 + 0.25 * (t * 0.7).sin();
+        for (mult, alpha) in [(2.6_f32, 14.0_f32), (2.0, 22.0), (1.5, 34.0)] {
+            let gr = (r as f32 * mult) as i32;
+            for dy in -gr..=gr {
+                let hw = ((gr * gr - dy * dy) as f32).sqrt() as i32;
+                self.horizon_px(
+                    o,
+                    (cx - hw, cy + dy, hw * 2 + 1, 1),
+                    color::hex(0x9DB4FF, (alpha * glow) as u8),
+                );
+            }
+        }
+        for dy in -r..=r {
+            let hw = ((r * r - dy * dy) as f32).sqrt() as i32;
+            self.horizon_px(
+                o,
+                (cx - hw, cy + dy, hw * 2 + 1, 1),
+                color::hex(0xC9D6FF, (46.0 * glow) as u8),
+            );
+        }
+        let ox = (r as f32 * 0.42) as i32;
+        let oy = -((r as f32 * 0.12) as i32);
+        let r2 = (r as f32 * 0.86) as i32;
+        for dy in -r..=r {
+            let hw = ((r * r - dy * dy) as f32).sqrt() as i32;
+            let (l, rt) = (cx - hw, cx + hw);
+            let rgb = blend_rgb(0xFFFBE0, 0xE8DDAE, (dy + r) as f32 / (2 * r) as f32);
+            let col = color::hex(rgb, 255);
+            let dy2 = dy - oy;
+            if dy2.abs() <= r2 {
+                let hw2 = ((r2 * r2 - dy2 * dy2) as f32).sqrt() as i32;
+                let (cl, cr) = (cx + ox - hw2, cx + ox + hw2);
+                if cl > l {
+                    self.horizon_px(o, (l, cy + dy, (cl - 1).min(rt) - l + 1, 1), col);
+                }
+                if cr < rt {
+                    let s = (cr + 1).max(l);
+                    self.horizon_px(o, (s, cy + dy, rt - s + 1, 1), col);
+                }
+            } else {
+                self.horizon_px(o, (l, cy + dy, rt - l + 1, 1), col);
+            }
+        }
+
+        // Clouds drifting left to right at different speeds, lit along the top by the moon.
+        for i in 0..6i32 {
+            let cw = 16 + (i % 3) * 7;
+            let span = cols + cw * 2;
+            let speed = 1.0 + i as f32 * 0.45;
+            let drift = (t * speed) as i32;
+            let gx = (i * 47 + drift) % span - cw;
+            let gy = (ROWS as f32 * (0.14 + i as f32 * 0.07)) as i32;
+            let body = 0x1B2650;
+            self.horizon_px(o, (gx, gy, cw, 1), color::hex(body, 170));
+            self.horizon_px(o, (gx + 3, gy - 1, cw - 8, 1), color::hex(body, 170));
+            self.horizon_px(o, (gx + 6, gy + 1, cw - 10, 1), color::hex(body, 120));
+            self.horizon_px(o, (gx + 3, gy - 2, cw - 8, 1), color::hex(0x6F86C8, 70));
+        }
+
+        // Three parallax mountain ranges (far -> near); pines on the nearest one.
+        const RANGES: [(u32, f32, f32); 3] = [
+            (0x1F2A63, 0.00, 0.8),
+            (0x131B48, 0.06, 1.8),
+            (0x090E28, 0.12, 3.5),
+        ];
+        for (li, (rgb, drop, speed)) in RANGES.into_iter().enumerate() {
+            let col = color::hex(rgb, 255);
+            let base = horizon + (ROWS as f32 * drop) as i32 - 2;
+            let scroll = (t * speed).floor();
+            let amp = 7.0 + li as f32 * 2.0;
+            let freq = 0.035 + li as f32 * 0.012;
+            let phase = li as f32 * 1.9;
+            let tops: Vec<i32> = (0..cols)
+                .map(|gx| {
+                    let wx = gx as f32 + scroll;
+                    let ridge = amp
+                        * (0.6 * (wx * freq + phase).sin()
+                            + 0.4 * (wx * freq * 2.3 + phase * 1.7).sin());
+                    base - (ridge as i32).max(-3) - 6
+                })
+                .collect();
+            let mut start = 0usize;
+            while start < tops.len() {
+                let mut end = start + 1;
+                while end < tops.len() && tops[end] == tops[start] {
+                    end += 1;
+                }
+                let top = tops[start];
+                self.horizon_px(o, (start as i32, top, (end - start) as i32, ROWS - top), col);
+                start = end;
+            }
+            if li == 2 {
+                for (gx, top) in tops.iter().enumerate() {
+                    let wx = gx as i32 + scroll as i32;
+                    if wx.rem_euclid(23) == 0 {
+                        let gx = gx as i32;
+                        self.horizon_px(o, (gx, top - 3, 1, 3), col);
+                        self.horizon_px(o, (gx - 1, top - 2, 3, 1), col);
+                        self.horizon_px(o, (gx - 2, top - 1, 5, 1), col);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draws the user's GIF (see [`CustomBackground`]) cover-fitted over `[x, y, w, h]` dp,
+    /// run-length merged into rectangles and darkened a little so text stays readable.
+    /// Shows a plain dark fill until a GIF has been decoded. Frozen on the first frame when
+    /// reduced motion is on.
+    pub fn draw_custom_background(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+        static START: OnceLock<Instant> = OnceLock::new();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        self.fill(x, y, w, h, color::hex(0x0B1016, 255));
+        let background = CUSTOM_BACKGROUND
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(background) = background else {
+            return;
+        };
+        let total: u32 = background.delays_ms.iter().sum::<u32>().max(1);
+        let animate = !(motion::reduced_motion() || motion::launcher_animations_disabled());
+        let now_ms: u32 = if animate {
+            (START.get_or_init(Instant::now).elapsed().as_millis() % total as u128) as u32
+        } else {
+            0
+        };
+        let mut index = 0usize;
+        let mut elapsed = 0u32;
+        for (i, delay) in background.delays_ms.iter().enumerate() {
+            elapsed += *delay;
+            if now_ms < elapsed {
+                index = i;
+                break;
+            }
+        }
+        let cols = background.cols as usize;
+        let rows = background.rows as usize;
+        let Some(frame) = background.frames.get(index) else {
+            return;
+        };
+        if cols == 0 || rows == 0 || frame.len() < cols * rows {
+            return;
+        }
+        let cell = (w / cols as f32).max(h / rows as f32);
+        let ox = x + (w - cell * cols as f32) * 0.5;
+        let oy = y + (h - cell * rows as f32) * 0.5;
+        for row in 0..rows {
+            let y0 = oy + row as f32 * cell;
+            let y1 = oy + (row + 1) as f32 * cell;
+            if y1 < y || y0 > y + h {
+                continue;
+            }
+            let line = &frame[row * cols..(row + 1) * cols];
+            let mut start = 0usize;
+            while start < cols {
+                let rgb = line[start];
+                let mut end = start + 1;
+                while end < cols && line[end] == rgb {
+                    end += 1;
+                }
+                let x0 = ox + start as f32 * cell;
+                let x1 = ox + end as f32 * cell;
+                if x1 >= x && x0 <= x + w {
+                    self.fill(x0, y0, x1 - x0, y1 - y0, color::hex(rgb, 255));
+                }
+                start = end;
+            }
+        }
+        self.fill(x, y, w, h, color::hex(0x000000, 96));
+    }
+
     /// Jetpack Compose Material 3 `ElevatedCard` / `Card(surfaceContainerLow)` with tonal elevation
     /// and subtle `outlineVariant` keyline (no harsh 1px neon borders).
     pub fn m3_tonal_card(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, elevated: bool) {
@@ -2776,9 +3388,8 @@ impl<'a> Ui<'a> {
 
     // ---- the launcher's components & animated Horizon intro ----
 
-    /// Draws the procedural crisp vector Horizon `H` mark centered at `(cx, cy)` in `size x size` dp:
-    /// left pillar sliding up, right pillar sliding down, and tilted horizon bridge sweeping across
-    /// with a subtle accent glow ring.
+    /// Draws the Horizon sunset logo centered at `(cx, cy)` in `size x size` dp: the scene
+    /// builds up from the skyline to the sun, with a soft warm glow ring behind it.
     pub fn draw_animated_horizon_mark(
         &mut self,
         cx: f32,
@@ -2791,7 +3402,7 @@ impl<'a> Ui<'a> {
         if a <= 0.01 || size <= 4.0 {
             return;
         }
-        let theme = active_theme();
+        let glow = 0xFFB36B_u32;
         let ring_t = motion::ease_out_cubic((elapsed / 0.55).clamp(0.0, 1.0));
         let ring_r = size * (0.56 + 0.08 * ring_t);
         self.rounded(
@@ -2800,7 +3411,7 @@ impl<'a> Ui<'a> {
             ring_r * 2.0,
             ring_r * 2.0,
             ring_r * 0.36,
-            color::with_alpha(theme.accent, 0.14 * ring_t * a),
+            color::with_alpha(color::hex(glow, 255), 0.14 * ring_t * a),
         );
         self.stroke_rounded(
             cx - ring_r,
@@ -2809,82 +3420,13 @@ impl<'a> Ui<'a> {
             ring_r * 2.0,
             ring_r * 0.36,
             1.5,
-            color::with_alpha(theme.accent, 0.38 * ring_t * a),
+            color::with_alpha(color::hex(glow, 255), 0.38 * ring_t * a),
         );
 
-        let plate_r = size * 0.46;
-        self.rounded(
-            cx - plate_r,
-            cy - plate_r,
-            plate_r * 2.0,
-            plate_r * 2.0,
-            plate_r * 0.32,
-            color::with_alpha(theme.surface, 0.94 * a),
-        );
-        self.stroke_rounded(
-            cx - plate_r,
-            cy - plate_r,
-            plate_r * 2.0,
-            plate_r * 2.0,
-            plate_r * 0.32,
-            1.4,
-            color::with_alpha(theme.border_strong, 0.85 * a),
-        );
-
-        let t_left = motion::ease_out_quint((elapsed / 0.42).clamp(0.0, 1.0));
-        let t_right = motion::ease_out_quint(((elapsed - 0.08).max(0.0) / 0.42).clamp(0.0, 1.0));
-        let t_bridge = motion::spring_spatial(((elapsed - 0.16).max(0.0) / 0.48).clamp(0.0, 1.0));
-
-        let bar_w = (size * 0.135).max(3.0);
-        let bar_h = (size * 0.56).max(10.0);
-        let bar_r = bar_w * 0.5;
-        let offset_x = size * 0.185;
-
-        // Left pillar sliding up into place
-        let left_slide = (1.0 - t_left) * (size * 0.24);
-        self.rounded(
-            cx - offset_x - bar_w * 0.5,
-            cy - bar_h * 0.5 + left_slide,
-            bar_w,
-            bar_h,
-            bar_r,
-            color::with_alpha(theme.text_primary, t_left * a),
-        );
-
-        // Right pillar sliding down into place
-        let right_slide = -(1.0 - t_right) * (size * 0.24);
-        self.rounded(
-            cx + offset_x - bar_w * 0.5,
-            cy - bar_h * 0.5 + right_slide,
-            bar_w,
-            bar_h,
-            bar_r,
-            color::with_alpha(theme.accent, t_right * a),
-        );
-
-        // Tilted horizon bridge sweeping across from left pillar to right pillar
-        if t_bridge > 0.02 {
-            let x0 = cx - offset_x;
-            let y0 = cy + size * 0.065;
-            let x1 = cx + offset_x;
-            let y1 = cy - size * 0.065;
-            let steps = 15usize;
-            let active_steps = ((steps as f32 * t_bridge).ceil() as usize).clamp(1, steps);
-            let dot_d = (bar_w * 0.92).max(2.5);
-            for i in 0..active_steps {
-                let f = i as f32 / (steps.saturating_sub(1).max(1) as f32);
-                let px = x0 + (x1 - x0) * f;
-                let py = y0 + (y1 - y0) * f;
-                self.rounded(
-                    px - dot_d * 0.5,
-                    py - dot_d * 0.5,
-                    dot_d,
-                    dot_d,
-                    dot_d * 0.5,
-                    color::with_alpha(theme.accent, t_bridge * a),
-                );
-            }
-        }
+        let pop = motion::ease_out_quint((elapsed / 0.50).clamp(0.0, 1.0));
+        let reveal = motion::ease_out_cubic((elapsed / 0.85).clamp(0.0, 1.0));
+        let logo = size * (0.88 + 0.12 * pop);
+        self.draw_horizon_logo_art(cx - logo * 0.5, cy - logo * 0.5, logo, a, reveal);
     }
 
     /// Renders a clean, modern, minimal animated Horizon intro screen centered on the
@@ -3245,6 +3787,12 @@ pub enum BackgroundMode {
     #[default]
     Solid,
     Gradient,
+    /// Animated pixel-art sunset landscape.
+    Horizon,
+    /// Animated pixel-art night sky with a crescent moon, stars and clouds.
+    Nightly,
+    /// A GIF chosen by the user, drawn as a low-resolution pixel-art animation.
+    Custom,
 }
 
 impl BackgroundMode {
@@ -3252,6 +3800,9 @@ impl BackgroundMode {
         match self {
             Self::Solid => "Solid Color",
             Self::Gradient => "Multi-Stop Gradient",
+            Self::Horizon => "Horizon Sunset",
+            Self::Nightly => "Nightly Sky",
+            Self::Custom => "Custom GIF",
         }
     }
 }
@@ -3422,6 +3973,12 @@ pub fn lerp_color(c0: u32, c1: u32, t: f32) -> u32 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedTheme {
     pub is_light: bool,
+    /// Animated "Horizon" sunset background is active.
+    pub is_horizon: bool,
+    /// Animated "Nightly" night-sky background is active.
+    pub is_nightly: bool,
+    /// The user's own "Custom" GIF background is active.
+    pub is_custom: bool,
     pub is_gradient: bool,
     pub gradient_direction: GradientDirection,
     pub use_three_stops: bool,
@@ -3625,6 +4182,9 @@ impl LauncherThemeConfig {
 
         ResolvedTheme {
             is_light,
+            is_horizon: self.background_mode == BackgroundMode::Horizon,
+            is_nightly: self.background_mode == BackgroundMode::Nightly,
+            is_custom: self.background_mode == BackgroundMode::Custom,
             is_gradient: self.background_mode == BackgroundMode::Gradient,
             gradient_direction: self.gradient_direction,
             use_three_stops: self.use_three_stops,
@@ -3654,6 +4214,32 @@ impl LauncherThemeConfig {
 }
 
 static ACTIVE_THEME: std::sync::Mutex<Option<ResolvedTheme>> = std::sync::Mutex::new(None);
+
+/// A user-chosen GIF, pre-shrunk to a small colour grid so it can be drawn as rectangles.
+/// `frames[i]` holds `cols * rows` cells as `0xRRGGBB`; `delays_ms[i]` is that frame's length.
+pub struct CustomBackground {
+    pub cols: u32,
+    pub rows: u32,
+    pub frames: Vec<Vec<u32>>,
+    pub delays_ms: Vec<u32>,
+}
+
+static CUSTOM_BACKGROUND: std::sync::Mutex<Option<std::sync::Arc<CustomBackground>>> =
+    std::sync::Mutex::new(None);
+
+/// Installs (or clears) the decoded GIF used by [`BackgroundMode::Custom`].
+pub fn set_custom_background(background: Option<CustomBackground>) {
+    *CUSTOM_BACKGROUND.lock().unwrap_or_else(|e| e.into_inner()) =
+        background.map(std::sync::Arc::new);
+}
+
+/// Whether a custom GIF has been decoded and is ready to draw.
+pub fn custom_background_loaded() -> bool {
+    CUSTOM_BACKGROUND
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+}
 
 pub fn active_theme() -> ResolvedTheme {
     if let Ok(guard) = ACTIVE_THEME.lock()

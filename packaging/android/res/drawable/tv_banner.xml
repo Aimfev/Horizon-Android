@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Original Horizon H mark; scalable TV launcher banner, no game assets. -->
+<!-- Horizon sunset mark; scalable TV launcher banner, no game assets. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="320dp" android:height="180dp"
     android:viewportWidth="320" android:viewportHeight="180">
-    <path android:fillColor="#111B24" android:pathData="M0,0h320v180h-320z" />
-    <path android:fillColor="#74D99F" android:pathData="M112,42h24v36h48v-36h24v96h-24v-36h-48v36h-24z" />
-    <path android:fillColor="#3C7658" android:pathData="M0,158h320v22h-320z" />
+    <path android:fillColor="#1B1740" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#3A2A6E" android:pathData="M0,96h320v84h-320z" />
+    <path android:fillColor="#FFDD8F" android:pathData="M112,104a48,48 0 0 1 96,0z" />
+    <path android:fillColor="#E8A56A" android:pathData="M112,92h96v4h-96z" />
+    <path android:fillColor="#E8A56A" android:pathData="M120,100h80v4h-80z" />
+    <path android:fillColor="#0C1030" android:pathData="M0,128h60v52h-60z M72,118h44v62h-44z M128,134h64v46h-64z M204,112h40v68h-40z M256,126h64v54h-64z" />
 </vector>

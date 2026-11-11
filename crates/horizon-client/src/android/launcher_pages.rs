@@ -1232,6 +1232,7 @@ impl Launcher {
         if r.suspended {
             return Ok(());
         }
+        custom_background_poll(&self.home);
         self.targets.clear();
         SLIDER_TRACK_TARGETS.with(|t| t.borrow_mut().clear());
         self.list_targets.clear();
@@ -5382,18 +5383,18 @@ impl Launcher {
                 let theme_cfg = self.catalog.config.theme.clone();
                 let resolved = theme_cfg.resolve();
                 let total_h = if theme_cfg.background_mode == BackgroundMode::Gradient {
-                    690.0
+                    740.0
                 } else {
-                    580.0
+                    630.0
                 };
                 let extra_ime = if ime_top_dp.is_some() { 200.0 } else { 0.0 };
                 let max_scroll = (total_h + extra_ime - (list_bottom - list_top)).max(0.0);
                 if let Some(ime_y) = ime_top_dp {
                     let target_row_y = match self.catalog.editing {
-                        Some("theme_accent") => Some(list_top + 320.0),
-                        Some("theme_bg" | "theme_surface") => Some(list_top + 404.0),
+                        Some("theme_accent") => Some(list_top + 370.0),
+                        Some("theme_bg" | "theme_surface") => Some(list_top + 454.0),
                         Some("theme_grad_start" | "theme_grad_mid" | "theme_grad_end") => {
-                            Some(list_top + 532.0)
+                            Some(list_top + 582.0)
                         }
                         _ => None,
                     };
@@ -5508,7 +5509,7 @@ impl Launcher {
                 }
                 cy += prev_h + 14.0;
 
-                // 2. Appearance Mode (Dark Mode vs Light Mode) & Background Mode (Solid vs Gradient)
+                // 2. Appearance Mode (Dark vs Light) & Background Mode (Solid, Gradient, Horizon, Nightly, Custom GIF)
                 if cy + 44.0 >= list_top && cy <= list_bottom {
                     let half = (content_w - 10.0) * 0.5;
                     let quarter = (half - 6.0) * 0.5;
@@ -5531,6 +5532,10 @@ impl Launcher {
                         self.list_targets
                             .push((r, Action::SetThemeAppearance(mode)));
                     }
+                }
+                cy += 50.0;
+                if cy + 44.0 >= list_top && cy <= list_bottom {
+                    let fifth = (content_w - 24.0) / 5.0;
                     for (i, (lbl, bmode, active)) in [
                         (
                             "Solid BG",
@@ -5542,16 +5547,26 @@ impl Launcher {
                             BackgroundMode::Gradient,
                             theme_cfg.background_mode == BackgroundMode::Gradient,
                         ),
+                        (
+                            "Horizon BG",
+                            BackgroundMode::Horizon,
+                            theme_cfg.background_mode == BackgroundMode::Horizon,
+                        ),
+                        (
+                            "Nightly BG",
+                            BackgroundMode::Nightly,
+                            theme_cfg.background_mode == BackgroundMode::Nightly,
+                        ),
+                        (
+                            "Custom GIF",
+                            BackgroundMode::Custom,
+                            theme_cfg.background_mode == BackgroundMode::Custom,
+                        ),
                     ]
                     .into_iter()
                     .enumerate()
                     {
-                        let r = [
-                            content_x + half + 10.0 + i as f32 * (quarter + 6.0),
-                            cy,
-                            quarter,
-                            38.0,
-                        ];
+                        let r = [content_x + i as f32 * (fifth + 6.0), cy, fifth, 38.0];
                         button(
                             ui,
                             &mut self.targets,
@@ -7782,11 +7797,28 @@ impl Launcher {
                 self.catalog.status = format!("Switched to {}.", appearance.label());
             }
             Some(Action::SetThemeBackgroundMode(mode)) => {
+                let was_custom = self.catalog.config.theme.background_mode
+                    == horizon_client::ui_theme::BackgroundMode::Custom;
                 self.catalog.config.theme.background_mode = mode;
                 horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = format!("Background style set to {}.", mode.label());
+                // Custom GIF: pick a file the first time, or when Custom is tapped again.
+                if mode == horizon_client::ui_theme::BackgroundMode::Custom
+                    && (was_custom
+                        || !(horizon_client::ui_theme::custom_background_loaded()
+                            || custom_background_file_exists(&self.home)))
+                {
+                    match crate::documents::begin_into_dir(self.home.join("backgrounds")) {
+                        Ok(()) => {
+                            self.catalog.status =
+                                "Choose a GIF for your custom background (photos are ignored)."
+                                    .into();
+                        }
+                        Err(error) => self.catalog.status = error,
+                    }
+                }
             }
             Some(Action::SetGradientDirection(dir)) => {
                 self.catalog.config.theme.gradient_direction = dir;
@@ -8580,4 +8612,151 @@ fn wrap_text_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Ve
         lines.push("No additional description available.".into());
     }
     lines
+}
+
+/// Whether any `.gif` has already been imported for the Custom background.
+fn custom_background_file_exists(home: &std::path::Path) -> bool {
+    std::fs::read_dir(home.join("backgrounds"))
+        .map(|entries| {
+            entries.flatten().any(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("gif"))
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// While the Custom background is selected, watches `<home>/backgrounds` (every ~1.5 s) for
+/// the newest `.gif` and decodes it on a worker thread. Photos and videos are ignored.
+fn custom_background_poll(home: &std::path::Path) {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant, SystemTime};
+    static LAST_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
+    static LOADED: Mutex<Option<(std::path::PathBuf, SystemTime)>> = Mutex::new(None);
+    static LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !horizon_client::ui_theme::active_theme().is_custom || LOADING.load(Ordering::Relaxed) {
+        return;
+    }
+    {
+        let mut last = LAST_CHECK.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|t| t.elapsed() < Duration::from_millis(1500)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    let mut newest: Option<(std::path::PathBuf, SystemTime)> = None;
+    if let Ok(entries) = std::fs::read_dir(home.join("backgrounds")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_gif = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("gif"));
+            if !is_gif {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            if newest.as_ref().is_none_or(|(_, t)| modified > *t) {
+                newest = Some((path, modified));
+            }
+        }
+    }
+    let Some(key) = newest else {
+        return;
+    };
+    if LOADED.lock().unwrap_or_else(|e| e.into_inner()).as_ref() == Some(&key) {
+        return;
+    }
+    LOADING.store(true, Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let (path, _) = &key;
+        match decode_custom_gif(path) {
+            Ok(background) => {
+                horizon_client::ui_theme::set_custom_background(Some(background));
+                // Keep only the newest GIF on disk.
+                if let Some(dir) = path.parent()
+                    && let Ok(entries) = std::fs::read_dir(dir)
+                {
+                    for entry in entries.flatten() {
+                        let other = entry.path();
+                        let is_gif = other
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .is_some_and(|e| e.eq_ignore_ascii_case("gif"));
+                        if is_gif && other != *path {
+                            let _ = std::fs::remove_file(other);
+                        }
+                    }
+                }
+            }
+            Err(error) => log::warn!("Custom background: {error}"),
+        }
+        *LOADED.lock().unwrap_or_else(|e| e.into_inner()) = Some(key);
+        LOADING.store(false, Ordering::Relaxed);
+    });
+}
+
+/// Decodes a GIF into at most 150 frames of an 80x45 colour grid (centre-cropped to 16:9,
+/// colours reduced to 12 bits so neighbouring cells merge into long runs).
+fn decode_custom_gif(
+    path: &std::path::Path,
+) -> std::result::Result<horizon_client::ui_theme::CustomBackground, String> {
+    use image::{AnimationDecoder, imageops};
+    const COLS: u32 = 80;
+    const ROWS: u32 = 45;
+    const MAX_FRAMES: usize = 150;
+    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > 40 * 1024 * 1024 {
+        return Err("GIF is larger than 40 MB".into());
+    }
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let decoder = image::codecs::gif::GifDecoder::new(std::io::BufReader::new(file))
+        .map_err(|e| e.to_string())?;
+    let mut frames: Vec<Vec<u32>> = Vec::new();
+    let mut delays_ms: Vec<u32> = Vec::new();
+    for frame in decoder.into_frames().take(MAX_FRAMES) {
+        let frame = frame.map_err(|e| e.to_string())?;
+        let (numer, denom) = frame.delay().numer_denom_ms();
+        let delay = (numer / denom.max(1)).clamp(20, 1000);
+        let buffer = frame.into_buffer();
+        let (sw, sh) = buffer.dimensions();
+        if sw == 0 || sh == 0 {
+            continue;
+        }
+        let (cw, ch) = if sw * ROWS > sh * COLS {
+            ((sh * COLS / ROWS).max(1), sh)
+        } else {
+            (sw, (sw * ROWS / COLS).max(1))
+        };
+        let cropped =
+            imageops::crop_imm(&buffer, (sw - cw) / 2, (sh - ch) / 2, cw, ch).to_image();
+        let small = imageops::resize(&cropped, COLS, ROWS, imageops::FilterType::Triangle);
+        let mut cells = Vec::with_capacity((COLS * ROWS) as usize);
+        for pixel in small.pixels() {
+            let [r, g, b, a] = pixel.0;
+            if a < 128 {
+                cells.push(0);
+                continue;
+            }
+            let q = |v: u8| ((v >> 4) as u32) * 17;
+            cells.push((q(r) << 16) | (q(g) << 8) | q(b));
+        }
+        frames.push(cells);
+        delays_ms.push(delay);
+    }
+    if frames.is_empty() {
+        return Err("GIF has no frames".into());
+    }
+    Ok(horizon_client::ui_theme::CustomBackground {
+        cols: COLS,
+        rows: ROWS,
+        frames,
+        delays_ms,
+    })
 }
