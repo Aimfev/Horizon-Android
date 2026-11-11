@@ -5,11 +5,12 @@
 //! 1. The launcher immediately compiles/transpiles it in real time (zero manual steps, no
 //!    external build server or "Try again" dialog required).
 //! 2. Reads official Horizon `.hnmod` bundles (`horizon-native.json`, `mixins/<id>/horizon-mixin.toml`,
-//!    `mixins/<id>/*.rs`, `api/src/*.rs`, and `src/lib.rs`) as well as Java `.jar` archives,
-//!    extracting real mod metadata, settings definitions, keybinds, commands, and hook targets.
-//! 3. Generates `<profile>/horizon-native-mods/<id>.hnmod` with `horizon-native.json`,
-//!    `src/lib.rs`, preserved `mixins/`, and `horizon-compiled.json` (used by the in-process
-//!    runtime engine in `game/android_bundled.rs` so the mod works immediately).
+//!    `mixins/<id>/*.rs`, `api/src/*.rs`, and the generated `mixins/<id>/data/horizon/runtime.rs`)
+//!    as well as Java `.jar` archives, extracting real mod metadata, settings definitions,
+//!    keybinds, commands, and hook targets.
+//! 3. Generates `<profile>/horizon-native-mods/<id>.hnmod` with `horizon-native.json`, preserved
+//!    `mixins/`, and the compiled metadata at `mixins/<id>/data/horizon/compiled.json` (used by the
+//!    in-process runtime engine in `game/android_bundled.rs` so the mod works immediately).
 //! 4. Generates `<profile>/horizon-mods/<id>.hmod` when the mod adds items, blocks, recipes, or
 //!    assets (`api = "0.2"`, `capabilities = ["registries"]`).
 //! 5. Automatically enables the mod in `<profile>/horizon-mods.txt`.
@@ -25,6 +26,31 @@ const MAX_ZIP_ENTRIES: usize = 4096;
 const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
 pub const DEFAULT_HORIZON_REV: &str = "8933e8c2d81bef1549a63dc1c8341ca46fe3cffa";
 pub const DEFAULT_MIXINS_REV: &str = "1e758beab4f00b7ab82183f5b4a7ec4f42599a98";
+
+/// The compiled metadata and the generated runtime source of a transpiled bundle, as paths under
+/// the mod's own `mixins/<id>/`: `horizon_mods::index::native::allowed` takes a `.json` only under
+/// `mixins/<id>/data/`, and code there is a bundle's data (`native_data!`), not a mixin source the
+/// native build compiles. The in-process engine reads both by these suffixes.
+pub const COMPILED_META: &str = "/data/horizon/compiled.json";
+pub const RUNTIME_SOURCE: &str = "/data/horizon/runtime.rs";
+
+fn compiled_meta_entry(mod_id: &str) -> String {
+    format!("mixins/{mod_id}{COMPILED_META}")
+}
+
+fn runtime_source_entry(mod_id: &str) -> String {
+    format!("mixins/{mod_id}{RUNTIME_SOURCE}")
+}
+
+/// Whether `name` is output of a compile rather than input it copies through: a bundle's manifest,
+/// its compiled metadata and runtime source, and the top-level paths older versions wrote.
+fn is_compiled_output(name: &str) -> bool {
+    matches!(
+        name,
+        "horizon-native.json" | "src/lib.rs" | "horizon-compiled.json"
+    ) || name.ends_with(RUNTIME_SOURCE)
+        || name.ends_with(COMPILED_META)
+}
 
 fn is_safe_zip_entry_name(name: &str) -> bool {
     !name.is_empty()
@@ -700,8 +726,8 @@ pub fn parse_rust_mod_metadata(rust_src: &str, mod_id: &str) -> (Option<String>,
 }
 
 /// Real-time compiler for `.hnmod` archives: validates or upgrades any `.hnmod` file,
-/// parses `mixins/<id>/*.rs`, `mixins/<id>/horizon-mixin.toml`, and `src/lib.rs`,
-/// embeds `horizon-compiled.json` with parsed metadata & hook capabilities so the
+/// parses `mixins/<id>/*.rs`, `mixins/<id>/horizon-mixin.toml`, and `mixins/<id>/data/horizon/runtime.rs`,
+/// embeds `mixins/<id>/data/horizon/compiled.json` with parsed metadata & hook capabilities so the
 /// in-process runtime engine executes it immediately without external server compilation,
 /// installs it into `<profile_dir>/horizon-native-mods/<id>.hnmod`, removes duplicates in
 /// `<profile_dir>/horizon-mods/`, and enables it in `horizon-mods.txt`.
@@ -789,7 +815,7 @@ pub fn compile_hnmod_bundle_realtime(
                     description = desc;
                 }
             }
-        } else if name == "src/lib.rs" {
+        } else if name == "src/lib.rs" || name.ends_with(RUNTIME_SOURCE) {
             lib_rs = String::from_utf8_lossy(&buf).into_owned();
         } else if name.ends_with(".rs") || name.ends_with("horizon-mixin.toml") {
             mixin_rs_combined.push_str(&String::from_utf8_lossy(&buf));
@@ -885,14 +911,14 @@ pub fn compile_hnmod_bundle_realtime(
             .map_err(|e| e.to_string())?;
 
         out_zip
-            .start_file("src/lib.rs", opts)
+            .start_file(runtime_source_entry(&mod_id), opts)
             .map_err(|e| e.to_string())?;
         out_zip
             .write_all(lib_rs.as_bytes())
             .map_err(|e| e.to_string())?;
 
         out_zip
-            .start_file("horizon-compiled.json", opts)
+            .start_file(compiled_meta_entry(&mod_id), opts)
             .map_err(|e| e.to_string())?;
         out_zip
             .write_all(
@@ -917,10 +943,7 @@ pub fn compile_hnmod_bundle_realtime(
         }
         let mut combined_content_files = Vec::new();
         for (name, bytes) in existing_files {
-            if matches!(
-                name.as_str(),
-                "horizon-native.json" | "src/lib.rs" | "horizon-compiled.json"
-            ) {
+            if is_compiled_output(&name) {
                 continue;
             }
             if name == "horizon-mod.toml"
@@ -979,8 +1002,8 @@ pub fn compile_hnmod_bundle_realtime(
 }
 
 /// Inspects and auto-compiles a Java `.jar` file in real time into both:
-/// - `<profile_dir>/horizon-native-mods/<id>.hnmod` (with `horizon-compiled.json`)
-/// - `<profile_dir>/horizon-mods/<id>.hmod` (with valid `horizon-mod.toml`, `data/<id>/horizon/`, and `horizon-content.json`)
+/// - `<profile_dir>/horizon-native-mods/<id>.hnmod` (with `mixins/<id>/data/horizon/compiled.json`)
+/// - `<profile_dir>/horizon-mods/<id>.hmod` (with valid `horizon-mod.toml`, `data/<id>/horizon/`, and `mixins/<id>/`)
 /// and enables the mod in `horizon-mods.txt`.
 pub fn transpile_jar_to_horizon_mods(
     jar_path: &Path,
@@ -1402,7 +1425,7 @@ fn build_hmod_from_jar(
     primary_ns: Option<&str>,
     items: &[String],
     blocks: &[String],
-    lang_en: &BTreeMap<String, String>,
+    _lang_en: &BTreeMap<String, String>,
     asset_entries: &[(String, Vec<u8>)],
     port_pack_carry_dir: Option<&Path>,
 ) -> Result<(), String> {
@@ -1440,6 +1463,16 @@ fn build_hmod_from_jar(
         let mut carried_files = Vec::new();
         collect_carry(carry_dir, carry_dir, &mut carried_files);
         for (rel_path, bytes) in carried_files {
+            // A `.hmod` that carries native code must hold nothing outside `mixins/<id>/` but its
+            // content (`horizon_mods::index::native::Bundle::read`), so the pack's root icon moves
+            // under the mod's assets and anything else at the root is dropped.
+            let rel_path = if rel_path.eq_ignore_ascii_case("icon.png") {
+                format!("assets/{mod_id}/icon.png")
+            } else if rel_path.starts_with("assets/") || rel_path.starts_with("data/") {
+                rel_path
+            } else {
+                continue;
+            };
             if valid_hmod_rel_path(&rel_path) && written_paths.insert(rel_path.clone()) {
                 zip.start_file(&rel_path, opts).map_err(|e| e.to_string())?;
                 zip.write_all(&bytes).map_err(|e| e.to_string())?;
@@ -1448,7 +1481,7 @@ fn build_hmod_from_jar(
     }
 
     for (raw_path, bytes) in asset_entries {
-        let remapped = if let Some(ns) = primary_ns {
+        let mut remapped = if let Some(ns) = primary_ns {
             if ns != mod_id {
                 if let Some(rest) = raw_path.strip_prefix(&format!("assets/{ns}/")) {
                     format!("assets/{mod_id}/{rest}")
@@ -1463,11 +1496,13 @@ fn build_hmod_from_jar(
         } else {
             raw_path.clone()
         };
+        if remapped.eq_ignore_ascii_case("icon.png") {
+            remapped = format!("assets/{mod_id}/icon.png");
+        }
         let lower_path = remapped.to_ascii_lowercase();
-        let allowed_root = lower_path == "icon.png"
-            || (lower_path.starts_with(&format!("assets/{mod_id}/"))
-                || (lower_path.starts_with(&format!("data/{mod_id}/"))
-                    && !lower_path.starts_with(&format!("data/{mod_id}/horizon/"))))
+        let allowed_root = lower_path.starts_with(&format!("assets/{mod_id}/"))
+            || (lower_path.starts_with(&format!("data/{mod_id}/"))
+                && !lower_path.starts_with(&format!("data/{mod_id}/horizon/")))
             || lower_path.starts_with("data/minecraft/tags/")
             || lower_path.starts_with("data/c/tags/");
         if !allowed_root || !valid_hmod_rel_path(&lower_path) {
@@ -1480,27 +1515,8 @@ fn build_hmod_from_jar(
         }
     }
 
-    let mut item_defs = Vec::new();
     let mut creative_items = Vec::new();
     for item in items {
-        let name = lang_en
-            .get(&format!("item.{mod_id}.{item}"))
-            .cloned()
-            .unwrap_or_else(|| title_case_id(item));
-        let tex_rel = format!("assets/{mod_id}/textures/item/{item}.png");
-        let texture = if written_paths.contains(&tex_rel) {
-            format!("{mod_id}:item/{item}")
-        } else {
-            "minecraft:item/amethyst_shard".to_owned()
-        };
-        item_defs.push(serde_json::json!({
-            "id": format!("{mod_id}:{item}"),
-            "name": name,
-            "template": "minecraft:stick",
-            "texture": texture,
-            "max_stack": 64
-        }));
-
         // Write `data/<mod_id>/horizon/item/<item>.json` for `horizon_mods::Content::read`
         let decl_path = format!("data/{mod_id}/horizon/item/{item}.json");
         if valid_hmod_rel_path(&decl_path) && written_paths.insert(decl_path.clone()) {
@@ -1515,25 +1531,7 @@ fn build_hmod_from_jar(
         }
     }
 
-    let mut block_defs = Vec::new();
     for block in blocks {
-        let name = lang_en
-            .get(&format!("block.{mod_id}.{block}"))
-            .cloned()
-            .unwrap_or_else(|| title_case_id(block));
-        let tex_rel = format!("assets/{mod_id}/textures/block/{block}.png");
-        let texture = if written_paths.contains(&tex_rel) {
-            format!("{mod_id}:block/{block}")
-        } else {
-            "minecraft:block/amethyst_block".to_owned()
-        };
-        block_defs.push(serde_json::json!({
-            "id": format!("{mod_id}:{block}"),
-            "name": name,
-            "template": "minecraft:stone",
-            "textures": { "all": texture }
-        }));
-
         // Write `data/<mod_id>/horizon/block/<block>.json` for `horizon_mods::Content::read`
         let decl_path = format!("data/{mod_id}/horizon/block/{block}.json");
         if valid_hmod_rel_path(&decl_path) && written_paths.insert(decl_path.clone()) {
@@ -1562,21 +1560,6 @@ fn build_hmod_from_jar(
         }
     }
 
-    let content_json = serde_json::json!({
-        "format_version": 1,
-        "id": mod_id,
-        "name": title,
-        "version": version,
-        "description": description,
-        "items": item_defs,
-        "blocks": block_defs
-    });
-    let content_bytes =
-        serde_json::to_vec_pretty(&content_json).map_err(|e| format!("json: {e}"))?;
-    zip.start_file("horizon-content.json", opts)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(&content_bytes).map_err(|e| e.to_string())?;
-
     let horizon_mod_toml = format!(
         "id = \"{mod_id}\"\nname = \"{}\"\nversion = \"{}\"\ndescription = \"{}\"\napi = \"0.2\"\ncapabilities = [\"registries\"]\n",
         title.replace('\\', "/").replace('"', "'"),
@@ -1587,11 +1570,6 @@ fn build_hmod_from_jar(
             .replace('\n', " ")
     );
     zip.start_file("horizon-mod.toml", opts)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(horizon_mod_toml.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    zip.start_file("mod.toml", opts)
         .map_err(|e| e.to_string())?;
     zip.write_all(horizon_mod_toml.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -1715,11 +1693,11 @@ fn build_hnmod_from_jar(
         zip.write_all(&mbytes).map_err(|e| e.to_string())?;
     }
 
-    zip.start_file("src/lib.rs", opts)
+    zip.start_file(runtime_source_entry(mod_id), opts)
         .map_err(|e| e.to_string())?;
     zip.write_all(lib_rs.as_bytes()).map_err(|e| e.to_string())?;
 
-    zip.start_file("horizon-compiled.json", opts)
+    zip.start_file(compiled_meta_entry(mod_id), opts)
         .map_err(|e| e.to_string())?;
     zip.write_all(&compiled_bytes).map_err(|e| e.to_string())?;
 
@@ -2864,14 +2842,14 @@ pub fn install_builtin_horizon_mod(
         }
 
         out_zip
-            .start_file("src/lib.rs", opts)
+            .start_file(runtime_source_entry(&mod_id), opts)
             .map_err(|e| e.to_string())?;
         out_zip
             .write_all(lib_rs.as_bytes())
             .map_err(|e| e.to_string())?;
 
         out_zip
-            .start_file("horizon-compiled.json", opts)
+            .start_file(compiled_meta_entry(&mod_id), opts)
             .map_err(|e| e.to_string())?;
         out_zip
             .write_all(

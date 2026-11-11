@@ -243,7 +243,9 @@ pub(super) fn parse_dynamic_hnmod(path: &std::path::Path) -> Option<DynamicHnmod
                     }
                 }
             }
-        } else if name == "horizon-compiled.json" {
+        } else if name == "horizon-compiled.json"
+            || name.ends_with(horizon_client::jar_transpiler::COMPILED_META)
+        {
             let mut s = String::new();
             let _ = entry.read_to_string(&mut s);
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
@@ -528,7 +530,17 @@ fn ensure_dynamic_mods_loaded(game: &Game<'_>, force: bool) {
             None => {
                 if let Ok(bytes) = fs::read(&path) {
                     if let Ok(mut z) = zip::ZipArchive::new(Cursor::new(&bytes)) {
-                        if z.by_name("horizon-compiled.json").is_err() {
+                        let compiled = (0..z.len().min(2048)).any(|i| {
+                            z.by_index(i).is_ok_and(|e| {
+                                e.name().is_ok_and(|n| {
+                                    n == "horizon-compiled.json"
+                                        || n.ends_with(
+                                            horizon_client::jar_transpiler::COMPILED_META,
+                                        )
+                                })
+                            })
+                        });
+                        if !compiled {
                             let _ = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(
                                 &path, &root,
                             );
