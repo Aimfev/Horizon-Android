@@ -1396,7 +1396,7 @@ class LauncherOverhaulTests(unittest.TestCase):
         # 3. Verify Jetpack Compose Material You Dashboard (Hero Split Button, 2-Column Bento Grid, Single Discord/GitHub, Stadium Nav Rail)
         lp_rs = _read_repo_file("crates/horizon-client/src/android/launcher_pages.rs")
         self.assertIn("ui.m3_tonal_card(content_x, card_y, content_w, hero_h, 18.0, true);", lp_rs)
-        self.assertIn('"Horizon Mod Engine"', lp_rs)
+        self.assertIn('"Moonlight Mod Engine"', lp_rs)
         self.assertIn('"Installed Mods"', lp_rs)
         self.assertIn('"Browse Mods"', lp_rs)
         self.assertIn('"Build Native .so"', lp_rs)

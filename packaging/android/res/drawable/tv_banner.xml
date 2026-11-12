@@ -1,12 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Horizon sunset mark; scalable TV launcher banner, no game assets. -->
+<!-- Moonlight creeper-face mark; scalable TV launcher banner, no game assets. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="320dp" android:height="180dp"
     android:viewportWidth="320" android:viewportHeight="180">
-    <path android:fillColor="#1B1740" android:pathData="M0,0h320v180h-320z" />
-    <path android:fillColor="#3A2A6E" android:pathData="M0,96h320v84h-320z" />
-    <path android:fillColor="#FFDD8F" android:pathData="M112,104a48,48 0 0 1 96,0z" />
-    <path android:fillColor="#E8A56A" android:pathData="M112,92h96v4h-96z" />
-    <path android:fillColor="#E8A56A" android:pathData="M120,100h80v4h-80z" />
-    <path android:fillColor="#0C1030" android:pathData="M0,128h60v52h-60z M72,118h44v62h-44z M128,134h64v46h-64z M204,112h40v68h-40z M256,126h64v54h-64z" />
+    <path android:fillColor="#000000" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#EBEBEB" android:pathData="M134.4,63.9h16.8v17.3h-16.8z M168.8,63.9h17.1v17.3h-17.1z M151.2,81.2h17.6v8.8h-17.6z M142.7,90.0h34.6v17.1h-34.6z M142.7,107.0h8.8v8.5h-8.8z M168.5,107.0h8.8v8.5h-8.8z" />
 </vector>

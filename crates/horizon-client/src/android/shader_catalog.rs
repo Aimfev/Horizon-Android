@@ -48,7 +48,7 @@ pub fn install(
     let v = version(&versions).ok_or("No downloadable shader ZIP is available")?;
     if !v.required.is_empty() {
         return Err(
-            "This shader requires additional projects which Horizon cannot install automatically"
+            "This shader requires additional projects which Moonlight cannot install automatically"
                 .into(),
         );
     }
@@ -95,7 +95,7 @@ pub fn install(
         )
         .map_err(|e| e.to_string())?;
         if native {
-            return Err("This ZIP is a native Horizon shader pack. Use Import file to install it as .hshader".into());
+            return Err("This ZIP is a native Moonlight shader pack. Use Import file to install it as .hshader".into());
         }
         let (algo, hash) = file.checksum().ok_or("The source supplies no checksum")?;
         if replacing {
@@ -195,7 +195,7 @@ pub fn install_horizon_builtin_shader(
 ) -> Result<usize, String> {
     progress(&format!("Building {} (.hshader)...", project.title), 0.25);
     let pack = horizon_shader_api::builtin_shader_pack(&project.id)
-        .ok_or_else(|| format!("Unknown Horizon shader pack: {}", project.id))?;
+        .ok_or_else(|| format!("Unknown Moonlight shader pack: {}", project.id))?;
     horizon_shader_api::check(&pack)
         .map_err(|errs| errs.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))?;
     let bytes = pack.package()?;
@@ -227,7 +227,7 @@ pub fn install_horizon_builtin_shader(
         checksum: format!("SHA-256:{sha}"),
         page: project.page.clone(),
         dependency: false,
-        verdict: Some("Verified Horizon Shader (.hshader)".into()),
+        verdict: Some("Verified Moonlight Shader (.hshader)".into()),
         skipped: vec![],
         namespaces: vec![],
     });

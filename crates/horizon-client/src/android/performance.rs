@@ -184,7 +184,7 @@ pub fn export(home: &Path) -> std::result::Result<(), String> {
     if crate::platform::open_documents("reports") {
         Ok(())
     } else {
-        Err("Open the system Files app, then Horizon Android / Reports.".into())
+        Err("Open the system Files app, then Moonlight Android / Reports.".into())
     }
 }
 

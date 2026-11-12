@@ -54,7 +54,7 @@ extern "system" fn Java_dev_horizon_android_HorizonDocumentsProvider_nativeCall(
             .map(|s| s.into_raw())
             .map_err(|e| e.to_string())
     }))
-    .unwrap_or_else(|_| Err("Horizon document operation failed".into()));
+    .unwrap_or_else(|_| Err("Moonlight document operation failed".into()));
     match result {
         Ok(value) => value,
         Err(error) => {
@@ -83,7 +83,7 @@ extern "system" fn Java_dev_horizon_android_HorizonDocumentsProvider_nativeOpen(
         }
         Ok::<_, String>(file.into_raw_fd())
     }))
-    .unwrap_or_else(|_| Err("Horizon document open failed".into()));
+    .unwrap_or_else(|_| Err("Moonlight document open failed".into()));
     match result {
         Ok(fd) => fd,
         Err(error) => {

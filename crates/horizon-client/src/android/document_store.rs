@@ -32,7 +32,7 @@ fn world_access(id: &str) -> io::Result<()> {
 }
 
 fn invalid() -> io::Error {
-    io::Error::new(ErrorKind::InvalidInput, "Invalid Horizon document")
+    io::Error::new(ErrorKind::InvalidInput, "Invalid Moonlight document")
 }
 fn component(name: &str) -> io::Result<()> {
     if name.is_empty()
@@ -143,7 +143,7 @@ fn resolve(home: &Path, id: &str) -> io::Result<Document> {
 fn row(home: &Path, id: &str) -> io::Result<Value> {
     if id == ROOT {
         return Ok(
-            json!({"document_id": ROOT, "_display_name": "Horizon Android",
+            json!({"document_id": ROOT, "_display_name": "Moonlight Android",
             "mime_type": DIRECTORY, "flags": 8}),
         );
     }
@@ -282,7 +282,7 @@ pub fn call(home: &Path, op: &str, id: &str, arg: &str) -> io::Result<Value> {
     }
     match op {
         "roots" => Ok(json!([{"root_id": ROOT, "document_id": ROOT,
-            "title": "Horizon Android", "flags": 19, "mime_types": "*/*"}])),
+            "title": "Moonlight Android", "flags": 19, "mime_types": "*/*"}])),
         "document" => Ok(json!([row(home, id)?])),
         "children" => Ok(json!(children(home, id)?)),
         "child" => Ok(json!(is_child(home, id, arg))),

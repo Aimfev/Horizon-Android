@@ -418,7 +418,7 @@ fn clipboard_write(text: &str, sensitive: bool) -> bool {
                 &[JValue::Object(&name)],
             )?
             .l()?;
-        let label = JObject::from(env.new_string("Horizon")?);
+        let label = JObject::from(env.new_string("Moonlight")?);
         let value = JObject::from(env.new_string(text)?);
         let clip = env
             .call_static_method(

@@ -82,7 +82,7 @@ fn save_file(file: &Path, report: bool) -> std::result::Result<(), String> {
                 .call_method(&dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?
                 .l()?;
             let value: String = env.get_string((&path).into())?.into();
-            Some(PathBuf::from(value).join("HorizonAndroid"))
+            Some(PathBuf::from(value).join("MoonlightAndroid"))
         } else {
             None
         };
@@ -168,7 +168,7 @@ fn write(request: Request) -> Result<String> {
             if std::time::Instant::now() >= deadline {
                 PERMISSION_PENDING.store(false, Ordering::Relaxed);
                 return Err(
-                    "Allow storage access to export this file; the original remains in Horizon"
+                    "Allow storage access to export this file; the original remains in Moonlight"
                         .into(),
                 );
             }
@@ -203,9 +203,9 @@ fn write(request: Request) -> Result<String> {
                 &values,
                 "relative_path",
                 if request.report {
-                    "Download/HorizonAndroid"
+                    "Download/MoonlightAndroid"
                 } else {
-                    "Pictures/HorizonAndroid"
+                    "Pictures/MoonlightAndroid"
                 },
             )?;
             pending(&mut env, &values, 1)?;
@@ -300,7 +300,7 @@ fn write(request: Request) -> Result<String> {
             env.call_method(request.resolver.as_obj(),"update","(Landroid/net/Uri;Landroid/content/ContentValues;Ljava/lang/String;[Ljava/lang/String;)I",&[JValue::Object(&row),JValue::Object(&published),JValue::Object(&JObject::null()),JValue::Object(&JObject::null())])?;
         }
         Ok(format!(
-            "{} saved to {}/HorizonAndroid/{name}",
+            "{} saved to {}/MoonlightAndroid/{name}",
             if request.report {
                 "Performance report"
             } else {

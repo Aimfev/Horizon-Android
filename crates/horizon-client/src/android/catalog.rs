@@ -396,7 +396,7 @@ impl CompilerMode {
     ];
     pub fn label(self) -> &'static str {
         match self {
-            Self::JarMod => "Java .jar -> Horizon",
+            Self::JarMod => "Java .jar -> Moonlight",
             Self::Modpack => "Modpack (.mrpack)",
             Self::DataPackUpgrade => "26.3 Data Pack",
             Self::NativeSoBuild => "Native .so Build",
@@ -909,9 +909,9 @@ impl Catalog {
                     horizon_client::content_files::Kind::Shaders => "SHADER",
                 };
                 let ext_tag = if name.ends_with(".hmod") {
-                    "Horizon Mod (.hmod)"
+                    "Moonlight Mod (.hmod)"
                 } else if name.ends_with(".hnmod") {
-                    "Horizon Native Mod (.hnmod)"
+                    "Moonlight Native Mod (.hnmod)"
                 } else if name.ends_with(".jar") {
                     let stem = name.strip_suffix(".jar").unwrap_or(&name);
                     let cid = horizon_client::jar_transpiler::sanitize_mod_id(stem);
@@ -920,7 +920,7 @@ impl Catalog {
                     }
                     "Java Mod (.jar -> .hnmod)"
                 } else if name.ends_with(".hshader") {
-                    "Horizon Shader (.hshader)"
+                    "Moonlight Shader (.hshader)"
                 } else if kind == horizon_client::content_files::Kind::Shaders {
                     "Shader Pack (.zip)"
                 } else {
@@ -1040,7 +1040,7 @@ impl Catalog {
                     size_bytes,
                     badge: "MOD",
                     subtitle: format!(
-                        "Horizon Native Mod (.hnmod)  •  {}  •  {name}",
+                        "Moonlight Native Mod (.hnmod)  •  {}  •  {name}",
                         format_file_size(size_bytes)
                     ),
                 });
@@ -1058,7 +1058,7 @@ impl Catalog {
                         enabled: true,
                         size_bytes: 0,
                         badge: "MOD",
-                        subtitle: format!("Built-in Horizon Mod  •  {b_desc}  •  {b_id}"),
+                        subtitle: format!("Built-in Moonlight Mod  •  {b_desc}  •  {b_id}"),
                     });
                 }
             }
@@ -1092,7 +1092,7 @@ impl Catalog {
                     .is_file();
                 if has_hnmod && has_hmod {
                     item.subtitle = format!(
-                        "Horizon Native Mod (.hnmod + .hmod)  •  {}  •  {canon_id}.hnmod",
+                        "Moonlight Native Mod (.hnmod + .hmod)  •  {}  •  {canon_id}.hnmod",
                         format_file_size(item.size_bytes)
                     );
                 }
@@ -1991,13 +1991,13 @@ impl Catalog {
             && items.is_empty()
             && self.config.shader_source == crate::shader_catalog::Origin::Horizon
         {
-            "No Horizon shader packs match this search. Try another query or import a .hshader."
+            "No Moonlight shader packs match this search. Try another query or import a .hshader."
                 .into()
         } else if self.page == Page::Shaders
             && self.config.shader_source == crate::shader_catalog::Origin::Horizon
         {
             format!(
-                "{} Horizon Native Shaders (.hshader) — tap Install to activate",
+                "{} Moonlight Native Shaders (.hshader) — tap Install to activate",
                 items.len()
             )
         } else if self.page == Page::Mods {
@@ -2010,7 +2010,7 @@ impl Catalog {
                 .count();
             let total = bundled_matches + items.len();
             format!(
-                "{total} Horizon mods available (10 per page) — tap Install to enable"
+                "{total} Moonlight mods available (10 per page) — tap Install to enable"
             )
         } else {
             format!("{} results — tap Install to download", items.len())
@@ -2122,7 +2122,7 @@ impl Catalog {
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
             if bytes.len() > 32 * 1024 * 1024 {
-                return Err("Horizon mod exceeds 32 MiB".into());
+                return Err("Moonlight mod exceeds 32 MiB".into());
             }
             *progress.lock().unwrap_or_else(|e| e.into_inner()) = 0.85;
             let dir = game.join("horizon-mods");
@@ -2182,7 +2182,7 @@ impl Catalog {
         let status = match (project.kind, project.source) {
             (Kind::Shader, browser::SourceId::Modrinth) => "Downloading shader pack ZIP...",
             (Kind::Shader, browser::SourceId::Horizon) => "Installing Horizon Native Shader (.hshader)...",
-            (Kind::Mod, _) => "Installing Horizon mod package...",
+            (Kind::Mod, _) => "Installing Moonlight mod package...",
             _ => "Checking compatibility and downloading...",
         };
         self.job(status, move || {
@@ -2517,7 +2517,7 @@ impl Catalog {
                         payload.len()
                     ),
                     format!(
-                        "Target ABI: arm64-v8a • Horizon rev {} • Mixins rev {} • Hooks API 415",
+                        "Target ABI: arm64-v8a • Moonlight rev {} • Mixins rev {} • Hooks API 415",
                         &horizon_client::jar_transpiler::DEFAULT_HORIZON_REV[..10],
                         &horizon_client::jar_transpiler::DEFAULT_MIXINS_REV[..10],
                     ),
@@ -2793,7 +2793,7 @@ impl Catalog {
             );
             self.compiler_logs = vec![
                 format!(
-                    "Compiled & verified '{}' ({}) for Horizon Native Hook API 415.",
+                    "Compiled & verified '{}' ({}) for Moonlight Native Hook API 415.",
                     res.name, res.mod_id
                 ),
                 format!("Active hooks & features: {}", res.mapped_hooks.join(", ")),

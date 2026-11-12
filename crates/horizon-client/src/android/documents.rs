@@ -845,7 +845,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             {
                 set_progress(
                     format!("Compiling mod '{name}'..."),
-                    "Running real-time Horizon Native Compiler...",
+                    "Running real-time Moonlight Native Compiler...",
                     Some(0.92),
                 );
                 let (mod_id, ext) = content_files::read_mod_archive_id(&staged, &name)?;
@@ -881,7 +881,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 if ext == "hpack" {
                     if let Ok(count) = horizon_client::jar_transpiler::install_hpack_modpack(&dest, profile_root) {
                         imported(
-                            format!("Installed Horizon Modpack '{mod_id}' ({count} mods enabled)!"),
+                            format!("Installed Moonlight Modpack '{mod_id}' ({count} mods enabled)!"),
                             Kind::Mods,
                         );
                         return Ok(());
@@ -1076,7 +1076,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                     && let Ok(count) = horizon_client::jar_transpiler::install_hpack_modpack(&target, &request.home)
                 {
                     transpiled_msg = Some(format!(
-                        "Installed Horizon Modpack '{mod_id}' ({count} mods enabled) — ready in game!"
+                        "Installed Moonlight Modpack '{mod_id}' ({count} mods enabled) — ready in game!"
                     ));
                 } else if ext == "hnmod"
                     && let Ok(compiled) = horizon_client::jar_transpiler::compile_hnmod_bundle_realtime(&target, &request.home)

@@ -1313,7 +1313,7 @@ impl Launcher {
         self.targets.push((eq_btn_rect, Action::OpenControlEditor));
 
         let brand_w = (eq_btn_rect[0] - 66.0).max(70.0);
-        ui.text(Face::SemiBold, 16.0, 54.0, 10.0, my3_text(), "Horizon");
+        ui.text(Face::SemiBold, 16.0, 54.0, 10.0, my3_text(), "Moonlight");
         let version_line = format!("Android {}", crate::backend::VERSION);
         let fitted_version = ui.fit_text(Face::Regular, 11.0, &version_line, brand_w);
         ui.text(
@@ -1851,14 +1851,14 @@ impl Launcher {
                     let rt_hdr = ui.fit_text(
                         Face::SemiBold,
                         12.5,
-                        "Horizon Mod Engine",
+                        "Moonlight Mod Engine",
                         right_w - 54.0,
                     );
                     ui.text(Face::SemiBold, 12.5, rx + 48.0, bento_y + 10.0, my3_text(), &rt_hdr);
                     let rt_sub = ui.fit_text(
                         Face::Regular,
                         10.5,
-                        "Official Horizon Mods • In-Process Engine",
+                        "Official Moonlight Mods • In-Process Engine",
                         right_w - 54.0,
                     );
                     ui.text(Face::Regular, 10.5, rx + 48.0, bento_y + 25.0, my3_accent(), &rt_sub);
@@ -2200,7 +2200,7 @@ impl Launcher {
                     content_x + 64.0,
                     y + 45.0,
                     my3_accent(),
-                    "Horizon Built-in • Tap for versions, Modrinth info & screenshots",
+                    "Moonlight Built-in • Tap for versions, Modrinth info & screenshots",
                 );
                 if let Some(c) = ui.clip_rect(card_rect) {
                     self.targets.push((c, Action::OpenBundledProject(id)));
@@ -2590,7 +2590,7 @@ impl Launcher {
                 x + 22.0,
                 y + 24.0,
                 my3_text(),
-                "Exit Horizon Android?",
+                "Exit Moonlight Android?",
             );
             let bw = (width - 52.0) * 0.5;
             button(
@@ -4257,7 +4257,7 @@ impl Launcher {
             title_x,
             head_y + 2.0,
             my3_text(),
-            "Horizon Android Update",
+            "Moonlight Android Update",
         );
         let badge_text = format!("v1.0.0  →  v{}", info.version);
         let badge_w = ui.measure(Face::SemiBold, 11.0, &badge_text) + 16.0;
@@ -5607,7 +5607,7 @@ impl Launcher {
                 }
                 cy += 50.0;
                 if cy + 44.0 >= list_top && cy <= list_bottom {
-                    let sixth = (content_w - 30.0) / 6.0;
+                    let seventh = (content_w - 36.0) / 7.0;
                     for (i, (lbl, bmode, active)) in [
                         (
                             "Solid",
@@ -5620,7 +5620,7 @@ impl Launcher {
                             theme_cfg.background_mode == BackgroundMode::Gradient,
                         ),
                         (
-                            "Horizon",
+                            "Sunset",
                             BackgroundMode::Horizon,
                             theme_cfg.background_mode == BackgroundMode::Horizon,
                         ),
@@ -5635,6 +5635,11 @@ impl Launcher {
                             theme_cfg.background_mode == BackgroundMode::Thun,
                         ),
                         (
+                            "Moonlight",
+                            BackgroundMode::Moonlight,
+                            theme_cfg.background_mode == BackgroundMode::Moonlight,
+                        ),
+                        (
                             "Custom",
                             BackgroundMode::Custom,
                             theme_cfg.background_mode == BackgroundMode::Custom,
@@ -5643,7 +5648,7 @@ impl Launcher {
                     .into_iter()
                     .enumerate()
                     {
-                        let r = [content_x + i as f32 * (sixth + 6.0), cy, sixth, 38.0];
+                        let r = [content_x + i as f32 * (seventh + 6.0), cy, seventh, 38.0];
                         button(
                             ui,
                             &mut self.targets,
@@ -7228,7 +7233,7 @@ impl Launcher {
                 match crate::documents::begin_control_import(game_home) {
                     Ok(()) => {
                         self.catalog.status =
-                            "Pick a control .json file — Horizon will auto-detect MCPE or GoyControl and save it in the right folder."
+                            "Pick a control .json file — Moonlight will auto-detect MCPE or GoyControl and save it in the right folder."
                                 .into();
                     }
                     Err(err) => {
@@ -7346,13 +7351,13 @@ impl Launcher {
             Some(Action::GameFiles) => {
                 self.catalog.status = if crate::platform::open_documents(crate::document_store::ROOT) {
                     "Game files opened. Worlds, mods, packs, shaders and reports are available here."
-                } else { "Open system Files > Horizon Android." }.into();
+                } else { "Open system Files > Moonlight Android." }.into();
             }
             Some(Action::WorldFiles) => {
                 let id = crate::document_store::folder_id(self.catalog.config.profile, "worlds");
                 self.catalog.status = if crate::platform::open_documents(&id) {
                     "Copy a complete world folder to back up or import. Finish copying before Play; never replace an existing world silently."
-                } else { "Open system Files > Horizon Android > Worlds. Copy complete world folders while the game is closed." }.into();
+                } else { "Open system Files > Moonlight Android > Worlds. Copy complete world folders while the game is closed." }.into();
             }
             Some(Action::WorkerLimit) => self.open_chooser(chooser::Kind::WorkerLimit),
             Some(Action::ChooseWorkerLimit(limit)) => {
@@ -7835,7 +7840,7 @@ impl Launcher {
                 self.catalog.status = if crate::platform::open_documents("reports") {
                     "Opened Reports folder in system Files.".into()
                 } else {
-                    "Reports are saved under Horizon Android > Reports.".into()
+                    "Reports are saved under Moonlight Android > Reports.".into()
                 };
             }
             Some(Action::ToggleLauncherAnimations) => {
@@ -8030,7 +8035,7 @@ impl Launcher {
                 horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
-                self.catalog.status = "Theme reset to Horizon default (Obsidian Violet).".into();
+                self.catalog.status = "Theme reset to Moonlight default (Obsidian Violet).".into();
             }
             Some(Action::SkipIntro) => {
                 self.anim.intro_done = true;
