@@ -224,8 +224,210 @@ public final class HorizonActivity extends android.app.NativeActivity {
         });
     }
 
+    private static String sBackgroundOut;
+
+    /** Opens the photo picker (Google Photos / gallery) for the launcher's Custom background. */
+    public void pickBackgroundMedia(final String outPath) {
+        sBackgroundOut = outPath;
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    android.content.Intent intent;
+                    if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        intent = new android.content.Intent("android.provider.action.PICK_IMAGES");
+                    } else {
+                        intent = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+                        intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+                        intent.setType("*/*");
+                        intent.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "video/*"});
+                    }
+                    startActivityForResult(intent, 4104);
+                } catch (Throwable err) {
+                    try {
+                        android.content.Intent fallback = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+                        fallback.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+                        fallback.setType("*/*");
+                        fallback.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "video/*"});
+                        startActivityForResult(fallback, 4104);
+                    } catch (Throwable err2) {
+                        backgroundToast("No photo picker is available.");
+                    }
+                }
+            }
+        });
+    }
+
+    private void backgroundToast(final String message) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                android.widget.Toast.makeText(HorizonActivity.this, message, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private static long backgroundNumber(String value, long fallback) {
+        try {
+            return Long.parseLong(value);
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    /** Centre-crops to 16:9, shrinks to cols x rows and keeps 12 bits of colour per cell. */
+    private static int[] backgroundCells(android.graphics.Bitmap src, int cols, int rows) {
+        int sw = src.getWidth();
+        int sh = src.getHeight();
+        int cw;
+        int ch;
+        if ((long) sw * rows > (long) sh * cols) {
+            ch = sh;
+            cw = Math.max(1, sh * cols / rows);
+        } else {
+            cw = sw;
+            ch = Math.max(1, sw * rows / cols);
+        }
+        android.graphics.Bitmap crop = android.graphics.Bitmap.createBitmap(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch);
+        android.graphics.Bitmap small = android.graphics.Bitmap.createScaledBitmap(crop, cols, rows, true);
+        int[] px = new int[cols * rows];
+        small.getPixels(px, 0, cols, 0, 0, cols, rows);
+        for (int i = 0; i < px.length; i++) {
+            int p = px[i];
+            int r = ((p >> 16) & 0xFF) >> 4;
+            int g = ((p >> 8) & 0xFF) >> 4;
+            int b = (p & 0xFF) >> 4;
+            px[i] = ((r * 17) << 16) | ((g * 17) << 8) | (b * 17);
+        }
+        return px;
+    }
+
+    private void handleBackgroundPick(final android.net.Uri uri) {
+        final String outPath = sBackgroundOut;
+        if (outPath == null) return;
+        backgroundToast("Preparing your background...");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    String type = getContentResolver().getType(uri);
+                    if (type != null && type.equalsIgnoreCase("image/gif")) {
+                        backgroundToast("GIFs are not supported. Choose a photo or a video.");
+                        return;
+                    }
+                    boolean video = type != null && type.startsWith("video/");
+                    boolean image = type != null && type.startsWith("image/");
+                    if (!video && !image) {
+                        backgroundToast("Choose a photo or a video.");
+                        return;
+                    }
+                    final int cols = 96;
+                    final int rows = 54;
+                    java.util.ArrayList<int[]> frames = new java.util.ArrayList<int[]>();
+                    java.util.ArrayList<Integer> delays = new java.util.ArrayList<Integer>();
+                    if (image) {
+                        android.graphics.ImageDecoder.Source source =
+                                android.graphics.ImageDecoder.createSource(getContentResolver(), uri);
+                        android.graphics.Bitmap bitmap = android.graphics.ImageDecoder.decodeBitmap(
+                                source, new android.graphics.ImageDecoder.OnHeaderDecodedListener() {
+                            @Override public void onHeaderDecoded(android.graphics.ImageDecoder decoder,
+                                    android.graphics.ImageDecoder.ImageInfo info,
+                                    android.graphics.ImageDecoder.Source src) {
+                                decoder.setAllocator(android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE);
+                                int shortSide = Math.min(info.getSize().getWidth(), info.getSize().getHeight());
+                                decoder.setTargetSampleSize(Math.max(1, shortSide / 400));
+                            }
+                        });
+                        frames.add(backgroundCells(bitmap, cols, rows));
+                        delays.add(Integer.valueOf(1000));
+                    } else {
+                        android.media.MediaMetadataRetriever retriever = new android.media.MediaMetadataRetriever();
+                        try {
+                            retriever.setDataSource(HorizonActivity.this, uri);
+                            long durationMs = backgroundNumber(retriever.extractMetadata(
+                                    android.media.MediaMetadataRetriever.METADATA_KEY_DURATION), 0);
+                            int vw = (int) backgroundNumber(retriever.extractMetadata(
+                                    android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH), 0);
+                            int vh = (int) backgroundNumber(retriever.extractMetadata(
+                                    android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT), 0);
+                            int rotation = (int) backgroundNumber(retriever.extractMetadata(
+                                    android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION), 0);
+                            if (rotation == 90 || rotation == 270) {
+                                int swap = vw;
+                                vw = vh;
+                                vh = swap;
+                            }
+                            if (durationMs <= 0 || vw <= 0 || vh <= 0) {
+                                backgroundToast("Couldn't read that video.");
+                                return;
+                            }
+                            float scale = 192f / Math.min(vw, vh);
+                            if (scale > 1f) scale = 1f;
+                            int dw = Math.max(2, Math.round(vw * scale));
+                            int dh = Math.max(2, Math.round(vh * scale));
+                            int maxFrames = 150;
+                            long stepMs = Math.max(100L, durationMs / maxFrames);
+                            int count = (int) Math.min((long) maxFrames, Math.max(1L, durationMs / stepMs));
+                            for (int i = 0; i < count; i++) {
+                                android.graphics.Bitmap frame = retriever.getScaledFrameAtTime(
+                                        i * stepMs * 1000L,
+                                        android.media.MediaMetadataRetriever.OPTION_CLOSEST, dw, dh);
+                                if (frame != null) {
+                                    frames.add(backgroundCells(frame, cols, rows));
+                                } else if (!frames.isEmpty()) {
+                                    frames.add(frames.get(frames.size() - 1));
+                                } else {
+                                    continue;
+                                }
+                                delays.add(Integer.valueOf((int) stepMs));
+                            }
+                        } finally {
+                            try {
+                                retriever.release();
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                    if (frames.isEmpty()) {
+                        backgroundToast("Couldn't read that file.");
+                        return;
+                    }
+                    java.io.File out = new java.io.File(outPath);
+                    java.io.File parent = out.getParentFile();
+                    if (parent != null) parent.mkdirs();
+                    java.io.File tmp = new java.io.File(outPath + ".tmp");
+                    java.io.DataOutputStream stream = new java.io.DataOutputStream(
+                            new java.io.BufferedOutputStream(new java.io.FileOutputStream(tmp)));
+                    try {
+                        stream.writeInt(0x48424731);
+                        stream.writeInt(cols);
+                        stream.writeInt(rows);
+                        stream.writeInt(frames.size());
+                        for (int i = 0; i < delays.size(); i++) stream.writeInt(delays.get(i).intValue());
+                        for (int i = 0; i < frames.size(); i++) {
+                            int[] cells = frames.get(i);
+                            for (int j = 0; j < cells.length; j++) stream.writeInt(cells[j]);
+                        }
+                    } finally {
+                        stream.close();
+                    }
+                    if (!tmp.renameTo(out)) {
+                        out.delete();
+                        tmp.renameTo(out);
+                    }
+                    backgroundToast("Custom background ready.");
+                } catch (Throwable err) {
+                    android.util.Log.e("HorizonActivity", "Custom background failed", err);
+                    backgroundToast("Couldn't read that file.");
+                }
+            }
+        }, "horizon-background").start();
+    }
+
     @Override protected void onActivityResult(int request, int result, android.content.Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == 4104) {
+            if (result == -1 && data != null && data.getData() != null) {
+                handleBackgroundPick(data.getData());
+            }
+            return;
+        }
         if (request != 4101 && request != 4102 && request != 4103) return;
         try {
             android.net.Uri uri = (data == null) ? null : data.getData();

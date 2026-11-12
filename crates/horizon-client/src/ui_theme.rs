@@ -1346,6 +1346,21 @@ impl<'a> Ui<'a> {
 
     /// A filled rectangle with rounded corners (pure, artifact-free geometry).
     pub fn rounded(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
+        // Liquid Glass turns every button-sized, opaque surface into lifted 3D glass.
+        if liquid_glass_enabled()
+            && w >= 30.0
+            && (26.0..=240.0).contains(&h)
+            && radius >= 5.0
+            && (color >> 24) >= 200
+        {
+            self.glass_rounded(x, y, w, h, radius, color);
+        } else {
+            self.rounded_plain(x, y, w, h, radius, color);
+        }
+    }
+
+    /// The plain filled rounded rectangle behind [`Ui::rounded`].
+    pub fn rounded_plain(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
         let (dy, alpha) = self.stagger_transform(x, y, w, h);
         let y = y + dy;
         let color = if alpha < 0.999 {
@@ -2855,6 +2870,10 @@ impl<'a> Ui<'a> {
             self.draw_nightly_sky(x, y, w, h);
             return;
         }
+        if theme.is_thun {
+            self.draw_thun_storm(x, y, w, h);
+            return;
+        }
         if theme.is_custom {
             self.draw_custom_background(x, y, w, h);
             return;
@@ -3386,6 +3405,227 @@ impl<'a> Ui<'a> {
         );
     }
 
+    /// A Liquid Glass surface: soft drop shadow, a slightly see-through body, a glossy upper
+    /// half, a bright specular edge, a rim light and a dark refraction line underneath.
+    fn glass_rounded(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
+        self.rounded_plain(x, y + 2.5, w, h, radius, color::hex(0x000000, 46));
+        self.rounded_plain(x, y, w, h, radius, color::with_alpha(color, 0.78));
+        self.rounded_plain(
+            x + 1.5,
+            y + 1.5,
+            (w - 3.0).max(1.0),
+            h * 0.46,
+            (radius - 1.0).max(2.0),
+            color::hex(0xFFFFFF, 34),
+        );
+        let edge = (w - 2.0 * radius).max(0.0);
+        self.fill(x + radius, y + 1.0, edge, 1.0, color::hex(0xFFFFFF, 120));
+        self.fill(x + radius, y + h - 2.0, edge, 1.5, color::hex(0x000000, 60));
+        self.stroke_rounded(x, y, w, h, radius, 1.0, color::hex(0xFFFFFF, 70));
+    }
+
+    /// Draws and ages the tap bubbles released by [`spawn_tap_bubbles`].
+    pub fn draw_tap_bubbles(&mut self) {
+        let now = std::time::Instant::now();
+        let mut live: Vec<(f32, f32, f32, f32)> = Vec::new();
+        {
+            let mut list = BUBBLES.lock().unwrap_or_else(|e| e.into_inner());
+            list.retain(|b| now.duration_since(b.born).as_secs_f32() < b.life);
+            for b in list.iter() {
+                let age = now.duration_since(b.born).as_secs_f32();
+                let p = age / b.life;
+                let x = b.x + b.vx * age + (age * 7.0 + b.wobble).sin() * 3.0;
+                let y = b.y + b.vy * age;
+                let alpha = if p > 0.65 { 1.0 - (p - 0.65) / 0.35 } else { 1.0 };
+                live.push((x, y, b.r * (0.8 + 0.4 * p), alpha));
+            }
+        }
+        for (x, y, r, alpha) in live {
+            let d = r * 2.0;
+            self.rounded_plain(x - r, y - r, d, d, r, color::hex(0xBEE6FF, (40.0 * alpha) as u8));
+            self.stroke_rounded(x - r, y - r, d, d, r, 1.0, color::hex(0xFFFFFF, (190.0 * alpha) as u8));
+            self.rounded_plain(
+                x - r * 0.55,
+                y - r * 0.62,
+                r * 0.55,
+                r * 0.34,
+                r * 0.17,
+                color::hex(0xFFFFFF, (230.0 * alpha) as u8),
+            );
+        }
+    }
+
+    /// Animated pixel-art thunderstorm ("Thun" background) over `[x, y, w, h]` dp: heavy clouds
+    /// drifting across a dark sky, slanted rain, lightning that flashes the whole scene, a
+    /// snow-capped mountain and a dark pine forest. Frozen when reduced motion is on.
+    pub fn draw_thun_storm(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+        static START: OnceLock<Instant> = OnceLock::new();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let t = if motion::reduced_motion() || motion::launcher_animations_disabled() {
+            0.0
+        } else {
+            START.get_or_init(Instant::now).elapsed().as_secs_f32()
+        };
+        const ROWS: i32 = 90;
+        let cell = h / ROWS as f32;
+        let cols = (w / cell).ceil() as i32 + 1;
+        let horizon = (ROWS as f32 * 0.78) as i32;
+        let o = (x, y, cell);
+        let hash = |n: u32| -> u32 { n.wrapping_mul(2_654_435_761).rotate_left(13) ^ n.wrapping_mul(40_503) };
+
+        // Lightning: one strike roughly every five seconds, with a quick second flicker.
+        let period = 5.0_f32;
+        let k = (t / period).floor();
+        let local = t - k * period;
+        let jitter = 1.0 + (hash(k as u32) % 1000) as f32 / 1000.0 * 2.5;
+        let ft = local - jitter;
+        let flash = if t > 0.0 && ft > -0.05 && ft < 0.6 {
+            let first = (1.0 - (ft / 0.12).abs()).max(0.0);
+            let second = (1.0 - ((ft - 0.22) / 0.10).abs()).max(0.0) * 0.6;
+            first.max(second)
+        } else {
+            0.0
+        };
+
+        // Sky: 16 bands from near-black to a stormy slate-blue, brightened by the flash.
+        const SKY: [u32; 4] = [0x06080E, 0x111723, 0x1D2636, 0x2C3849];
+        const BANDS: i32 = 16;
+        for band in 0..BANDS {
+            let s = band as f32 / (BANDS - 1) as f32 * 3.0;
+            let i = (s.floor() as usize).min(2);
+            let base = blend_rgb(SKY[i], SKY[i + 1], s - i as f32);
+            let rgb = blend_rgb(base, 0x8FA6D0, flash * 0.35);
+            let y0 = band * horizon / BANDS;
+            let y1 = (band + 1) * horizon / BANDS;
+            self.horizon_px(o, (0, y0, cols, y1 - y0), color::hex(rgb, 255));
+        }
+
+        // A far, dim range behind the big mountain.
+        let far_col = color::hex(blend_rgb(0x161D2B, 0x6D7F9F, flash * 0.4), 255);
+        for gx in 0..cols {
+            let top = horizon - 14 - ((gx as f32 * 0.05 + 2.0).sin() * 6.0 + (gx as f32 * 0.13).sin() * 3.0) as i32;
+            self.horizon_px(o, (gx, top, 1, horizon + 8 - top), far_col);
+        }
+
+        // The big mountain: lit face on the left, shadow face on the right, snow on the peak.
+        let peak_x = cols * 58 / 100;
+        let peak_row = (ROWS as f32 * 0.22) as i32;
+        let snow_line = peak_row + 13;
+        let lit = color::hex(blend_rgb(0x3A4560, 0x9FB4D8, flash * 0.5), 255);
+        let shade = color::hex(blend_rgb(0x232B3D, 0x7186A8, flash * 0.5), 255);
+        let snow_lit = color::hex(blend_rgb(0xE6EEFA, 0xFFFFFF, flash), 255);
+        let snow_shade = color::hex(blend_rgb(0xB9C6DE, 0xEAF1FF, flash), 255);
+        for gx in 0..cols {
+            let d = (gx - peak_x).abs() as f32;
+            let jag = (gx as f32 * 0.9).sin() * 1.2 + (gx as f32 * 0.31 + 1.0).sin() * 2.0;
+            let top = ((peak_row as f32 + d * 0.85 + jag).round() as i32).min(horizon);
+            let (body, snow) = if gx <= peak_x { (lit, snow_lit) } else { (shade, snow_shade) };
+            self.horizon_px(o, (gx, top, 1, horizon + 8 - top), body);
+            if top < snow_line {
+                let bottom = snow_line + (gx as f32 * 1.7).sin().round() as i32;
+                self.horizon_px(o, (gx, top, 1, bottom - top), snow);
+            }
+        }
+
+        // Heavy clouds drifting across the sky at different speeds.
+        self.horizon_px(o, (0, 0, cols, 10), color::hex(0x0A0D14, 150));
+        for i in 0..7i32 {
+            let cw = 26 + (i % 4) * 9;
+            let span = cols + cw * 2;
+            let speed = 1.4 + i as f32 * 0.55;
+            let drift = (t * speed) as i32;
+            let gx = (i * 41 + drift) % span - cw;
+            let gy = 6 + (i * 5) % 22;
+            let body = color::hex(blend_rgb(0x1E2638, 0x7F93B8, flash * 0.6), 225);
+            let under = color::hex(blend_rgb(0x10151F, 0x58698C, flash * 0.5), 200);
+            self.horizon_px(o, (gx + 4, gy - 3, cw - 8, 3), body);
+            self.horizon_px(o, (gx, gy, cw, 4), body);
+            self.horizon_px(o, (gx + 8, gy + 4, cw - 16, 2), under);
+        }
+
+        // The lightning bolt itself: a jagged white core with a faint glow and the odd fork.
+        if flash > 0.05 {
+            let sh = hash(k as u32 ^ 0x9E37);
+            let mut bx = cols / 5 + (sh % (cols as u32 * 3 / 5).max(1)) as i32;
+            let mut yy = 14;
+            let mut seed = sh;
+            let a = (255.0 * flash.min(1.0)) as u8;
+            while yy < horizon - 4 {
+                seed = hash(seed.wrapping_add(7));
+                let dx = (seed % 5) as i32 - 2;
+                self.horizon_px(o, (bx - 2, yy, 5, 3), color::hex(0xAFC8FF, (a as f32 * 0.22) as u8));
+                self.horizon_px(o, (bx, yy, 2, 3), color::hex(0xFFFFFF, a));
+                bx += dx;
+                yy += 3;
+                if seed % 11 == 0 {
+                    let dir = if seed % 2 == 0 { 1 } else { -1 };
+                    for f in 1..5 {
+                        self.horizon_px(
+                            o,
+                            (bx + dir * f * 2, yy + f * 2, 2, 2),
+                            color::hex(0xDDE8FF, (a as f32 * 0.8) as u8),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Mist, then two layers of pines across the bottom (the back row sways a little).
+        self.horizon_px(o, (0, horizon - 6, cols, 8), color::hex(0x8FA3C0, 26));
+        self.horizon_px(o, (0, horizon + 4, cols, ROWS - horizon), color::hex(0x050B0A, 255));
+        for layer in 0..2i32 {
+            let rgb = if layer == 0 { 0x0E1B1B } else { 0x070F0E };
+            let col = color::hex(blend_rgb(rgb, 0x3A4A66, flash * 0.35), 255);
+            let step = 6 - layer;
+            let base = horizon + 4 + layer * 5;
+            let mut gx = -(layer * 2);
+            let mut n = 0u32;
+            while gx < cols + 4 {
+                let hsh = hash(n.wrapping_add(layer as u32 * 977));
+                let ht = 10 + (hsh % 7) as i32 + layer * 3;
+                let sway = if t > 0.0 {
+                    ((t * 1.3 + gx as f32 * 0.4).sin() * 0.7).round() as i32
+                } else {
+                    0
+                };
+                self.horizon_px(o, (gx, base - 2, 1, 3), col);
+                for tier in 0..4i32 {
+                    let half_w = 1 + tier;
+                    let ty = base - 2 - ht + tier * (ht / 4);
+                    let th = ht / 4 + 2;
+                    let shift = sway * (3 - tier) / 3;
+                    self.horizon_px(o, (gx - half_w + shift, ty, half_w * 2 + 1, th), col);
+                }
+                gx += step;
+                n += 1;
+            }
+        }
+
+        // Rain: three speed layers of slanted streaks blown in from the right.
+        for i in 0..130u32 {
+            let hsh = hash(i);
+            let layer = ((hsh >> 28) % 3) as usize;
+            let speed = [38.0_f32, 62.0, 96.0][layer];
+            let sx = (hsh % cols.max(1) as u32) as f32;
+            let sy = ((hsh >> 8) % ROWS as u32) as f32;
+            let rx = (sx - t * speed * 0.3).rem_euclid(cols as f32) as i32;
+            let ry = (sy + t * speed).rem_euclid(ROWS as f32) as i32;
+            let alpha = [70u8, 110, 160][layer];
+            let streak = color::hex(0xB8CCE8, alpha);
+            self.horizon_px(o, (rx, ry, 1, 2 + layer as i32), streak);
+            self.horizon_px(o, (rx + 1, ry - 1, 1, 1), streak);
+        }
+
+        // The lightning lights up the whole scene for a moment.
+        if flash > 0.02 {
+            self.horizon_px(o, (0, 0, cols, ROWS), color::hex(0xCFE0FF, (flash * 70.0) as u8));
+        }
+    }
+
     // ---- the launcher's components & animated Horizon intro ----
 
     /// Draws the Horizon sunset logo centered at `(cx, cy)` in `size x size` dp: the scene
@@ -3791,7 +4031,9 @@ pub enum BackgroundMode {
     Horizon,
     /// Animated pixel-art night sky with a crescent moon, stars and clouds.
     Nightly,
-    /// A GIF chosen by the user, drawn as a low-resolution pixel-art animation.
+    /// Animated pixel-art thunderstorm: rain, lightning, a snow-capped mountain and a forest.
+    Thun,
+    /// A photo or video chosen by the user, drawn as a low-resolution pixel-art picture.
     Custom,
 }
 
@@ -3802,7 +4044,8 @@ impl BackgroundMode {
             Self::Gradient => "Multi-Stop Gradient",
             Self::Horizon => "Horizon Sunset",
             Self::Nightly => "Nightly Sky",
-            Self::Custom => "Custom GIF",
+            Self::Thun => "Thun Storm",
+            Self::Custom => "Custom Photo/Video",
         }
     }
 }
@@ -3889,6 +4132,8 @@ pub struct LauncherThemeConfig {
     pub gradient_end_hex: String,
     pub gradient_mid_pos: f32,
     pub use_three_stops: bool,
+    /// Liquid Glass UI: 3D glass surfaces and bubbles on every tap.
+    pub liquid_glass: bool,
 }
 
 impl Default for LauncherThemeConfig {
@@ -3896,7 +4141,7 @@ impl Default for LauncherThemeConfig {
         Self {
             preset: ThemePreset::EmeraldForest,
             appearance: ThemeAppearance::Dark,
-            background_mode: BackgroundMode::Solid,
+            background_mode: BackgroundMode::Horizon,
             custom_bg_hex: "#0D1714".into(),
             custom_surface_hex: "#152620".into(),
             custom_accent_hex: "#34D399".into(),
@@ -3906,6 +4151,7 @@ impl Default for LauncherThemeConfig {
             gradient_end_hex: "#0A120F".into(),
             gradient_mid_pos: 0.50,
             use_three_stops: true,
+            liquid_glass: false,
         }
     }
 }
@@ -3977,8 +4223,12 @@ pub struct ResolvedTheme {
     pub is_horizon: bool,
     /// Animated "Nightly" night-sky background is active.
     pub is_nightly: bool,
-    /// The user's own "Custom" GIF background is active.
+    /// Animated "Thun" thunderstorm background is active.
+    pub is_thun: bool,
+    /// The user's own "Custom" photo/video background is active.
     pub is_custom: bool,
+    /// Liquid Glass UI (3D glass surfaces + tap bubbles) is on.
+    pub liquid_glass: bool,
     pub is_gradient: bool,
     pub gradient_direction: GradientDirection,
     pub use_three_stops: bool,
@@ -4184,7 +4434,9 @@ impl LauncherThemeConfig {
             is_light,
             is_horizon: self.background_mode == BackgroundMode::Horizon,
             is_nightly: self.background_mode == BackgroundMode::Nightly,
+            is_thun: self.background_mode == BackgroundMode::Thun,
             is_custom: self.background_mode == BackgroundMode::Custom,
+            liquid_glass: self.liquid_glass,
             is_gradient: self.background_mode == BackgroundMode::Gradient,
             gradient_direction: self.gradient_direction,
             use_three_stops: self.use_three_stops,
@@ -4250,7 +4502,128 @@ pub fn active_theme() -> ResolvedTheme {
     ResolvedTheme::default()
 }
 
+/// Whether Liquid Glass is on (kept in an atomic so the per-widget draw path stays cheap).
+static LIQUID_GLASS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Liquid Glass UI (3D glass surfaces and tap bubbles) is on.
+pub fn liquid_glass_enabled() -> bool {
+    LIQUID_GLASS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+struct Bubble {
+    x: f32,
+    y: f32,
+    vx: f32,
+    vy: f32,
+    r: f32,
+    wobble: f32,
+    life: f32,
+    born: std::time::Instant,
+}
+
+static BUBBLES: std::sync::Mutex<Vec<Bubble>> = std::sync::Mutex::new(Vec::new());
+
+/// Releases a burst of soap bubbles at `(x, y)` dp. Does nothing unless Liquid Glass is on.
+pub fn spawn_tap_bubbles(x: f32, y: f32) {
+    if !liquid_glass_enabled() {
+        return;
+    }
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(12_345)
+        | 1;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed % 10_000) as f32 / 10_000.0
+    };
+    let mut list = BUBBLES.lock().unwrap_or_else(|e| e.into_inner());
+    if list.len() > 90 {
+        list.drain(..45);
+    }
+    for _ in 0..10 {
+        let angle = next() * std::f32::consts::TAU;
+        let speed = 18.0 + next() * 46.0;
+        let lift = 26.0 + next() * 24.0;
+        let radius = 2.5 + next() * 6.5;
+        let wobble = next() * 6.28;
+        let life = 0.7 + next() * 0.8;
+        list.push(Bubble {
+            x,
+            y,
+            vx: angle.cos() * speed,
+            vy: angle.sin() * speed * 0.6 - lift,
+            r: radius,
+            wobble,
+            life,
+            born: std::time::Instant::now(),
+        });
+    }
+}
+
+/// Whether any tap bubbles are still floating (the launcher keeps redrawing while so).
+pub fn tap_bubbles_active() -> bool {
+    BUBBLES
+        .lock()
+        .map(|list| !list.is_empty())
+        .unwrap_or(false)
+}
+
+/// Whether the custom background is a video (more than one frame) that needs redraws.
+pub fn custom_background_animated() -> bool {
+    CUSTOM_BACKGROUND
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|b| b.frames.len() > 1)
+}
+
+/// Parses the `HBG1` file the Android side writes for a picked photo or video: magic, cols,
+/// rows, frame count, one delay (ms) per frame, then `cols * rows` `0xRRGGBB` cells per
+/// frame (everything a big-endian u32).
+pub fn parse_custom_background(bytes: &[u8]) -> Option<CustomBackground> {
+    let word = |i: usize| -> Option<u32> {
+        let s = bytes.get(i * 4..i * 4 + 4)?;
+        Some(u32::from_be_bytes([s[0], s[1], s[2], s[3]]))
+    };
+    if word(0)? != 0x4842_4731 {
+        return None;
+    }
+    let cols = word(1)? as usize;
+    let rows = word(2)? as usize;
+    let count = word(3)? as usize;
+    if cols == 0 || rows == 0 || cols > 256 || rows > 256 || count == 0 || count > 600 {
+        return None;
+    }
+    let cells = cols * rows;
+    if bytes.len() < (4 + count + count * cells) * 4 {
+        return None;
+    }
+    let mut delays_ms = Vec::with_capacity(count);
+    for i in 0..count {
+        delays_ms.push(word(4 + i)?.clamp(20, 5000));
+    }
+    let mut frames = Vec::with_capacity(count);
+    for f in 0..count {
+        let base = 4 + count + f * cells;
+        let mut frame = Vec::with_capacity(cells);
+        for c in 0..cells {
+            frame.push(word(base + c)? & 0x00FF_FFFF);
+        }
+        frames.push(frame);
+    }
+    Some(CustomBackground {
+        cols: cols as u32,
+        rows: rows as u32,
+        frames,
+        delays_ms,
+    })
+}
+
 pub fn set_active_theme(theme: ResolvedTheme) {
+    LIQUID_GLASS.store(theme.liquid_glass, std::sync::atomic::Ordering::Relaxed);
     if let Ok(mut guard) = ACTIVE_THEME.lock() {
         *guard = Some(theme);
     }

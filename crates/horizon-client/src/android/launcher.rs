@@ -1010,6 +1010,7 @@ impl ApplicationHandler for Launcher {
                     .as_ref()
                     .is_some_and(|m| m.loading)
                 || self.anim.is_active()
+                || horizon_client::ui_theme::tap_bubbles_active()
                 || ({
                     let theme = horizon_client::ui_theme::active_theme();
                     (theme.is_horizon || theme.is_nightly || theme.is_custom)

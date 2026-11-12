@@ -35,6 +35,7 @@ enum Command {
     ImportDocument,
     ImportFolderTree,
     CreateDocument(String, String),
+    PickBackground(String),
     Screen(bool, bool),
 }
 struct Ui {
@@ -476,6 +477,23 @@ impl Ui {
                     crate::documents::picker_failed("No Android file save picker is available");
                 }
             }
+            Command::PickBackground(out_path) => {
+                let result = (|| -> jni::errors::Result<()> {
+                    let path = JObject::from(env.new_string(&out_path)?);
+                    env.call_method(
+                        &self.activity,
+                        "pickBackgroundMedia",
+                        "(Ljava/lang/String;)V",
+                        &[JValue::Object(&path)],
+                    )?;
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    let _ = env.exception_clear();
+                    log::warn!("Background media picker: {error}");
+                    crate::documents::picker_failed("No Android photo picker is available");
+                }
+            }
             Command::Show(text, secret) => {
                 env.call_method(
                     &self.edit,
@@ -830,6 +848,15 @@ pub fn pick_document_tree() -> bool {
         return false;
     };
     ui.enqueue(Command::ImportFolderTree);
+    true
+}
+/// Opens the Android photo picker (Google Photos / gallery) for the Custom background. The
+/// Java side prepares the picked photo or video into `out_path` (an `HBG1` file).
+pub fn pick_background_media(out_path: &str) -> bool {
+    let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
+        return false;
+    };
+    ui.enqueue(Command::PickBackground(out_path.to_owned()));
     true
 }
 pub fn create_document(suggested_name: &str, mime_type: &str) -> bool {

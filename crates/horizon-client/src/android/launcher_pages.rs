@@ -412,6 +412,9 @@ pub(super) enum Action {
     SelectThemePreset(horizon_client::ui_theme::ThemePreset),
     SetThemeAppearance(horizon_client::ui_theme::ThemeAppearance),
     SetThemeBackgroundMode(horizon_client::ui_theme::BackgroundMode),
+    ToggleLiquidGlass,
+    LiquidGlassContinue,
+    LiquidGlassCancel,
     SetGradientDirection(horizon_client::ui_theme::GradientDirection),
     ToggleGradientThreeStops,
     StepGradientMidPos(i8),
@@ -2607,6 +2610,75 @@ impl Launcher {
                 true,
             );
         }
+        if LIQUID_WARNING_OPEN.load(Ordering::Relaxed) && !self.exit_confirmation {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.list_view = None;
+            ui.rounded(
+                0.0,
+                0.0,
+                w,
+                h,
+                0.0,
+                horizon_client::hud::rgba(0, 0, 0, 180),
+            );
+            let width = (w - 32.0).min(380.0);
+            let x = (w - width) * 0.5;
+            let y = (h - 214.0) * 0.5;
+            ui.rounded(x, y, width, 214.0, 20.0, my3_surface());
+            ui.border(x, y, width, 214.0, 20.0, my3_border());
+            ui.text(Face::SemiBold, 20.0, x + 22.0, y + 22.0, my3_text(), "Liquid Glass");
+            ui.text(
+                Face::Medium,
+                13.0,
+                x + 22.0,
+                y + 58.0,
+                my3_accent(),
+                "Performance warning",
+            );
+            ui.text(
+                Face::Regular,
+                13.0,
+                x + 22.0,
+                y + 82.0,
+                my3_muted(),
+                "3D glass on every button and card, plus",
+            );
+            ui.text(
+                Face::Regular,
+                13.0,
+                x + 22.0,
+                y + 102.0,
+                my3_muted(),
+                "bubbles wherever you tap. On low-end",
+            );
+            ui.text(
+                Face::Regular,
+                13.0,
+                x + 22.0,
+                y + 122.0,
+                my3_muted(),
+                "devices this can make the app slower.",
+            );
+            let bw = (width - 52.0) * 0.5;
+            button(
+                &mut ui,
+                &mut self.targets,
+                [x + 20.0, y + 152.0, bw, 42.0],
+                "Cancel",
+                Action::LiquidGlassCancel,
+                false,
+            );
+            button(
+                &mut ui,
+                &mut self.targets,
+                [x + 32.0 + bw, y + 152.0, bw, 42.0],
+                "Continue",
+                Action::LiquidGlassContinue,
+                true,
+            );
+        }
+        ui.draw_tap_bubbles();
         if let Some(action) = self.pending_focus.take() {
             self.focus = self.targets.iter().position(|(_, a)| *a == action);
         }
@@ -5383,18 +5455,18 @@ impl Launcher {
                 let theme_cfg = self.catalog.config.theme.clone();
                 let resolved = theme_cfg.resolve();
                 let total_h = if theme_cfg.background_mode == BackgroundMode::Gradient {
-                    740.0
+                    790.0
                 } else {
-                    630.0
+                    680.0
                 };
                 let extra_ime = if ime_top_dp.is_some() { 200.0 } else { 0.0 };
                 let max_scroll = (total_h + extra_ime - (list_bottom - list_top)).max(0.0);
                 if let Some(ime_y) = ime_top_dp {
                     let target_row_y = match self.catalog.editing {
-                        Some("theme_accent") => Some(list_top + 370.0),
-                        Some("theme_bg" | "theme_surface") => Some(list_top + 454.0),
+                        Some("theme_accent") => Some(list_top + 420.0),
+                        Some("theme_bg" | "theme_surface") => Some(list_top + 504.0),
                         Some("theme_grad_start" | "theme_grad_mid" | "theme_grad_end") => {
-                            Some(list_top + 582.0)
+                            Some(list_top + 632.0)
                         }
                         _ => None,
                     };
@@ -5535,30 +5607,35 @@ impl Launcher {
                 }
                 cy += 50.0;
                 if cy + 44.0 >= list_top && cy <= list_bottom {
-                    let fifth = (content_w - 24.0) / 5.0;
+                    let sixth = (content_w - 30.0) / 6.0;
                     for (i, (lbl, bmode, active)) in [
                         (
-                            "Solid BG",
+                            "Solid",
                             BackgroundMode::Solid,
                             theme_cfg.background_mode == BackgroundMode::Solid,
                         ),
                         (
-                            "Gradient BG",
+                            "Gradient",
                             BackgroundMode::Gradient,
                             theme_cfg.background_mode == BackgroundMode::Gradient,
                         ),
                         (
-                            "Horizon BG",
+                            "Horizon",
                             BackgroundMode::Horizon,
                             theme_cfg.background_mode == BackgroundMode::Horizon,
                         ),
                         (
-                            "Nightly BG",
+                            "Nightly",
                             BackgroundMode::Nightly,
                             theme_cfg.background_mode == BackgroundMode::Nightly,
                         ),
                         (
-                            "Custom GIF",
+                            "Thun",
+                            BackgroundMode::Thun,
+                            theme_cfg.background_mode == BackgroundMode::Thun,
+                        ),
+                        (
+                            "Custom",
                             BackgroundMode::Custom,
                             theme_cfg.background_mode == BackgroundMode::Custom,
                         ),
@@ -5566,7 +5643,7 @@ impl Launcher {
                     .into_iter()
                     .enumerate()
                     {
-                        let r = [content_x + i as f32 * (fifth + 6.0), cy, fifth, 38.0];
+                        let r = [content_x + i as f32 * (sixth + 6.0), cy, sixth, 38.0];
                         button(
                             ui,
                             &mut self.targets,
@@ -5578,6 +5655,29 @@ impl Launcher {
                         self.list_targets
                             .push((r, Action::SetThemeBackgroundMode(bmode)));
                     }
+                }
+                cy += 50.0;
+                // Liquid Glass switch (turning it on asks for confirmation first).
+                if cy + 44.0 >= list_top && cy <= list_bottom {
+                    let half = (content_w - 10.0) * 0.5;
+                    ui.text(
+                        Face::Medium,
+                        14.0,
+                        content_x,
+                        cy + 10.0,
+                        my3_text(),
+                        "Liquid Glass",
+                    );
+                    let lg = [content_x + half + 10.0, cy, half, 38.0];
+                    toggle(
+                        ui,
+                        &mut self.targets,
+                        lg,
+                        theme_cfg.liquid_glass,
+                        Action::ToggleLiquidGlass,
+                        if theme_cfg.liquid_glass { 1.0 } else { 0.0 },
+                    );
+                    self.list_targets.push((lg, Action::ToggleLiquidGlass));
                 }
                 cy += 50.0;
 
@@ -7684,7 +7784,31 @@ impl Launcher {
                 self.catalog.refresh(&self.home);
                 self.chooser = None;
             }
+            Some(Action::ToggleLiquidGlass) => {
+                if self.catalog.config.theme.liquid_glass {
+                    self.catalog.config.theme.liquid_glass = false;
+                    horizon_client::ui_theme::set_active_theme(
+                        self.catalog.config.theme.resolve(),
+                    );
+                    self.catalog.config.save(&self.home)?;
+                    self.catalog.status = "Liquid Glass is off.".into();
+                } else {
+                    LIQUID_WARNING_OPEN.store(true, Ordering::Relaxed);
+                }
+            }
+            Some(Action::LiquidGlassContinue) => {
+                LIQUID_WARNING_OPEN.store(false, Ordering::Relaxed);
+                self.catalog.config.theme.liquid_glass = true;
+                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                self.anim.trigger_theme_pulse();
+                self.catalog.config.save(&self.home)?;
+                self.catalog.status = "Liquid Glass is on.".into();
+            }
+            Some(Action::LiquidGlassCancel) => {
+                LIQUID_WARNING_OPEN.store(false, Ordering::Relaxed);
+            }
             Some(Action::Dismiss) => {
+                LIQUID_WARNING_OPEN.store(false, Ordering::Relaxed);
                 self.exit_confirmation = false;
                 self.chooser = None;
                 if self.session_worker.is_none() {
@@ -7804,19 +7928,21 @@ impl Launcher {
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = format!("Background style set to {}.", mode.label());
-                // Custom GIF: pick a file the first time, or when Custom is tapped again.
+                // Custom: open the photo gallery the first time, or when Custom is tapped again.
                 if mode == horizon_client::ui_theme::BackgroundMode::Custom
                     && (was_custom
                         || !(horizon_client::ui_theme::custom_background_loaded()
-                            || custom_background_file_exists(&self.home)))
+                            || custom_background_file(&self.home).exists()))
                 {
-                    match crate::documents::begin_into_dir(self.home.join("backgrounds")) {
-                        Ok(()) => {
-                            self.catalog.status =
-                                "Choose a GIF for your custom background (photos are ignored)."
-                                    .into();
-                        }
-                        Err(error) => self.catalog.status = error,
+                    let target = custom_background_file(&self.home);
+                    if let Some(dir) = target.parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    if crate::native_ime::pick_background_media(&target.to_string_lossy()) {
+                        self.catalog.status =
+                            "Choose a photo or a video (GIFs are not supported).".into();
+                    } else {
+                        self.catalog.status = "No photo picker is available.".into();
                     }
                 }
             }
@@ -8468,6 +8594,7 @@ impl Launcher {
         let py = t.location.y as f32 / density;
         match t.phase {
             TouchPhase::Started => {
+                horizon_client::ui_theme::spawn_tap_bubbles(px, py);
                 let hit_slider = SLIDER_TRACK_TARGETS.with(|list| {
                     list.borrow()
                         .iter()
@@ -8614,28 +8741,18 @@ fn wrap_text_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Ve
     lines
 }
 
-/// Whether any `.gif` has already been imported for the Custom background.
-fn custom_background_file_exists(home: &std::path::Path) -> bool {
-    std::fs::read_dir(home.join("backgrounds"))
-        .map(|entries| {
-            entries.flatten().any(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("gif"))
-            })
-        })
-        .unwrap_or(false)
+/// Where the Android side writes the photo/video background it prepared (`HBG1`).
+fn custom_background_file(home: &std::path::Path) -> std::path::PathBuf {
+    home.join("backgrounds").join("custom.hbg")
 }
 
-/// While the Custom background is selected, watches `<home>/backgrounds` (every ~1.5 s) for
-/// the newest `.gif` and decodes it on a worker thread. Photos and videos are ignored.
+/// While the Custom background is selected, checks (every ~1.5 s) whether the picked photo
+/// or video has been prepared or replaced, and loads it on a worker thread.
 fn custom_background_poll(home: &std::path::Path) {
     use std::sync::Mutex;
     use std::time::{Duration, Instant, SystemTime};
     static LAST_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
-    static LOADED: Mutex<Option<(std::path::PathBuf, SystemTime)>> = Mutex::new(None);
+    static LOADED: Mutex<Option<SystemTime>> = Mutex::new(None);
     static LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if !horizon_client::ui_theme::active_theme().is_custom || LOADING.load(Ordering::Relaxed) {
         return;
@@ -8647,116 +8764,26 @@ fn custom_background_poll(home: &std::path::Path) {
         }
         *last = Some(Instant::now());
     }
-    let mut newest: Option<(std::path::PathBuf, SystemTime)> = None;
-    if let Ok(entries) = std::fs::read_dir(home.join("backgrounds")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let is_gif = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("gif"));
-            if !is_gif {
-                continue;
-            }
-            let modified = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            if newest.as_ref().is_none_or(|(_, t)| modified > *t) {
-                newest = Some((path, modified));
-            }
-        }
-    }
-    let Some(key) = newest else {
+    let path = custom_background_file(home);
+    let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
         return;
     };
-    if LOADED.lock().unwrap_or_else(|e| e.into_inner()).as_ref() == Some(&key) {
+    if *LOADED.lock().unwrap_or_else(|e| e.into_inner()) == Some(modified) {
         return;
     }
     LOADING.store(true, Ordering::Relaxed);
     std::thread::spawn(move || {
-        let (path, _) = &key;
-        match decode_custom_gif(path) {
-            Ok(background) => {
-                horizon_client::ui_theme::set_custom_background(Some(background));
-                // Keep only the newest GIF on disk.
-                if let Some(dir) = path.parent()
-                    && let Ok(entries) = std::fs::read_dir(dir)
-                {
-                    for entry in entries.flatten() {
-                        let other = entry.path();
-                        let is_gif = other
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            .is_some_and(|e| e.eq_ignore_ascii_case("gif"));
-                        if is_gif && other != *path {
-                            let _ = std::fs::remove_file(other);
-                        }
-                    }
-                }
-            }
-            Err(error) => log::warn!("Custom background: {error}"),
+        match std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| horizon_client::ui_theme::parse_custom_background(&bytes))
+        {
+            Some(background) => horizon_client::ui_theme::set_custom_background(Some(background)),
+            None => log::warn!("Custom background: could not read {}", path.display()),
         }
-        *LOADED.lock().unwrap_or_else(|e| e.into_inner()) = Some(key);
+        *LOADED.lock().unwrap_or_else(|e| e.into_inner()) = Some(modified);
         LOADING.store(false, Ordering::Relaxed);
     });
 }
 
-/// Decodes a GIF into at most 150 frames of an 80x45 colour grid (centre-cropped to 16:9,
-/// colours reduced to 12 bits so neighbouring cells merge into long runs).
-fn decode_custom_gif(
-    path: &std::path::Path,
-) -> std::result::Result<horizon_client::ui_theme::CustomBackground, String> {
-    use image::{AnimationDecoder, imageops};
-    const COLS: u32 = 80;
-    const ROWS: u32 = 45;
-    const MAX_FRAMES: usize = 150;
-    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
-    if size > 40 * 1024 * 1024 {
-        return Err("GIF is larger than 40 MB".into());
-    }
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let decoder = image::codecs::gif::GifDecoder::new(std::io::BufReader::new(file))
-        .map_err(|e| e.to_string())?;
-    let mut frames: Vec<Vec<u32>> = Vec::new();
-    let mut delays_ms: Vec<u32> = Vec::new();
-    for frame in decoder.into_frames().take(MAX_FRAMES) {
-        let frame = frame.map_err(|e| e.to_string())?;
-        let (numer, denom) = frame.delay().numer_denom_ms();
-        let delay = (numer / denom.max(1)).clamp(20, 1000);
-        let buffer = frame.into_buffer();
-        let (sw, sh) = buffer.dimensions();
-        if sw == 0 || sh == 0 {
-            continue;
-        }
-        let (cw, ch) = if sw * ROWS > sh * COLS {
-            ((sh * COLS / ROWS).max(1), sh)
-        } else {
-            (sw, (sw * ROWS / COLS).max(1))
-        };
-        let cropped =
-            imageops::crop_imm(&buffer, (sw - cw) / 2, (sh - ch) / 2, cw, ch).to_image();
-        let small = imageops::resize(&cropped, COLS, ROWS, imageops::FilterType::Triangle);
-        let mut cells = Vec::with_capacity((COLS * ROWS) as usize);
-        for pixel in small.pixels() {
-            let [r, g, b, a] = pixel.0;
-            if a < 128 {
-                cells.push(0);
-                continue;
-            }
-            let q = |v: u8| ((v >> 4) as u32) * 17;
-            cells.push((q(r) << 16) | (q(g) << 8) | q(b));
-        }
-        frames.push(cells);
-        delays_ms.push(delay);
-    }
-    if frames.is_empty() {
-        return Err("GIF has no frames".into());
-    }
-    Ok(horizon_client::ui_theme::CustomBackground {
-        cols: COLS,
-        rows: ROWS,
-        frames,
-        delays_ms,
-    })
-}
+/// Set while the Liquid Glass performance warning is on screen.
+static LIQUID_WARNING_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
