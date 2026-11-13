@@ -40,6 +40,21 @@ Back up their test data before uninstalling. Normal release installations are
 unaffected. Do not reset this workflow's run counter: its increasing value is
 used as Android's dev-channel version code.
 
+## Automatic releases
+
+The **Android release APK** workflow builds the public, release-profile APK on every
+code push to `android` and publishes it as a GitHub Release: the attached asset is the
+`.apk` file itself, so there is no artifact ZIP to unpack or sign-in to download.
+Releases are tagged `android-<run number>`, and
+`https://github.com/<owner>/<repo>/releases/latest/download/Horizon-Android.apk` always
+points at the newest ARM64 build. Re-running a build replaces that run's release.
+
+Unlike the dev channel these APKs use the normal application ID, are signed with the
+permanent release certificate, and keep the same `versionCode`, so a newer build
+installs over the previous one in place. They carry the same experimental status as
+dev builds: compilation and the public payload audit pass, device gameplay does not.
+**Run workflow → all_abis** additionally attaches ARMv7 and x86_64 APKs.
+
 ## Sharing with testers
 
 Open Actions → Android dev APKs → the successful run → Artifacts. Share the run

@@ -60,8 +60,10 @@ Microsoft/Mojang registration; do not describe it as an approved integration.
 ## Versions and release branches
 
 Development is now on the `0.7.5` release candidate. See the
-[change list and validation scope](android-0.7.5.md). A Git push does not itself
-publish an APK; release attachments must come from the exact tagged source.
+[change list and validation scope](android-0.7.5.md). A Git push builds and publishes
+an experimental APK as a GitHub Release (`Android release APK`, see
+[development builds](android-dev-builds.md)); stable release attachments must still
+come from the exact tagged source.
 
 Use `0.7.5-dev.<build>` for intermediate development APKs and `0.7.5-rc.<build>`
 for explicitly prepared release candidates. Debug builds use a separate `.dev`
